@@ -1,0 +1,8 @@
+.git
+.codegraph
+.env
+node_modules
+npm-debug.log*
+.DS_Store
+backend/data/runtime.json
+data/runtime.json

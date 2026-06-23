@@ -1,0 +1,16 @@
+{
+  "name": "smartq",
+  "version": "0.1.0",
+  "description": "SmartQ MVP exam and assessment platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js",
+    "check": "node --check backend/server.js && node --check backend/lib/ai.js && node --check backend/lib/env.js && node --check backend/lib/runtime-store.js && node --check frontend/assets/app.js && node --check frontend/assets/candidate.js && node --check frontend/assets/proctor.js && node --check frontend/assets/papers.js && node --check scripts/verify.mjs",
+    "verify": "node scripts/verify.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

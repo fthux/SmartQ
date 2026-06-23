@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmartQ 考生端</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: [
+                "Inter",
+                "ui-sans-serif",
+                "system-ui",
+                "-apple-system",
+                "BlinkMacSystemFont",
+                "Segoe UI",
+                "sans-serif",
+              ],
+            },
+            colors: {
+              ink: "#12201f",
+              mist: "#f4fbf8",
+              ocean: "#0f9ea8",
+              leaf: "#16a773",
+              iris: "#4f5bd5",
+              honey: "#e4a11b",
+              coral: "#e55757",
+            },
+            boxShadow: {
+              soft: "0 18px 50px rgba(18, 32, 31, 0.08)",
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      body {
+        letter-spacing: 0;
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-mist text-ink antialiased">
+    <main class="min-h-screen w-full px-8 py-6">
+      <header class="flex h-16 items-center justify-between rounded-lg border border-slate-200/80 bg-white/90 px-5 shadow-soft backdrop-blur">
+        <div class="flex items-center gap-4">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-lg font-black text-white">Q</div>
+          <div>
+            <div class="text-lg font-black">SmartQ</div>
+            <div class="text-xs font-medium text-slate-500">考生考试端</div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700">综合能力测评 · A 卷</div>
+          <div class="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+            <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
+            已连接
+          </div>
+          <div class="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-black text-amber-700">
+            <i data-lucide="clock-3" class="h-4 w-4"></i>
+            42:18
+          </div>
+          <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+            <i data-lucide="help-circle" class="h-4 w-4"></i>
+            帮助
+          </button>
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-ocean to-iris text-sm font-bold text-white">林</div>
+        </div>
+      </header>
+
+      <section class="mt-6 grid grid-cols-[1fr_360px] items-start gap-5 pb-8">
+        <div class="space-y-5">
+        <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+          <div class="flex items-start justify-between gap-6">
+            <div>
+              <div class="text-sm font-bold text-ocean">考生会话 SQ-20260623-0891</div>
+              <h1 class="mt-2 text-3xl font-black">2026 春季综合能力测评</h1>
+              <div class="mt-3 flex flex-wrap gap-2 text-sm font-semibold text-slate-600">
+                <span class="rounded bg-slate-100 px-3 py-1.5">考生：林同学</span>
+                <span class="rounded bg-slate-100 px-3 py-1.5">准考证：202606230891</span>
+                <span class="rounded bg-slate-100 px-3 py-1.5">试卷：A 卷</span>
+                <span class="rounded bg-slate-100 px-3 py-1.5">时段：10:00 - 11:30</span>
+                <span class="rounded bg-slate-100 px-3 py-1.5">总分：50</span>
+              </div>
+            </div>
+            <div class="grid min-w-[360px] grid-cols-3 gap-2">
+              <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                <div class="text-xl font-black">12</div>
+                <div class="text-xs font-semibold text-slate-500">题目</div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                <div class="text-xl font-black text-leaf">6</div>
+                <div class="text-xs font-semibold text-slate-500">已答</div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                <div class="text-xl font-black text-honey">42%</div>
+                <div class="text-xs font-semibold text-slate-500">进度</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-6 grid grid-cols-4 gap-3">
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+              <div class="flex items-center justify-between">
+                <div class="text-sm font-black text-emerald-700">摄像头</div>
+                <i data-lucide="video" class="h-5 w-5 text-emerald-700"></i>
+              </div>
+              <div class="mt-2 text-xs font-semibold text-emerald-700">已开启 · 人脸正常</div>
+            </div>
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+              <div class="flex items-center justify-between">
+                <div class="text-sm font-black text-emerald-700">麦克风</div>
+                <i data-lucide="mic" class="h-5 w-5 text-emerald-700"></i>
+              </div>
+              <div class="mt-2 text-xs font-semibold text-emerald-700">已开启 · 环境正常</div>
+            </div>
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+              <div class="flex items-center justify-between">
+                <div class="text-sm font-black text-emerald-700">屏幕共享</div>
+                <i data-lucide="monitor-up" class="h-5 w-5 text-emerald-700"></i>
+              </div>
+              <div class="mt-2 text-xs font-semibold text-emerald-700">已开启 · 窗口正常</div>
+            </div>
+            <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div class="flex items-center justify-between">
+                <div class="text-sm font-black text-amber-700">自动保存</div>
+                <i data-lucide="cloud-check" class="h-5 w-5 text-amber-700"></i>
+              </div>
+              <div class="mt-2 text-xs font-semibold text-amber-700">10:42:16 已同步</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 bg-white shadow-soft">
+          <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+            <div>
+              <h2 class="text-lg font-black">试卷内容</h2>
+              <div class="mt-1 text-xs font-semibold text-slate-500">全部题目在当前页面连续展示</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                <i data-lucide="flag" class="h-4 w-4"></i>
+                标记本题
+              </button>
+              <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                <i data-lucide="chevrons-up" class="h-4 w-4"></i>
+                回到顶部
+              </button>
+            </div>
+          </div>
+
+          <div class="divide-y divide-slate-100 px-5">
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">1. 单选题 <span class="ml-2 text-slate-400">4 分</span></div>
+                  <p class="mt-3 text-base font-semibold">下列关于数据安全分级管理的说法，正确的是哪一项？</p>
+                </div>
+                <span class="rounded bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">已答</span>
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-3">
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">A</span> 所有数据都应采用相同安全等级</label>
+                <label class="flex items-center gap-3 rounded-lg border-2 border-ocean bg-cyan-50 p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full bg-ocean text-white">B</span> 按敏感程度与影响范围分级保护</label>
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">C</span> 只对生产数据进行分类</label>
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">D</span> 数据越多安全等级越低</label>
+              </div>
+            </article>
+
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">2. 多选题 <span class="ml-2 text-slate-400">6 分</span></div>
+                  <p class="mt-3 text-base font-semibold">在项目风险识别阶段，哪些信息可作为风险来源？</p>
+                </div>
+                <span class="rounded bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">已答</span>
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-3">
+                <label class="flex items-center gap-3 rounded-lg border-2 border-iris bg-indigo-50 p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded bg-iris text-white">A</span> 历史问题记录</label>
+                <label class="flex items-center gap-3 rounded-lg border-2 border-iris bg-indigo-50 p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded bg-iris text-white">B</span> 需求变更记录</label>
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded border border-slate-300">C</span> 与项目无关的个人偏好</label>
+                <label class="flex items-center gap-3 rounded-lg border-2 border-iris bg-indigo-50 p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded bg-iris text-white">D</span> 外部依赖变化</label>
+              </div>
+            </article>
+
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">3. 判断题 <span class="ml-2 text-slate-400">3 分</span></div>
+                  <p class="mt-3 text-base font-semibold">断线重连时，考试会话应恢复到考生自己的答题状态。</p>
+                </div>
+                <span class="rounded bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">已答</span>
+              </div>
+              <div class="mt-4 flex gap-3">
+                <label class="flex w-36 items-center justify-center rounded-lg border-2 border-leaf bg-emerald-50 p-3 text-sm font-black text-leaf">正确</label>
+                <label class="flex w-36 items-center justify-center rounded-lg border border-slate-200 bg-white p-3 text-sm font-black text-slate-500">错误</label>
+              </div>
+            </article>
+
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">4. 填空题 <span class="ml-2 text-slate-400">3 分</span></div>
+                  <p class="mt-3 text-base font-semibold">在线考试实时状态通常通过 ______ 与服务端保持同步。</p>
+                </div>
+                <span class="rounded bg-white px-2 py-1 text-xs font-bold text-slate-500 ring-1 ring-slate-200">未答</span>
+              </div>
+              <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-400">请输入答案</div>
+            </article>
+
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">5. 简答题 <span class="ml-2 text-slate-400">8 分</span></div>
+                  <p class="mt-3 text-base font-semibold">请说明如何设计一个可追溯的 AI 题目质量审核流程。</p>
+                </div>
+                <span class="rounded bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">已答</span>
+              </div>
+              <div class="mt-4 min-h-28 rounded-lg border-2 border-ocean bg-cyan-50 p-4 text-sm font-semibold leading-6 text-slate-700">
+                应先固定题目结构，生成后进行字段校验、答案一致性校验、重复检测和难度检查；校验失败进入修复流程，通过后保留版本并等待人工抽检。
+              </div>
+            </article>
+
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">6. 单选题 <span class="ml-2 text-slate-400">4 分</span></div>
+                  <p class="mt-3 text-base font-semibold">以下哪种方式最适合保存在线考试中的实时心跳状态？</p>
+                </div>
+                <span class="rounded bg-white px-2 py-1 text-xs font-bold text-slate-500 ring-1 ring-slate-200">未答</span>
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-3">
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">A</span> Redis</label>
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">B</span> 静态文件</label>
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">C</span> 浏览器收藏夹</label>
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">D</span> 图片缓存</label>
+              </div>
+            </article>
+
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">7. 判断题 <span class="ml-2 text-slate-400">3 分</span></div>
+                  <p class="mt-3 text-base font-semibold">考试过程中关闭摄像头不会影响监考记录。</p>
+                </div>
+                <span class="rounded bg-white px-2 py-1 text-xs font-bold text-slate-500 ring-1 ring-slate-200">未答</span>
+              </div>
+              <div class="mt-4 flex gap-3">
+                <label class="flex w-36 items-center justify-center rounded-lg border border-slate-200 bg-white p-3 text-sm font-black text-slate-500">正确</label>
+                <label class="flex w-36 items-center justify-center rounded-lg border border-slate-200 bg-white p-3 text-sm font-black text-slate-500">错误</label>
+              </div>
+            </article>
+
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">8. 论述题 <span class="ml-2 text-slate-400">10 分</span></div>
+                  <p class="mt-3 text-base font-semibold">结合多人在线测评场景，设计一套考试数据分析指标。</p>
+                </div>
+                <span class="rounded bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">已标记</span>
+              </div>
+              <div class="mt-4 min-h-32 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-400">请输入作答内容</div>
+            </article>
+
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">9. 单选题 <span class="ml-2 text-slate-400">4 分</span></div>
+                  <p class="mt-3 text-base font-semibold">评分规则 rubric 的主要作用是什么？</p>
+                </div>
+                <span class="rounded bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">已答</span>
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-3">
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">A</span> 让评分完全随机</label>
+                <label class="flex items-center gap-3 rounded-lg border-2 border-ocean bg-cyan-50 p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full bg-ocean text-white">B</span> 明确评分维度与标准</label>
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">C</span> 删除主观题</label>
+                <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300">D</span> 跳过复核流程</label>
+              </div>
+            </article>
+
+            <article class="py-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <div class="text-sm font-black">10. 简答题 <span class="ml-2 text-slate-400">5 分</span></div>
+                  <p class="mt-3 text-base font-semibold">请描述一次完整的 AI 阅卷复核流程。</p>
+                </div>
+                <span class="rounded bg-white px-2 py-1 text-xs font-bold text-slate-500 ring-1 ring-slate-200">未答</span>
+              </div>
+              <div class="mt-4 min-h-28 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-400">请输入作答内容</div>
+            </article>
+          </div>
+        </div>
+        </div>
+
+        <aside class="space-y-5">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-black">答题卡</h2>
+            <span class="rounded bg-cyan-50 px-2.5 py-1 text-xs font-black text-ocean">一页试卷</span>
+          </div>
+          <div class="mt-4 grid grid-cols-6 gap-2">
+            <button class="h-10 rounded-lg bg-ink text-sm font-black text-white">1</button>
+            <button class="h-10 rounded-lg bg-ink text-sm font-black text-white">2</button>
+            <button class="h-10 rounded-lg bg-ink text-sm font-black text-white">3</button>
+            <button class="h-10 rounded-lg bg-white text-sm font-black text-slate-500 ring-1 ring-slate-200">4</button>
+            <button class="h-10 rounded-lg bg-ink text-sm font-black text-white">5</button>
+            <button class="h-10 rounded-lg bg-white text-sm font-black text-slate-500 ring-1 ring-slate-200">6</button>
+            <button class="h-10 rounded-lg bg-white text-sm font-black text-slate-500 ring-1 ring-slate-200">7</button>
+            <button class="h-10 rounded-lg bg-amber-100 text-sm font-black text-amber-700 ring-1 ring-amber-200">8</button>
+            <button class="h-10 rounded-lg bg-ink text-sm font-black text-white">9</button>
+            <button class="h-10 rounded-lg bg-white text-sm font-black text-slate-500 ring-1 ring-slate-200">10</button>
+            <button class="h-10 rounded-lg bg-white text-sm font-black text-slate-500 ring-1 ring-slate-200">11</button>
+            <button class="h-10 rounded-lg bg-white text-sm font-black text-slate-500 ring-1 ring-slate-200">12</button>
+          </div>
+
+          <div class="mt-5 grid grid-cols-3 gap-2 text-center text-xs font-bold">
+            <div class="rounded bg-ink px-2 py-2 text-white">已答 6</div>
+            <div class="rounded bg-white px-2 py-2 text-slate-500 ring-1 ring-slate-200">未答 5</div>
+            <div class="rounded bg-amber-100 px-2 py-2 text-amber-700">标记 1</div>
+          </div>
+
+          <div class="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div class="text-sm font-black">监考画面</div>
+            <div class="mt-3 flex h-32 items-center justify-center rounded bg-slate-900 text-xs font-bold text-white">摄像头预览</div>
+            <div class="mt-3 grid grid-cols-2 gap-2 text-xs font-bold">
+              <div class="rounded bg-emerald-50 px-2 py-2 text-emerald-700">人脸正常</div>
+              <div class="rounded bg-emerald-50 px-2 py-2 text-emerald-700">无切屏</div>
+            </div>
+          </div>
+
+          <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+            离开考试页面、关闭监考权限或切换屏幕会被记录为风险事件。
+          </div>
+
+          <button id="submitExamBtn" class="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-ink text-sm font-black text-white">
+            <i data-lucide="send" class="h-4 w-4"></i>
+            提交试卷
+          </button>
+        </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <h2 class="text-lg font-black">考试规则</h2>
+            <div class="mt-4 space-y-3 text-sm font-semibold text-slate-600">
+              <div class="flex gap-2"><i data-lucide="check-circle-2" class="h-4 w-4 shrink-0 text-leaf"></i><span>考试期间保持摄像头、麦克风和屏幕共享开启。</span></div>
+              <div class="flex gap-2"><i data-lucide="check-circle-2" class="h-4 w-4 shrink-0 text-leaf"></i><span>答题内容会自动保存，提交后不可修改。</span></div>
+              <div class="flex gap-2"><i data-lucide="check-circle-2" class="h-4 w-4 shrink-0 text-leaf"></i><span>断线重连后恢复当前考生会话。</span></div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <h2 class="text-lg font-black">当前状态</h2>
+            <div class="mt-4 space-y-3">
+              <div class="flex items-center justify-between rounded bg-slate-50 px-3 py-2 text-sm font-bold">
+                <span>开始时间</span>
+                <span>10:00</span>
+              </div>
+              <div class="flex items-center justify-between rounded bg-slate-50 px-3 py-2 text-sm font-bold">
+                <span>结束时间</span>
+                <span>11:30</span>
+              </div>
+              <div class="flex items-center justify-between rounded bg-slate-50 px-3 py-2 text-sm font-bold">
+                <span>剩余时间</span>
+                <span class="text-honey">42:18</span>
+              </div>
+              <div class="flex items-center justify-between rounded bg-slate-50 px-3 py-2 text-sm font-bold">
+                <span>风险记录</span>
+                <span class="text-leaf">0</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <h2 class="text-lg font-black">提交检查</h2>
+            <div class="mt-4 space-y-3 text-sm font-semibold">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-600">已答题目</span>
+                <span class="font-black">6 / 12</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-600">未答题目</span>
+                <span class="font-black text-coral">5</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-600">标记题目</span>
+                <span class="font-black text-honey">1</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-600">保存状态</span>
+                <span class="font-black text-leaf">已同步</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+    </main>
+
+    <script type="module" src="/assets/candidate.js"></script>
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>

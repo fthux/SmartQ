@@ -45,7 +45,6 @@ const app = createApp({
     const state = reactive({
       route: currentRoute(),
       dashboard: null,
-      config: null,
       loading: true,
       toast: "",
       generatedDraft: null,
@@ -67,16 +66,53 @@ const app = createApp({
       editingPaperId: null,
       authoringPaperId: currentAuthoringPaperId(),
       assignmentForm: {
+        id: "",
         paperId: "",
         startTime: defaultDateTimeLocal(10, 0),
         endTime: defaultDateTimeLocal(11, 30),
-        candidate: "新考生",
-        ticket: "202606239999",
-        className: "一班",
-        batchText: "",
+        participantTicket: "",
+        candidate: "",
+        ticket: "",
+        className: "",
+        remark: "",
       },
-      assignmentPreview: null,
+      assignmentModalOpen: false,
       assignmentSubmitting: false,
+      assignmentPage: 1,
+      assignmentPageSize: 8,
+      selectedAssignmentIds: [],
+      confirmDeleteAssignment: null,
+      confirmDeleteSelectedAssignments: false,
+      candidateForm: {
+        id: "",
+        candidate: "",
+        ticket: "",
+        className: "",
+        phone: "",
+        email: "",
+        description: "",
+        avatar: "",
+      },
+      candidateSubmitting: false,
+      participantModalOpen: false,
+      participantPage: 1,
+      participantPageSize: 8,
+      selectedParticipantTickets: [],
+      confirmDeleteParticipant: null,
+      confirmDeleteSelectedParticipants: false,
+      viewingParticipant: null,
+      groupForm: {
+        id: "",
+        name: "",
+        description: "",
+      },
+      groupModalOpen: false,
+      groupSubmitting: false,
+      groupPage: 1,
+      groupPageSize: 6,
+      selectedGroupIds: [],
+      confirmDeleteGroup: null,
+      confirmDeleteSelectedGroups: false,
       candidate: {
         sessionId: currentCandidateSessionId(),
         session: null,
@@ -98,6 +134,8 @@ const app = createApp({
       { key: "home", label: "控制台首页", icon: "layout-dashboard" },
       { key: "authoring", label: "出题制卷", icon: "sparkles" },
       { key: "papers", label: "已出卷子", icon: "files" },
+      { key: "participants", label: "参与者管理", icon: "users" },
+      { key: "assignments", label: "试卷分配", icon: "list-checks" },
       { key: "proctor", label: "监考工作台", icon: "screen-share" },
       { key: "analysis", label: "阅卷分析", icon: "chart-no-axes-combined" },
     ];
@@ -107,6 +145,23 @@ const app = createApp({
     const quality = computed(() => state.dashboard?.quality || {});
     const analysis = computed(() => state.dashboard?.analysis || {});
     const sessions = computed(() => state.dashboard?.sessions || []);
+    const candidates = computed(() => state.dashboard?.participants || state.dashboard?.candidates || []);
+    const groups = computed(() => state.dashboard?.groups || []);
+    const groupTotalPages = computed(() => Math.max(1, Math.ceil(groups.value.length / state.groupPageSize)));
+    const pagedGroups = computed(() => {
+      const page = Math.min(state.groupPage, groupTotalPages.value);
+      const start = (page - 1) * state.groupPageSize;
+      return groups.value.slice(start, start + state.groupPageSize);
+    });
+    const allPagedGroupsSelected = computed(() => pagedGroups.value.length > 0 && pagedGroups.value.every((item) => state.selectedGroupIds.includes(item.id)));
+    const selectedUsedGroups = computed(() => groups.value.filter((item) => state.selectedGroupIds.includes(item.id) && groupInUse(item)));
+    const participantTotalPages = computed(() => Math.max(1, Math.ceil(candidates.value.length / state.participantPageSize)));
+    const pagedParticipants = computed(() => {
+      const page = Math.min(state.participantPage, participantTotalPages.value);
+      const start = (page - 1) * state.participantPageSize;
+      return candidates.value.slice(start, start + state.participantPageSize);
+    });
+    const allPagedParticipantsSelected = computed(() => pagedParticipants.value.length > 0 && pagedParticipants.value.every((item) => state.selectedParticipantTickets.includes(item.ticket)));
     const papers = computed(() => state.dashboard?.papers || []);
     const publishedPapers = computed(() => papers.value.filter((item) => item.status === "已发布"));
     const gradingQueue = computed(() => state.dashboard?.gradingQueue || {});
@@ -180,7 +235,7 @@ const app = createApp({
         {
           key: "publish",
           title: "发布试卷",
-          meta: published ? "已发布给考生" : saved ? "可发布" : "等待保存",
+          meta: published ? "已发布给参与者" : saved ? "可发布" : "等待保存",
           status: published ? "done" : saved ? "active" : "pending",
           action: published ? "已发布" : "发布试卷",
           clickable: published || saved,
@@ -192,7 +247,7 @@ const app = createApp({
     const dashboardCards = computed(() => [
       { label: "考试场次", value: 1, tone: "text-ink", icon: "calendar-check" },
       { label: "已发布试卷", value: papers.value.filter((item) => item.status === "已发布").length, tone: "text-leaf", icon: "send" },
-      { label: "在线考生", value: state.dashboard?.stats?.online || 0, tone: "text-ocean", icon: "users" },
+      { label: "在线参与者", value: state.dashboard?.stats?.online || 0, tone: "text-ocean", icon: "users" },
       { label: "待审核题目", value: pendingReviewCount.value, tone: "text-honey", icon: "badge-alert" },
       { label: "监考风险", value: state.dashboard?.stats?.risk || 0, tone: "text-coral", icon: "shield-alert" },
       { label: "待复核答卷", value: gradingQueue.value.subjectivePending || 0, tone: "text-iris", icon: "check-check" },
@@ -208,9 +263,9 @@ const app = createApp({
         },
         {
           title: hasCurrentPaper.value ? "有未发布试卷待处理" : "有试卷内容待保存",
-          desc: hasCurrentPaper.value ? "发布后可进入考生分配流程" : "完成题目审核后保存为未发布试卷",
-          action: hasCurrentPaper.value ? "去处理" : "保存试卷",
-          route: hasCurrentPaper.value ? "papers" : "authoring",
+          desc: hasCurrentPaper.value ? "发布后可进入参与者分配流程" : "完成题目审核后保存为未发布试卷",
+          action: hasCurrentPaper.value ? "去分配" : "保存试卷",
+          route: hasCurrentPaper.value ? "assignments" : "authoring",
           show: paper.value.status !== "已发布" && (hasCurrentPaper.value || questions.value.length > 0),
         },
         {
@@ -249,6 +304,13 @@ const app = createApp({
     });
     const assignmentSummary = computed(() => state.dashboard?.assignments || {});
     const assignmentPaperCounts = computed(() => assignmentSummary.value.byPaper || []);
+    const assignmentTotalPages = computed(() => Math.max(1, Math.ceil(sessions.value.length / state.assignmentPageSize)));
+    const pagedAssignments = computed(() => {
+      const page = Math.min(state.assignmentPage, assignmentTotalPages.value);
+      const start = (page - 1) * state.assignmentPageSize;
+      return sessions.value.slice(start, start + state.assignmentPageSize);
+    });
+    const allPagedAssignmentsSelected = computed(() => pagedAssignments.value.length > 0 && pagedAssignments.value.every((item) => state.selectedAssignmentIds.includes(item.id)));
     const proctorEvents = computed(() => state.dashboard?.proctorEvents || state.dashboard?.auditLog || []);
     const candidateAnsweredCount = computed(() => Object.keys(state.candidate.answers || {}).length);
     const candidateQuestionCount = computed(() => state.candidate.questions.length);
@@ -261,12 +323,19 @@ const app = createApp({
     async function refresh() {
       state.loading = true;
       try {
-        const [dashboard, config] = await Promise.all([request("/api/dashboard"), request("/api/config")]);
+        const dashboard = await request("/api/dashboard");
         state.dashboard = dashboard;
-        state.config = config;
-        if (!state.assignmentForm.paperId) {
-          state.assignmentForm.paperId = (dashboard.papers || []).find((item) => item.status === "已发布")?.id || "";
-        }
+        const firstGroup = (dashboard.groups || [])[0]?.name || "";
+        if (!state.candidateForm.className) state.candidateForm.className = firstGroup;
+        const groupIds = new Set((dashboard.groups || []).map((item) => item.id));
+        state.selectedGroupIds = state.selectedGroupIds.filter((id) => groupIds.has(id));
+        state.groupPage = Math.min(state.groupPage, Math.max(1, Math.ceil(groupIds.size / state.groupPageSize) || 1));
+        const tickets = new Set((dashboard.participants || dashboard.candidates || []).map((item) => item.ticket));
+        state.selectedParticipantTickets = state.selectedParticipantTickets.filter((ticket) => tickets.has(ticket));
+        state.participantPage = Math.min(state.participantPage, Math.max(1, Math.ceil(tickets.size / state.participantPageSize) || 1));
+        const sessionIds = new Set((dashboard.sessions || []).map((item) => item.id));
+        state.selectedAssignmentIds = state.selectedAssignmentIds.filter((id) => sessionIds.has(id));
+        state.assignmentPage = Math.min(state.assignmentPage, Math.max(1, Math.ceil(sessionIds.size / state.assignmentPageSize) || 1));
       } catch (error) {
         notify(`数据加载失败：${error.message}`);
       } finally {
@@ -279,7 +348,7 @@ const app = createApp({
       state.route = route;
       if (route === "candidate") {
         state.candidate.sessionId = params.session || state.candidate.sessionId || "s-001";
-        loadCandidateSession(state.candidate.sessionId).catch((error) => notify(`考生会话加载失败：${error.message}`));
+        loadCandidateSession(state.candidate.sessionId).catch((error) => notify(`测试会话加载失败：${error.message}`));
       }
       if (route === "authoring") {
         state.authoringPaperId = params.paperid || params.paperId || params.papeid || "";
@@ -664,80 +733,496 @@ const app = createApp({
       const payload = readAssignmentForm();
       state.assignmentSubmitting = true;
       try {
-        const endpoint = Array.isArray(payload.candidates) ? "/api/assignments/batch" : "/api/assignments";
+        const editing = Boolean(state.assignmentForm.id);
+        const endpoint = editing ? `/api/assignments/${encodeURIComponent(state.assignmentForm.id)}` : "/api/assignments";
         const result = await request(endpoint, {
-          method: "POST",
+          method: editing ? "PATCH" : "POST",
           body: JSON.stringify(payload),
         });
         await refresh();
-        state.assignmentPreview = null;
+        closeAssignmentModal();
         const firstSession = Array.isArray(result.sessions) ? result.sessions[0] : result;
         if (firstSession?.id) copyCandidateUrl(firstSession.id);
-        notify(Array.isArray(result.sessions) ? `已分配 ${result.sessions.length} 名考生` : `${firstSession.candidate} 已分配考试`);
+        notify(editing ? "试卷分配已更新" : `${firstSession.candidate} 已分配测试`);
       } catch (error) {
-        notify(`分配失败：${error.message}`);
+        notify(`保存分配失败：${error.message}`);
       } finally {
         state.assignmentSubmitting = false;
       }
     }
 
-    async function previewAssignments() {
+    async function submitCandidate() {
+      const form = state.candidateForm;
+      const payload = {
+        candidate: String(form.candidate || "").trim(),
+        className: String(form.className || "").trim(),
+        phone: String(form.phone || "").trim(),
+        email: String(form.email || "").trim(),
+        description: String(form.description || "").trim(),
+        avatar: String(form.avatar || "").trim(),
+      };
+      const editing = Boolean(form.ticket);
+      state.candidateSubmitting = true;
       try {
-        state.assignmentPreview = await request("/api/assignments/import-preview", {
-          method: "POST",
-          body: JSON.stringify({ text: state.assignmentForm.batchText }),
+        const created = await request(editing ? `/api/participants/${encodeURIComponent(form.ticket)}` : "/api/participants", {
+          method: editing ? "PATCH" : "POST",
+          body: JSON.stringify(payload),
         });
-        const invalid = state.assignmentPreview.invalidCount || 0;
-        notify(invalid ? `名单预览：${state.assignmentPreview.validCount} 人可分配，${invalid} 人需修正` : `名单预览：${state.assignmentPreview.validCount} 人可分配`);
+        await refresh();
+        closeParticipantModal();
+        notify(`${created.candidate} 已${editing ? "更新" : "添加"}到参与者信息`);
       } catch (error) {
-        notify(`预览失败：${error.message}`);
+        notify(`保存失败：${error.message}`);
+      } finally {
+        state.candidateSubmitting = false;
       }
     }
 
-    async function importAssignmentExcel(event) {
+    function openParticipantModal(participant = null) {
+      const firstGroup = groups.value[0]?.name || "";
+      Object.assign(state.candidateForm, {
+        id: participant?.id || "",
+        candidate: participant?.candidate || "",
+        ticket: participant?.ticket || "",
+        className: participant?.className || firstGroup,
+        phone: participant?.phone || "",
+        email: participant?.email || "",
+        description: participant?.description || "",
+        avatar: participant?.avatar || "",
+      });
+      state.participantModalOpen = true;
+      mountIcons();
+    }
+
+    function closeParticipantModal() {
+      state.participantModalOpen = false;
+      Object.assign(state.candidateForm, { id: "", candidate: "", ticket: "", className: groups.value[0]?.name || "", phone: "", email: "", description: "", avatar: "" });
+    }
+
+    async function handleParticipantAvatar(event) {
       const file = event.target.files?.[0];
       event.target.value = "";
       if (!file) return;
-      try {
-        const rows = await readAssignmentWorkbook(file);
-        if (!rows.length) {
-          notify("未读取到可导入的考生名单");
-          return;
-        }
-        state.assignmentForm.batchText = rows.map((item) => [item.candidate, item.ticket, item.className].join(",")).join("\n");
-        await previewAssignments();
-        notify(`已导入 ${rows.length} 名考生`);
-      } catch (error) {
-        notify(`导入失败：${error.message}`);
-      }
-    }
-
-    function downloadAssignmentTemplate() {
-      const rows = [
-        { 考生姓名: "张同学", 准考证号: "202606240001", 班级: "一班" },
-        { 考生姓名: "李同学", 准考证号: "202606240002", 班级: "一班" },
-      ];
-      if (window.XLSX) {
-        const worksheet = XLSX.utils.json_to_sheet(rows, { header: ["考生姓名", "准考证号", "班级"] });
-        worksheet["!cols"] = [{ wch: 18 }, { wch: 22 }, { wch: 16 }];
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "考生名单");
-        XLSX.writeFile(workbook, "SmartQ-考生批量分配模板.xlsx");
-        notify("Excel 模板已下载");
+      if (!file.type.startsWith("image/")) {
+        notify("请选择图片文件");
         return;
       }
-      downloadExcelTable("SmartQ 考生批量分配模板", rows, "SmartQ-考生批量分配模板.xls");
-      notify("Excel 模板已下载");
+      const reader = new FileReader();
+      reader.onload = () => {
+        state.candidateForm.avatar = String(reader.result || "");
+      };
+      reader.readAsDataURL(file);
     }
 
-    async function deleteAssignment(sessionId) {
+    function previewParticipantAvatar(participant) {
+      if (!participant?.avatar) return;
+      if (!window.Viewer) {
+        window.open(participant.avatar, "_blank", "noopener");
+        return;
+      }
+      const container = document.createElement("div");
+      const image = document.createElement("img");
+      image.src = participant.avatar;
+      image.alt = `${participant.candidate || "参与者"}图片`;
+      container.appendChild(image);
+      const viewer = new Viewer(container, {
+        hidden() {
+          viewer.destroy();
+          container.remove();
+        },
+        navbar: false,
+        title: [1, () => [participant.candidate, participant.ticket].filter(Boolean).join(" · ") || "参与者图片"],
+        toolbar: {
+          zoomIn: 1,
+          zoomOut: 1,
+          oneToOne: 1,
+          reset: 1,
+          prev: 0,
+          play: 0,
+          next: 0,
+          rotateLeft: 1,
+          rotateRight: 1,
+          flipHorizontal: 1,
+          flipVertical: 1,
+        },
+        transition: true,
+        viewed() {
+          viewer.zoomTo(1);
+        },
+      });
+      viewer.show();
+    }
+
+    async function submitGroup() {
+      const form = state.groupForm;
+      const payload = {
+        name: String(form.name || "").trim(),
+        description: String(form.description || "").trim(),
+      };
+      const editing = Boolean(form.id);
+      state.groupSubmitting = true;
       try {
-        await request(`/api/assignments/${sessionId}`, { method: "DELETE" });
+        await request(editing ? `/api/groups/${encodeURIComponent(form.id)}` : "/api/groups", {
+          method: editing ? "PATCH" : "POST",
+          body: JSON.stringify(payload),
+        });
+        await refresh();
+        closeGroupModal();
+        notify(editing ? "分组已更新" : "分组已新建");
+      } catch (error) {
+        notify(`分组保存失败：${error.message}`);
+      } finally {
+        state.groupSubmitting = false;
+      }
+    }
+
+    function openGroupModal(group = null) {
+      Object.assign(state.groupForm, {
+        id: group?.id || "",
+        name: group?.name || "",
+        description: group?.description || "",
+      });
+      state.groupModalOpen = true;
+      mountIcons();
+    }
+
+    function closeGroupModal() {
+      state.groupModalOpen = false;
+      resetGroupForm();
+    }
+
+    function editGroup(group) {
+      openGroupModal(group);
+    }
+
+    function resetGroupForm() {
+      Object.assign(state.groupForm, { id: "", name: "", description: "" });
+    }
+
+    function groupParticipantCount(group) {
+      return candidates.value.filter((item) => item.className === group.name).length;
+    }
+
+    function groupInUse(group) {
+      return groupParticipantCount(group) > 0 || sessions.value.some((item) => item.className === group.name);
+    }
+
+    function toggleGroupSelection(id) {
+      const selected = new Set(state.selectedGroupIds);
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      state.selectedGroupIds = [...selected];
+    }
+
+    function togglePagedGroupSelection() {
+      if (!pagedGroups.value.length) return;
+      const selected = new Set(state.selectedGroupIds);
+      if (allPagedGroupsSelected.value) {
+        pagedGroups.value.forEach((item) => selected.delete(item.id));
+      } else {
+        pagedGroups.value.forEach((item) => selected.add(item.id));
+      }
+      state.selectedGroupIds = [...selected];
+    }
+
+    function changeGroupPage(delta) {
+      state.groupPage = Math.max(1, Math.min(groupTotalPages.value, state.groupPage + delta));
+    }
+
+    function askDeleteGroup(group) {
+      state.confirmDeleteGroup = group;
+    }
+
+    async function confirmDeleteGroup() {
+      const target = state.confirmDeleteGroup;
+      if (!target) return;
+      if (groupInUse(target)) return;
+      try {
+        await request(`/api/groups/${encodeURIComponent(target.id)}`, { method: "DELETE" });
+        state.confirmDeleteGroup = null;
+        state.selectedGroupIds = state.selectedGroupIds.filter((id) => id !== target.id);
+        await refresh();
+        if (state.groupForm.id === target.id) closeGroupModal();
+        notify("分组已删除");
+      } catch (error) {
+        notify(`删除分组失败：${error.message}`);
+      }
+    }
+
+    async function confirmDeleteSelectedGroups() {
+      const selected = groups.value.filter((item) => state.selectedGroupIds.includes(item.id));
+      if (!selected.length) return;
+      const used = selected.filter(groupInUse);
+      if (used.length) {
+        notify(`所选分组中包含已被参与者引用的分组，不能删除：${used.map((item) => item.name).join("、")}`);
+        state.confirmDeleteSelectedGroups = false;
+        return;
+      }
+      const failed = [];
+      for (const group of selected) {
+        try {
+          await request(`/api/groups/${encodeURIComponent(group.id)}`, { method: "DELETE" });
+        } catch (error) {
+          failed.push(`${group.name}：${error.message}`);
+        }
+      }
+      state.confirmDeleteSelectedGroups = false;
+      state.selectedGroupIds = [];
+      await refresh();
+      notify(failed.length ? `部分分组删除失败：${failed.join("；")}` : `已删除 ${selected.length} 个分组`);
+    }
+
+    function exportGroups(scope = "all") {
+      const selected = new Set(state.selectedGroupIds);
+      const rows = (scope === "selected" ? groups.value.filter((item) => selected.has(item.id)) : groups.value).map(groupExportRow);
+      if (!rows.length) {
+        notify(scope === "selected" ? "请先选择要导出的分组" : "暂无可导出的分组");
+        return;
+      }
+      downloadExcelTable("SmartQ 分组信息", rows, `smartq-groups-${scope}-${dateStamp()}.xls`);
+      notify(`已导出 ${rows.length} 条分组信息`);
+    }
+
+    function groupExportRow(group) {
+      return {
+        分组名称: group.name || "",
+        备注信息: group.description || "",
+        参与者数: groupParticipantCount(group),
+        创建时间: group.createdAt ? formatDateTimeWithYear(group.createdAt) : "",
+        更新时间: group.updatedAt ? formatDateTimeWithYear(group.updatedAt) : "",
+      };
+    }
+
+    function toggleParticipantSelection(ticket) {
+      const selected = new Set(state.selectedParticipantTickets);
+      if (selected.has(ticket)) selected.delete(ticket);
+      else selected.add(ticket);
+      state.selectedParticipantTickets = [...selected];
+    }
+
+    function togglePagedParticipantSelection() {
+      if (!pagedParticipants.value.length) return;
+      const selected = new Set(state.selectedParticipantTickets);
+      if (allPagedParticipantsSelected.value) {
+        pagedParticipants.value.forEach((item) => selected.delete(item.ticket));
+      } else {
+        pagedParticipants.value.forEach((item) => selected.add(item.ticket));
+      }
+      state.selectedParticipantTickets = [...selected];
+    }
+
+    function changeParticipantPage(delta) {
+      state.participantPage = Math.max(1, Math.min(participantTotalPages.value, state.participantPage + delta));
+    }
+
+    async function confirmDeleteParticipant() {
+      const target = state.confirmDeleteParticipant;
+      if (!target) return;
+      try {
+        await request(`/api/participants/${encodeURIComponent(target.ticket)}`, { method: "DELETE" });
+        state.confirmDeleteParticipant = null;
+        await refresh();
+        notify("参与者信息已删除");
+      } catch (error) {
+        notify(`删除失败：${error.message}`);
+      }
+    }
+
+    async function confirmDeleteSelectedParticipants() {
+      if (!state.selectedParticipantTickets.length) return;
+      try {
+        await request("/api/participants/delete-batch", {
+          method: "POST",
+          body: JSON.stringify({ tickets: state.selectedParticipantTickets }),
+        });
+        state.confirmDeleteSelectedParticipants = false;
+        state.selectedParticipantTickets = [];
+        await refresh();
+        notify("已删除所选参与者");
+      } catch (error) {
+        notify(`批量删除失败：${error.message}`);
+      }
+    }
+
+    function exportParticipants(scope = "all") {
+      const selected = new Set(state.selectedParticipantTickets);
+      const rows = (scope === "selected" ? candidates.value.filter((item) => selected.has(item.ticket)) : candidates.value).map(participantExportRow);
+      if (!rows.length) {
+        notify(scope === "selected" ? "请先选择要导出的参与者" : "暂无可导出的参与者");
+        return;
+      }
+      downloadExcelTable("SmartQ 参与者信息", rows, `smartq-participants-${scope}-${dateStamp()}.xls`);
+      notify(`已导出 ${rows.length} 条参与者信息`);
+    }
+
+    function participantExportRow(item) {
+      return {
+        姓名: item.candidate || "",
+        编号: item.ticket || "",
+        分组: item.className || "",
+        手机号: item.phone || "",
+        邮箱: item.email || "",
+        描述: item.description || "",
+      };
+    }
+
+    function openAssignmentModal(assignment = null) {
+      Object.assign(state.assignmentForm, {
+        id: assignment?.id || "",
+        paperId: assignment?.paperId || "",
+        startTime: assignment?.startTime || defaultDateTimeLocal(10, 0),
+        endTime: assignment?.endTime || defaultDateTimeLocal(11, 30),
+        participantTicket: assignment?.ticket || "",
+        candidate: assignment?.candidate || "",
+        ticket: assignment?.ticket || "",
+        className: assignment?.className || "",
+        remark: assignment?.remark || "",
+      });
+      state.assignmentModalOpen = true;
+      mountIcons();
+    }
+
+    function closeAssignmentModal() {
+      state.assignmentModalOpen = false;
+      resetAssignmentForm();
+    }
+
+    function resetAssignmentForm() {
+      Object.assign(state.assignmentForm, {
+        id: "",
+        paperId: "",
+        startTime: defaultDateTimeLocal(10, 0),
+        endTime: defaultDateTimeLocal(11, 30),
+        participantTicket: "",
+        candidate: "",
+        ticket: "",
+        className: "",
+        remark: "",
+      });
+    }
+
+    function setAssignmentParticipant(ticket) {
+      const participant = candidates.value.find((item) => item.ticket === ticket || item.id === ticket);
+      Object.assign(state.assignmentForm, {
+        participantTicket: ticket || "",
+        candidate: participant?.candidate || "",
+        ticket: participant?.ticket || "",
+        className: participant?.className || "",
+      });
+    }
+
+    function viewAssignmentParticipant(assignment) {
+      const participant = candidates.value.find((item) => item.ticket === assignment.ticket || item.id === assignment.ticket);
+      state.viewingParticipant = participant || {
+        candidate: assignment.candidate || "",
+        ticket: assignment.ticket || "",
+        className: assignment.className || "",
+        phone: assignment.phone || "",
+        email: assignment.email || "",
+        description: "",
+        avatar: "",
+      };
+      mountIcons();
+    }
+
+    function toggleAssignmentSelection(id) {
+      const selected = new Set(state.selectedAssignmentIds);
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      state.selectedAssignmentIds = [...selected];
+    }
+
+    function togglePagedAssignmentSelection() {
+      const selected = new Set(state.selectedAssignmentIds);
+      if (allPagedAssignmentsSelected.value) {
+        pagedAssignments.value.forEach((item) => selected.delete(item.id));
+      } else {
+        pagedAssignments.value.forEach((item) => selected.add(item.id));
+      }
+      state.selectedAssignmentIds = [...selected];
+    }
+
+    function changeAssignmentPage(delta) {
+      state.assignmentPage = Math.max(1, Math.min(assignmentTotalPages.value, state.assignmentPage + delta));
+    }
+
+    function askDeleteAssignment(assignment) {
+      state.confirmDeleteAssignment = assignment;
+    }
+
+    async function deleteCandidate(ticket) {
+      const participant = candidates.value.find((item) => item.ticket === ticket || item.id === ticket);
+      if (participant) state.confirmDeleteParticipant = participant;
+    }
+
+    async function confirmDeleteAssignment() {
+      const target = state.confirmDeleteAssignment;
+      if (!target) return;
+      try {
+        await request(`/api/assignments/${target.id}`, { method: "DELETE" });
+        state.confirmDeleteAssignment = null;
+        state.selectedAssignmentIds = state.selectedAssignmentIds.filter((id) => id !== target.id);
         await refresh();
         notify("考试分配已撤销");
       } catch (error) {
         notify(`撤销失败：${error.message}`);
       }
+    }
+
+    async function confirmDeleteSelectedAssignments() {
+      if (!state.selectedAssignmentIds.length) return;
+      try {
+        await request("/api/assignments/delete-batch", {
+          method: "POST",
+          body: JSON.stringify({ ids: state.selectedAssignmentIds }),
+        });
+        state.confirmDeleteSelectedAssignments = false;
+        state.selectedAssignmentIds = [];
+        await refresh();
+        notify("已删除所选试卷分配");
+      } catch (error) {
+        notify(`批量删除失败：${error.message}`);
+      }
+    }
+
+    function exportAssignments(scope = "all") {
+      const selected = new Set(state.selectedAssignmentIds);
+      const rows = (scope === "selected" ? sessions.value.filter((item) => selected.has(item.id)) : sessions.value).map(assignmentExportRow);
+      if (!rows.length) {
+        notify(scope === "selected" ? "请先选择要导出的试卷分配" : "暂无可导出的试卷分配");
+        return;
+      }
+      downloadExcelTable("SmartQ 试卷分配信息", rows, `smartq-assignments-${scope}-${dateStamp()}.xls`);
+      notify(`已导出 ${rows.length} 条试卷分配信息`);
+    }
+
+    function assignmentExportRow(item) {
+      return {
+        参与者: item.candidate || "",
+        编号: item.ticket || "",
+        分组: item.className || "",
+        试卷: item.paperName || item.paper || "",
+        开始时间: item.startTime || "",
+        结束时间: item.endTime || "",
+        状态: item.status || "",
+        进度: `${item.progress || 0}%`,
+        风险: item.risk || "",
+        备注: item.remark || "",
+        会话ID: item.id || "",
+      };
+    }
+
+    function assignmentProgressText(item) {
+      const progress = Number(item.progress || 0);
+      if (item.status === "待开考") return "";
+      if (item.status === "已提交") return "已完成";
+      return `答题进度 ${Math.max(0, Math.min(100, Math.round(progress)))}%`;
+    }
+
+    function assignmentRiskText(item) {
+      const risk = item.risk || "低";
+      if (risk === "低") return "";
+      return `风险${risk}`;
     }
 
     async function recordProctorRisk(sessionId) {
@@ -755,40 +1240,21 @@ const app = createApp({
 
     function readAssignmentForm() {
       const form = state.assignmentForm;
-      const base = {
+      const participant = candidates.value.find((item) => item.ticket === form.participantTicket || item.id === form.participantTicket);
+      return {
         paperId: form.paperId || publishedPapers.value[0]?.id || "",
         startTime: form.startTime,
         endTime: form.endTime,
+        candidate: participant?.candidate || String(form.candidate || "").trim(),
+        ticket: participant?.ticket || String(form.ticket || "").trim(),
+        className: participant?.className || String(form.className || "").trim(),
+        remark: String(form.remark || "").trim(),
       };
-      const batchText = String(form.batchText || "").trim();
-      if (batchText) {
-        return {
-          ...base,
-          candidates: parseBatchCandidates(batchText),
-        };
-      }
-      return {
-        ...base,
-        candidate: String(form.candidate || "").trim(),
-        ticket: String(form.ticket || "").trim(),
-        className: String(form.className || "").trim(),
-      };
-    }
-
-    function parseBatchCandidates(text) {
-      return text
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => {
-          const [candidate, ticket, className] = line.split(/[,，\t]/).map((item) => String(item || "").trim());
-          return { candidate, ticket, className: className || "" };
-        });
     }
 
     function copyCandidateUrl(sessionId) {
       const url = `${window.location.origin}/#/candidate?session=${encodeURIComponent(sessionId)}`;
-      navigator.clipboard?.writeText(url).catch(() => {});
+      navigator.clipboard?.writeText(url).catch(() => { });
     }
 
     async function loadCandidateSession(sessionId = state.candidate.sessionId || "s-001") {
@@ -900,9 +1366,9 @@ const app = createApp({
 
     function startCandidateHeartbeat() {
       if (state.candidate.heartbeatTimer) clearInterval(state.candidate.heartbeatTimer);
-      sendCandidateHeartbeat(document.visibilityState).catch(() => {});
+      sendCandidateHeartbeat(document.visibilityState).catch(() => { });
       state.candidate.heartbeatTimer = setInterval(() => {
-        sendCandidateHeartbeat(document.visibilityState).catch(() => {});
+        sendCandidateHeartbeat(document.visibilityState).catch(() => { });
       }, 15000);
     }
 
@@ -969,8 +1435,8 @@ const app = createApp({
           序号: index + 1,
           事件时间: formatDateTimeFull(event.createdAt),
           事件类型: proctorEventTypeText(event.type),
-          考生: session?.candidate || parseCandidateFromMessage(event.message) || "",
-          准考证号: session?.ticket || "",
+          参与者: session?.candidate || parseCandidateFromMessage(event.message) || "",
+          编号: session?.ticket || "",
           会话ID: session?.id || "",
           试卷: session?.paperName || session?.paper || "",
           当前风险: session?.risk || "",
@@ -998,7 +1464,7 @@ const app = createApp({
         state.editingPaperId = state.route === "authoring" && state.authoringPaperId ? state.authoringPaperId : null;
         if (state.route === "papers") clearSelectedPaper();
         if (state.route === "candidate") {
-          loadCandidateSession(state.candidate.sessionId).catch((error) => notify(`考生会话加载失败：${error.message}`));
+          loadCandidateSession(state.candidate.sessionId).catch((error) => notify(`测试会话加载失败：${error.message}`));
         }
         if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
           activatePaper(state.authoringPaperId, { silent: true }).catch(() => { });
@@ -1032,6 +1498,8 @@ const app = createApp({
       quality,
       analysis,
       sessions,
+      candidates,
+      groups,
       papers,
       publishedPapers,
       paperRows,
@@ -1049,7 +1517,17 @@ const app = createApp({
       proctorSummary,
       assignmentSummary,
       assignmentPaperCounts,
+      pagedGroups,
+      groupTotalPages,
+      allPagedGroupsSelected,
+      selectedUsedGroups,
+      pagedAssignments,
+      assignmentTotalPages,
+      allPagedAssignmentsSelected,
       proctorEvents,
+      pagedParticipants,
+      participantTotalPages,
+      allPagedParticipantsSelected,
       candidateAnsweredCount,
       candidateQuestionCount,
       candidateProgress,
@@ -1073,11 +1551,46 @@ const app = createApp({
       closeQuestionEditor,
       saveQuestionEdit,
       reviewNextGrading,
+      submitCandidate,
+      openParticipantModal,
+      closeParticipantModal,
+      handleParticipantAvatar,
+      previewParticipantAvatar,
+      toggleParticipantSelection,
+      togglePagedParticipantSelection,
+      changeParticipantPage,
+      confirmDeleteParticipant,
+      confirmDeleteSelectedParticipants,
+      exportParticipants,
+      submitGroup,
+      openGroupModal,
+      closeGroupModal,
+      editGroup,
+      resetGroupForm,
+      groupParticipantCount,
+      groupInUse,
+      toggleGroupSelection,
+      togglePagedGroupSelection,
+      changeGroupPage,
+      askDeleteGroup,
+      confirmDeleteGroup,
+      confirmDeleteSelectedGroups,
+      exportGroups,
+      deleteCandidate,
       submitAssignment,
-      previewAssignments,
-      importAssignmentExcel,
-      downloadAssignmentTemplate,
-      deleteAssignment,
+      openAssignmentModal,
+      closeAssignmentModal,
+      setAssignmentParticipant,
+      viewAssignmentParticipant,
+      toggleAssignmentSelection,
+      togglePagedAssignmentSelection,
+      changeAssignmentPage,
+      askDeleteAssignment,
+      confirmDeleteAssignment,
+      confirmDeleteSelectedAssignments,
+      exportAssignments,
+      assignmentProgressText,
+      assignmentRiskText,
       recordProctorRisk,
       loadCandidateSession,
       updateCandidateAnswer,
@@ -1095,6 +1608,9 @@ const app = createApp({
       displayPaperStatus,
       workflowStatusText,
       formatDateTime,
+      formatDateTimeWithYear,
+      formatDateTimeFull,
+      formatDateOnly,
       escapeHtml,
     };
   },
@@ -1108,11 +1624,7 @@ const app = createApp({
             <span class="block text-xs font-medium text-slate-500">通用考试 / 测评平台</span>
           </span>
         </button>
-        <div class="flex w-[520px] items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
-          <i data-lucide="search" class="h-4 w-4 text-slate-400"></i>
-          <span class="text-sm text-slate-500">搜索考试、题库、考生、报告</span>
-        </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center justify-end gap-2">
           <button
             v-for="item in navItems"
             :key="item.key"
@@ -1122,10 +1634,6 @@ const app = createApp({
           >
             {{ item.label }}
           </button>
-          <div class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold" :class="state.config?.aiReady ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'">
-            <span class="h-2 w-2 rounded-full" :class="state.config?.aiReady ? 'bg-emerald-500' : 'bg-amber-500'"></span>
-            {{ state.config?.aiReady ? 'AI 已配置' : 'AI 未配置' }}
-          </div>
         </div>
       </header>
 
@@ -1493,17 +2001,298 @@ const app = createApp({
           </div>
         </section>
 
+        <section v-if="state.route === 'participants'" class="mt-6 space-y-5">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h1 class="text-3xl font-black">参与者管理</h1>
+                <div class="mt-1 text-sm font-semibold text-slate-500">维护分组与参与者基础信息，支撑试卷分配和测评会话管理</div>
+              </div>
+              <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="refresh">刷新</button>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-black">分组管理</h2>
+                <div class="mt-1 text-xs font-semibold text-slate-500">先维护分组，再给参与者选择所属分组</div>
+              </div>
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!state.selectedGroupIds.length" @click="state.confirmDeleteSelectedGroups = true">
+                  <i data-lucide="trash-2" class="h-4 w-4"></i>
+                  删除所选
+                </button>
+                <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!state.selectedGroupIds.length" @click="exportGroups('selected')">
+                  <i data-lucide="download" class="h-4 w-4"></i>
+                  导出所选
+                </button>
+                <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!groups.length" @click="exportGroups('all')">
+                  <i data-lucide="file-down" class="h-4 w-4"></i>
+                  导出全部
+                </button>
+                <button class="flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-sm font-bold text-white" @click="openGroupModal()">
+                  <i data-lucide="folder-plus" class="h-4 w-4"></i>
+                  添加分组
+                </button>
+              </div>
+            </div>
+            <div class="mt-4 overflow-hidden rounded-lg border border-slate-200">
+              <div class="overflow-x-auto">
+                <table class="min-w-full table-auto text-left text-sm">
+                  <thead class="bg-slate-50 text-xs font-black text-slate-500">
+                    <tr>
+                      <th class="w-12 px-3 py-3 text-center"><input type="checkbox" :checked="allPagedGroupsSelected" :disabled="!pagedGroups.length" @change="togglePagedGroupSelection" /></th>
+                      <th class="whitespace-nowrap px-3 py-3">分组名称</th>
+                      <th class="px-3 py-3">备注信息</th>
+                      <th class="whitespace-nowrap px-3 py-3">参与者数</th>
+                      <th class="whitespace-nowrap px-3 py-3">创建时间</th>
+                      <th class="whitespace-nowrap px-3 py-3">更新时间</th>
+                      <th class="whitespace-nowrap px-3 py-3 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 bg-white">
+                    <tr v-for="group in pagedGroups" :key="group.id">
+                      <td class="px-3 py-3 text-center"><input type="checkbox" :checked="state.selectedGroupIds.includes(group.id)" @change="toggleGroupSelection(group.id)" /></td>
+                      <td class="whitespace-nowrap px-3 py-3 font-black text-ink">{{ group.name }}</td>
+                      <td class="px-3 py-3"><div class="max-w-md truncate font-semibold text-slate-500">{{ group.description || '无备注' }}</div></td>
+                      <td class="whitespace-nowrap px-3 py-3 font-semibold text-slate-600">{{ groupParticipantCount(group) }}</td>
+                      <td class="whitespace-nowrap px-3 py-3 text-xs font-semibold text-slate-500">{{ group.createdAt ? formatDateTimeWithYear(group.createdAt) : '-' }}</td>
+                      <td class="whitespace-nowrap px-3 py-3 text-xs font-semibold text-slate-500">{{ group.updatedAt ? formatDateTimeWithYear(group.updatedAt) : '-' }}</td>
+                      <td class="px-3 py-3">
+                        <div class="flex justify-end gap-2">
+                          <button class="rounded bg-slate-50 px-2.5 py-1.5 text-xs font-black text-slate-600" @click="editGroup(group)">编辑</button>
+                          <button class="rounded bg-rose-50 px-2.5 py-1.5 text-xs font-black text-coral" :title="groupInUse(group) ? '该分组已被引用，不能删除' : '删除分组'" @click="askDeleteGroup(group)">删除</button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr v-if="!groups.length">
+                      <td colspan="7" class="px-3 py-10 text-center text-sm font-bold text-slate-500">暂无分组</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-500">
+              <div>共 {{ groups.length }} 条，已选择 {{ state.selectedGroupIds.length }} 条</div>
+              <div class="flex items-center gap-2">
+                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.groupPage <= 1" @click="changeGroupPage(-1)">上一页</button>
+                <span class="min-w-20 text-center text-sm font-black text-ink">{{ state.groupPage }} / {{ groupTotalPages }}</span>
+                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.groupPage >= groupTotalPages" @click="changeGroupPage(1)">下一页</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-black">参与者信息</h2>
+                <div class="mt-1 text-xs font-semibold text-slate-500">编号由系统自动生成，基础资料可用于试卷分配和测评会话识别</div>
+              </div>
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!state.selectedParticipantTickets.length" @click="state.confirmDeleteSelectedParticipants = true">
+                  <i data-lucide="trash-2" class="h-4 w-4"></i>
+                  删除所选
+                </button>
+                <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700" @click="exportParticipants('selected')">
+                  <i data-lucide="download" class="h-4 w-4"></i>
+                  导出所选
+                </button>
+                <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700" @click="exportParticipants('all')">
+                  <i data-lucide="file-down" class="h-4 w-4"></i>
+                  导出全部
+                </button>
+                <button class="flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="!groups.length" @click="openParticipantModal()">
+                  <i data-lucide="user-plus" class="h-4 w-4"></i>
+                  添加参与者
+                </button>
+              </div>
+            </div>
+            <div class="mt-4 overflow-hidden rounded-lg border border-slate-200">
+              <div class="overflow-x-auto">
+                <table class="min-w-full table-auto text-left text-sm">
+                  <thead class="bg-slate-50 text-xs font-black text-slate-500">
+                    <tr>
+                      <th class="w-12 px-3 py-3 text-center"><input type="checkbox" :checked="allPagedParticipantsSelected" :disabled="!pagedParticipants.length" @change="togglePagedParticipantSelection" /></th>
+                      <th class="whitespace-nowrap px-3 py-3">姓名</th>
+                      <th class="whitespace-nowrap px-3 py-3">编号</th>
+                      <th class="whitespace-nowrap px-3 py-3">手机号</th>
+                      <th class="whitespace-nowrap px-3 py-3">分组</th>
+                      <th class="whitespace-nowrap px-3 py-3">邮箱</th>
+                      <th class="px-3 py-3">描述</th>
+                      <th class="whitespace-nowrap px-3 py-3">创建时间</th>
+                      <th class="whitespace-nowrap px-3 py-3">更新时间</th>
+                      <th class="whitespace-nowrap px-3 py-3">图片</th>
+                      <th class="whitespace-nowrap px-3 py-3 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 bg-white">
+                    <tr v-for="item in pagedParticipants" :key="item.id || item.ticket">
+                      <td class="px-3 py-3 text-center"><input type="checkbox" :checked="state.selectedParticipantTickets.includes(item.ticket)" @change="toggleParticipantSelection(item.ticket)" /></td>
+                      <td class="whitespace-nowrap px-3 py-3 font-black text-ink">{{ item.candidate }}</td>
+                      <td class="whitespace-nowrap px-3 py-3 font-semibold text-slate-600">{{ item.ticket }}</td>
+                      <td class="whitespace-nowrap px-3 py-3 font-semibold text-slate-600">{{ item.phone || '-' }}</td>
+                      <td class="whitespace-nowrap px-3 py-3 font-semibold text-slate-500">{{ item.className || '-' }}</td>
+                      <td class="whitespace-nowrap px-3 py-3 font-semibold text-slate-600">{{ item.email || '-' }}</td>
+                      <td class="px-3 py-3"><div class="max-w-md truncate text-xs font-semibold text-slate-500">{{ item.description || '无描述' }}</div></td>
+                      <td class="whitespace-nowrap px-3 py-3 text-xs font-semibold text-slate-500">{{ item.createdAt ? formatDateTimeWithYear(item.createdAt) : '-' }}</td>
+                      <td class="whitespace-nowrap px-3 py-3 text-xs font-semibold text-slate-500">{{ item.updatedAt ? formatDateTimeWithYear(item.updatedAt) : '-' }}</td>
+                      <td class="px-3 py-3">
+                        <button v-if="item.avatar" type="button" title="预览图片" class="block h-10 w-10 overflow-hidden rounded-lg ring-1 ring-slate-200 transition hover:ring-ocean" @click="previewParticipantAvatar(item)">
+                          <img :src="item.avatar" alt="参与者图片" class="h-full w-full object-cover" />
+                        </button>
+                        <span v-else class="text-xs font-semibold text-slate-500">无</span>
+                      </td>
+                      <td class="px-3 py-3">
+                        <div class="flex justify-end gap-2">
+                          <button class="rounded bg-slate-50 px-2.5 py-1.5 text-xs font-black text-slate-600" @click="openParticipantModal(item)">编辑</button>
+                          <button class="rounded bg-rose-50 px-2.5 py-1.5 text-xs font-black text-coral" @click="deleteCandidate(item.ticket)">删除</button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr v-if="!candidates.length">
+                      <td colspan="11" class="px-3 py-10 text-center text-sm font-bold text-slate-500">暂无参与者信息</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-500">
+              <div>共 {{ candidates.length }} 条，已选择 {{ state.selectedParticipantTickets.length }} 条</div>
+              <div class="flex items-center gap-2">
+                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.participantPage <= 1" @click="changeParticipantPage(-1)">上一页</button>
+                <span class="min-w-20 text-center text-sm font-black text-ink">{{ state.participantPage }} / {{ participantTotalPages }}</span>
+                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.participantPage >= participantTotalPages" @click="changeParticipantPage(1)">下一页</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="state.route === 'assignments'" class="mt-6 space-y-5">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h1 class="text-3xl font-black">试卷分配</h1>
+                <div class="mt-1 text-sm font-semibold text-slate-500">选择已发布试卷、参与者名单和测试时间，生成测试会话入口</div>
+              </div>
+              <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="refresh">刷新</button>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-black">试卷分配列表</h2>
+                <div class="mt-1 text-xs font-semibold text-slate-500">按参与者查看分配信息、考试状态和备注</div>
+              </div>
+              <div class="flex flex-wrap justify-end gap-2">
+                <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!state.selectedAssignmentIds.length" @click="exportAssignments('selected')">
+                  <i data-lucide="download" class="h-4 w-4"></i>
+                  导出所选
+                </button>
+                <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!sessions.length" @click="exportAssignments('all')">
+                  <i data-lucide="download" class="h-4 w-4"></i>
+                  导出全部
+                </button>
+                <button class="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-coral disabled:cursor-not-allowed disabled:opacity-50" :disabled="!state.selectedAssignmentIds.length" @click="state.confirmDeleteSelectedAssignments = true">
+                  <i data-lucide="trash-2" class="h-4 w-4"></i>
+                  删除所选
+                </button>
+                <button class="flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="!publishedPapers.length || !candidates.length" @click="openAssignmentModal()">
+                  <i data-lucide="user-plus" class="h-4 w-4"></i>
+                  添加分配
+                </button>
+              </div>
+            </div>
+            <div class="mt-4 overflow-hidden rounded-lg border border-slate-200">
+              <table class="w-full table-fixed text-left text-sm">
+                <thead class="bg-slate-50 text-xs font-black text-slate-500">
+                  <tr>
+                    <th class="w-12 px-3 py-3"><input type="checkbox" :checked="allPagedAssignmentsSelected" @change="togglePagedAssignmentSelection" /></th>
+                    <th class="w-[18%] px-3 py-3">参与者</th>
+                    <th class="w-[22%] px-3 py-3">试卷</th>
+                    <th class="w-[20%] px-3 py-3">时间</th>
+                    <th class="w-[10%] px-3 py-3">状态</th>
+                    <th class="w-[14%] px-3 py-3">备注</th>
+                    <th class="w-36 px-3 py-3 text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                  <tr v-for="item in pagedAssignments" :key="item.id">
+                    <td class="px-3 py-3"><input type="checkbox" :checked="state.selectedAssignmentIds.includes(item.id)" @change="toggleAssignmentSelection(item.id)" /></td>
+                    <td class="px-3 py-3">
+                      <button class="block max-w-full text-left" @click="viewAssignmentParticipant(item)">
+                        <div class="truncate font-black text-ocean hover:underline">{{ item.candidate }}</div>
+                        <div class="mt-1 truncate text-xs font-semibold text-slate-500">{{ item.className || '未分组' }}</div>
+                      </button>
+                    </td>
+                    <td class="px-3 py-3">
+                      <div class="truncate font-bold text-slate-700">{{ item.paperName || item.paper }}</div>
+                    </td>
+                    <td class="px-3 py-3 text-xs font-semibold text-slate-600">
+                      <div class="truncate">开始：{{ formatDateTimeFull(item.startTime) || '-' }}</div>
+                      <div class="mt-1 truncate">结束：{{ formatDateTimeFull(item.endTime) || '-' }}</div>
+                    </td>
+                    <td class="px-3 py-3 text-left">
+                      <span class="inline-flex rounded px-2 py-1 text-xs font-black" :class="item.status === '已提交' ? 'bg-emerald-50 text-emerald-700' : item.status === '答题中' ? 'bg-cyan-50 text-ocean' : 'bg-slate-100 text-slate-600'">{{ item.status }}</span>
+                      <div v-if="assignmentProgressText(item)" class="mt-1 text-xs font-semibold text-slate-500">{{ assignmentProgressText(item) }}</div>
+                      <div v-if="assignmentRiskText(item)" class="mt-1 text-xs font-semibold text-honey">{{ assignmentRiskText(item) }}</div>
+                    </td>
+                    <td class="px-3 py-3"><div class="truncate text-xs font-semibold text-slate-600">{{ item.remark || '-' }}</div></td>
+                    <td class="px-3 py-3">
+                      <div class="flex justify-end gap-2">
+                        <button class="rounded bg-slate-50 px-2 py-1.5 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40" :disabled="item.status === '已提交'" @click="openAssignmentModal(item)">编辑</button>
+                        <button class="rounded bg-rose-50 px-2 py-1.5 text-xs font-black text-coral disabled:cursor-not-allowed disabled:opacity-40" :disabled="item.status === '已提交'" @click="askDeleteAssignment(item)">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="!pagedAssignments.length">
+                    <td colspan="7" class="px-3 py-10 text-center text-sm font-bold text-slate-500">暂无试卷分配</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="mt-4 flex items-center justify-between gap-3">
+              <div class="text-xs font-semibold text-slate-500">已选择 {{ state.selectedAssignmentIds.length }} 条 · 共 {{ sessions.length }} 条</div>
+              <div class="flex items-center gap-2">
+                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.assignmentPage <= 1" @click="changeAssignmentPage(-1)">上一页</button>
+                <span class="min-w-20 text-center text-sm font-black text-ink">{{ state.assignmentPage }} / {{ assignmentTotalPages }}</span>
+                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.assignmentPage >= assignmentTotalPages" @click="changeAssignmentPage(1)">下一页</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-black">试卷分配概览</h2>
+                <div class="mt-1 text-xs font-semibold text-slate-500">查看各试卷分配人数、答题中和提交状态</div>
+              </div>
+            </div>
+            <div class="mt-4 grid grid-cols-3 gap-3">
+              <div v-for="item in assignmentPaperCounts" :key="item.paperId || item.paperName" class="rounded-lg bg-slate-50 px-4 py-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0 truncate text-sm font-black">{{ item.paperName }}</div>
+                  <div class="text-sm font-black text-ocean">{{ item.assigned }}</div>
+                </div>
+                <div class="mt-1 text-xs font-semibold text-slate-500">答题中 {{ item.active }} · 已提交 {{ item.submitted }}</div>
+              </div>
+              <div v-if="!assignmentPaperCounts.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">暂无试卷分配</div>
+            </div>
+          </div>
+        </section>
+
         <section v-if="state.route === 'proctor'" class="mt-6 space-y-5">
           <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <div class="flex items-start justify-between gap-4">
               <div>
                 <h1 class="text-3xl font-black">监考工作台</h1>
-                <div class="mt-1 text-sm font-semibold text-slate-500">在当前控制台分配已发布试卷、生成考生入口并监控考试状态</div>
+                <div class="mt-1 text-sm font-semibold text-slate-500">在当前控制台分配已发布试卷、生成测试入口并监控测试状态</div>
               </div>
               <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="refresh">刷新</button>
             </div>
             <div class="mt-5 grid grid-cols-5 gap-3">
-              <div class="rounded-lg bg-cyan-50 p-4"><div class="text-2xl font-black text-ocean">{{ proctorSummary.online }}</div><div class="text-xs font-bold text-slate-500">在线考生</div></div>
+              <div class="rounded-lg bg-cyan-50 p-4"><div class="text-2xl font-black text-ocean">{{ proctorSummary.online }}</div><div class="text-xs font-bold text-slate-500">在线参与者</div></div>
               <div class="rounded-lg bg-rose-50 p-4"><div class="text-2xl font-black text-coral">{{ proctorSummary.highRisk }}</div><div class="text-xs font-bold text-slate-500">高风险</div></div>
               <div class="rounded-lg bg-amber-50 p-4"><div class="text-2xl font-black text-honey">{{ proctorSummary.mediumRisk }}</div><div class="text-xs font-bold text-slate-500">中风险</div></div>
               <div class="rounded-lg bg-indigo-50 p-4"><div class="text-2xl font-black text-iris">{{ assignmentSummary.waiting || 0 }}</div><div class="text-xs font-bold text-slate-500">待开考</div></div>
@@ -1514,96 +2303,20 @@ const app = createApp({
           <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <div class="flex items-center justify-between gap-3">
               <div>
-                <h2 class="text-lg font-black">分配试卷与考生</h2>
-                <div class="mt-1 text-xs font-semibold text-slate-500">选择已发布试卷后，可单人分配、上传 Excel 或批量粘贴名单</div>
-              </div>
-              <button class="flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.assignmentSubmitting || !publishedPapers.length" @click="submitAssignment">
-                <i data-lucide="user-plus" class="h-4 w-4"></i>
-                {{ state.assignmentSubmitting ? '分配中' : '分配' }}
-              </button>
-            </div>
-            <div class="mt-4 grid grid-cols-[1fr_1fr] gap-4">
-              <div class="space-y-3">
-                <div class="grid grid-cols-[1fr_180px_180px] gap-3">
-                  <label class="text-xs font-bold text-slate-600">已发布试卷
-                    <select v-model="state.assignmentForm.paperId" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink">
-                      <option value="" disabled>请选择试卷</option>
-                    <option v-for="item in publishedPapers" :key="item.id" :value="item.id">{{ item.name }} · {{ item.score || 0 }} 分 · {{ item.questionCount || 0 }} 题</option>
-                  </select>
-                </label>
-                <label class="text-xs font-bold text-slate-600">开始时间
-                  <input v-model="state.assignmentForm.startTime" type="datetime-local" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
-                </label>
-                  <label class="text-xs font-bold text-slate-600">结束时间
-                    <input v-model="state.assignmentForm.endTime" type="datetime-local" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
-                  </label>
-                </div>
-                <div class="grid grid-cols-[1fr_1.2fr_1fr] gap-3">
-                  <label class="text-xs font-bold text-slate-600">考生姓名
-                    <input v-model="state.assignmentForm.candidate" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
-                  </label>
-                  <label class="text-xs font-bold text-slate-600">准考证号
-                    <input v-model="state.assignmentForm.ticket" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
-                  </label>
-                  <label class="text-xs font-bold text-slate-600">班级
-                    <input v-model="state.assignmentForm.className" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
-                  </label>
-                </div>
-              </div>
-              <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div class="flex items-center justify-between gap-3">
-                  <div class="text-xs font-black text-slate-600">批量名单</div>
-                  <div class="flex items-center gap-2">
-                    <button class="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700" @click="downloadAssignmentTemplate">
-                      <i data-lucide="download" class="h-3.5 w-3.5"></i>
-                      下载模板
-                    </button>
-                    <label class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700">
-                      <i data-lucide="upload" class="h-3.5 w-3.5"></i>
-                      上传 Excel
-                      <input class="sr-only" type="file" accept=".xlsx,.xls,.csv,.tsv" @change="importAssignmentExcel" />
-                    </label>
-                    <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700" @click="previewAssignments">预览名单</button>
-                  </div>
-                </div>
-                <textarea v-model="state.assignmentForm.batchText" rows="5" class="mt-3 w-full resize-y rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold text-ink" placeholder="姓名,准考证号,班级&#10;李同学,202606240001,一班"></textarea>
-                <div class="mt-2 text-xs font-semibold text-slate-500">
-                  <span v-if="state.assignmentPreview">可分配 {{ state.assignmentPreview.validCount }} 人，需修正 {{ state.assignmentPreview.invalidCount }} 人</span>
-                  <span v-else>未填写批量名单时，将按上方单个考生分配</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <h2 class="text-lg font-black">试卷分配概览</h2>
-                <div class="mt-1 text-xs font-semibold text-slate-500">查看各试卷分配人数、提交状态和完整风险记录</div>
+                <h2 class="text-lg font-black">风险记录</h2>
+                <div class="mt-1 text-xs font-semibold text-slate-500">查看测试过程中的完整风险与保存、提交事件</div>
               </div>
               <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!proctorEvents.length" @click="exportProctorEvents">
                 <i data-lucide="download" class="h-4 w-4"></i>
                 导出风险记录
               </button>
             </div>
-            <div class="mt-4 grid grid-cols-[0.9fr_1.1fr] gap-4">
-              <div class="space-y-3">
-                <div v-for="item in assignmentPaperCounts" :key="item.paperId || item.paperName" class="rounded-lg bg-slate-50 px-4 py-3">
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="min-w-0 truncate text-sm font-black">{{ item.paperName }}</div>
-                    <div class="text-sm font-black text-ocean">{{ item.assigned }}</div>
-                  </div>
-                  <div class="mt-1 text-xs font-semibold text-slate-500">答题中 {{ item.active }} · 已提交 {{ item.submitted }}</div>
-                </div>
-                <div v-if="!assignmentPaperCounts.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">暂无试卷分配</div>
+            <div class="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div v-for="event in proctorEvents" :key="event.id" class="flex items-center justify-between gap-3 rounded bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                <span class="truncate">{{ event.message }}</span>
+                <span>{{ formatDateTime(event.createdAt) }}</span>
               </div>
-              <div class="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div v-for="event in proctorEvents" :key="event.id" class="flex items-center justify-between gap-3 rounded bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
-                  <span class="truncate">{{ event.message }}</span>
-                  <span>{{ formatDateTime(event.createdAt) }}</span>
-                </div>
-                <div v-if="!proctorEvents.length" class="rounded bg-slate-50 px-3 py-6 text-center text-xs font-bold text-slate-500">暂无风险事件</div>
-              </div>
+              <div v-if="!proctorEvents.length" class="rounded bg-slate-50 px-3 py-6 text-center text-xs font-bold text-slate-500">暂无风险事件</div>
             </div>
           </div>
 
@@ -1625,7 +2338,7 @@ const app = createApp({
               <div class="mt-3 grid grid-cols-3 gap-2">
                 <a :href="'/#/candidate?session=' + encodeURIComponent(item.id)" target="_blank" class="rounded bg-slate-50 px-2 py-1.5 text-center text-xs font-black text-slate-700">进入</a>
                 <button class="rounded bg-slate-50 px-2 py-1.5 text-xs font-black text-slate-700" @click="recordProctorRisk(item.id)">风险</button>
-                <button class="rounded bg-slate-50 px-2 py-1.5 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40" :disabled="item.status === '已提交'" @click="deleteAssignment(item.id)">撤销</button>
+                <button class="rounded bg-slate-50 px-2 py-1.5 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40" :disabled="item.status === '已提交'" @click="askDeleteAssignment(item)">撤销</button>
               </div>
             </div>
           </div>
@@ -1636,11 +2349,11 @@ const app = createApp({
             <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
               <div class="flex items-start justify-between gap-6">
                 <div>
-                  <div class="text-sm font-bold text-ocean">考生会话 {{ state.candidate.session?.id || state.candidate.sessionId }}</div>
+                  <div class="text-sm font-bold text-ocean">测试会话 {{ state.candidate.session?.id || state.candidate.sessionId }}</div>
                   <h1 class="mt-2 text-3xl font-black">{{ state.candidate.exam?.title || '考试加载中' }}</h1>
                   <div class="mt-3 flex flex-wrap gap-2 text-sm font-semibold text-slate-600">
-                    <span class="rounded bg-slate-100 px-3 py-1.5">考生：{{ state.candidate.session?.candidate || '-' }}</span>
-                    <span class="rounded bg-slate-100 px-3 py-1.5">准考证：{{ state.candidate.session?.ticket || '-' }}</span>
+                    <span class="rounded bg-slate-100 px-3 py-1.5">参与者：{{ state.candidate.session?.candidate || '-' }}</span>
+                    <span class="rounded bg-slate-100 px-3 py-1.5">编号：{{ state.candidate.session?.ticket || '-' }}</span>
                     <span class="rounded bg-slate-100 px-3 py-1.5">试卷：{{ state.candidate.paper?.name || state.candidate.session?.paper || '-' }}</span>
                     <span class="rounded bg-slate-100 px-3 py-1.5">时段：{{ state.candidate.session?.time || '-' }}</span>
                     <span class="rounded bg-slate-100 px-3 py-1.5">总分：{{ state.candidate.paper?.score || state.candidate.exam?.totalScore || 0 }}</span>
@@ -1838,6 +2551,231 @@ const app = createApp({
           </div>
         </div>
       </div>
+      <div v-if="state.assignmentModalOpen" class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink/40 px-6 py-8">
+        <form class="w-full max-w-2xl rounded-lg bg-white p-5 shadow-soft" @submit.prevent="submitAssignment">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-lg font-black">{{ state.assignmentForm.id ? '编辑试卷分配' : '添加试卷分配' }}</div>
+              <div class="mt-1 text-xs font-semibold text-slate-500">参与者从基础信息中选择，编号与分组自动带入</div>
+            </div>
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700" @click="closeAssignmentModal">关闭</button>
+          </div>
+          <div class="mt-5 grid grid-cols-2 gap-3">
+            <label class="col-span-2 text-xs font-bold text-slate-600">已发布试卷
+              <select v-model="state.assignmentForm.paperId" required class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink">
+                <option value="" disabled>请选择试卷</option>
+                <option v-for="item in publishedPapers" :key="item.id" :value="item.id">{{ item.name }} · {{ item.score || 0 }} 分 · {{ item.questionCount || 0 }} 题</option>
+              </select>
+            </label>
+            <label class="col-span-2 text-xs font-bold text-slate-600">参与者
+              <select v-model="state.assignmentForm.participantTicket" required class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" @change="setAssignmentParticipant(state.assignmentForm.participantTicket)">
+                <option value="" disabled>请选择参与者</option>
+                <option v-for="item in candidates" :key="item.ticket" :value="item.ticket">{{ item.candidate }} · {{ item.ticket }} · {{ item.className || '未分组' }}</option>
+              </select>
+            </label>
+            <label class="text-xs font-bold text-slate-600">开始时间
+              <input v-model="state.assignmentForm.startTime" required type="datetime-local" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
+            </label>
+            <label class="text-xs font-bold text-slate-600">结束时间
+              <input v-model="state.assignmentForm.endTime" required type="datetime-local" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
+            </label>
+            <label class="col-span-2 text-xs font-bold text-slate-600">备注
+              <textarea v-model="state.assignmentForm.remark" rows="4" class="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-6 text-ink" placeholder="选填"></textarea>
+            </label>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="closeAssignmentModal">取消</button>
+            <button type="submit" class="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.assignmentSubmitting">
+              {{ state.assignmentSubmitting ? '保存中' : '保存' }}
+            </button>
+          </div>
+        </form>
+      </div>
+      <div v-if="state.confirmDeleteAssignment" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
+        <div class="w-full max-w-md rounded-lg bg-white p-5 shadow-soft">
+          <div class="text-lg font-black">确认删除试卷分配</div>
+          <div class="mt-2 text-sm font-semibold leading-6 text-slate-600">删除后该参与者的考试会话会被撤销。确认删除「{{ state.confirmDeleteAssignment.candidate }}」的分配吗？</div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="state.confirmDeleteAssignment = null">取消</button>
+            <button class="rounded-lg bg-coral px-4 py-2 text-sm font-bold text-white" @click="confirmDeleteAssignment">确认删除</button>
+          </div>
+        </div>
+      </div>
+      <div v-if="state.confirmDeleteSelectedAssignments" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
+        <div class="w-full max-w-md rounded-lg bg-white p-5 shadow-soft">
+          <div class="text-lg font-black">确认批量删除分配</div>
+          <div class="mt-2 text-sm font-semibold leading-6 text-slate-600">将删除已选择的 {{ state.selectedAssignmentIds.length }} 条试卷分配。已提交的会话会被保留并提示失败。</div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="state.confirmDeleteSelectedAssignments = false">取消</button>
+            <button class="rounded-lg bg-coral px-4 py-2 text-sm font-bold text-white" @click="confirmDeleteSelectedAssignments">确认删除</button>
+          </div>
+        </div>
+      </div>
+      <div v-if="state.viewingParticipant" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
+        <div class="w-full max-w-lg rounded-lg bg-white p-5 shadow-soft">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-lg font-black">参与者详情</div>
+              <div class="mt-1 text-xs font-semibold text-slate-500">来自参与者基础信息</div>
+            </div>
+            <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700" @click="state.viewingParticipant = null">关闭</button>
+          </div>
+          <div class="mt-5 grid grid-cols-[88px_1fr] gap-5">
+            <div>
+              <div class="flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200">
+                <img v-if="state.viewingParticipant.avatar" :src="state.viewingParticipant.avatar" alt="" class="h-full w-full object-cover" />
+                <span v-else class="text-xl font-black text-slate-500">{{ (state.viewingParticipant.candidate || '参').slice(0, 1) }}</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div class="rounded bg-slate-50 px-3 py-2"><div class="text-xs font-bold text-slate-500">姓名</div><div class="mt-1 font-black text-ink">{{ state.viewingParticipant.candidate || '-' }}</div></div>
+              <div class="rounded bg-slate-50 px-3 py-2"><div class="text-xs font-bold text-slate-500">分组</div><div class="mt-1 font-black text-ink">{{ state.viewingParticipant.className || '-' }}</div></div>
+              <div class="rounded bg-slate-50 px-3 py-2"><div class="text-xs font-bold text-slate-500">编号</div><div class="mt-1 font-semibold text-slate-700">{{ state.viewingParticipant.ticket || '-' }}</div></div>
+              <div class="rounded bg-slate-50 px-3 py-2"><div class="text-xs font-bold text-slate-500">手机号</div><div class="mt-1 font-semibold text-slate-700">{{ state.viewingParticipant.phone || '-' }}</div></div>
+              <div class="col-span-2 rounded bg-slate-50 px-3 py-2"><div class="text-xs font-bold text-slate-500">邮箱</div><div class="mt-1 font-semibold text-slate-700">{{ state.viewingParticipant.email || '-' }}</div></div>
+              <div class="col-span-2 rounded bg-slate-50 px-3 py-2"><div class="text-xs font-bold text-slate-500">描述</div><div class="mt-1 font-semibold leading-6 text-slate-700">{{ state.viewingParticipant.description || '无描述' }}</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-if="state.groupModalOpen" class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink/40 px-6 py-8">
+        <form class="w-full max-w-lg rounded-lg bg-white p-5 shadow-soft" @submit.prevent="submitGroup">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-lg font-black">{{ state.groupForm.id ? '编辑分组' : '添加分组' }}</div>
+              <div class="mt-1 text-xs font-semibold text-slate-500">分组名称用于参与者归属，备注可记录用途或范围</div>
+            </div>
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700" @click="closeGroupModal">关闭</button>
+          </div>
+          <div class="mt-5 space-y-3">
+            <label class="block text-xs font-bold text-slate-600">
+              <span class="flex items-center gap-2">分组名称 <span class="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-black text-coral">必填</span></span>
+              <input v-model="state.groupForm.name" required class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" placeholder="请输入分组名称" />
+            </label>
+            <label class="block text-xs font-bold text-slate-600">
+              <span class="flex items-center gap-2">备注信息 <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-500">选填</span></span>
+              <textarea v-model="state.groupForm.description" rows="4" class="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-6 text-ink" placeholder="用于记录分组用途、范围或备注"></textarea>
+            </label>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="closeGroupModal">取消</button>
+            <button type="submit" class="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.groupSubmitting">
+              {{ state.groupSubmitting ? '保存中' : '保存' }}
+            </button>
+          </div>
+        </form>
+      </div>
+      <div v-if="state.confirmDeleteGroup" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
+        <div class="w-full max-w-md rounded-lg bg-white p-5 shadow-soft">
+          <div class="text-lg font-black">确认删除分组</div>
+          <div class="mt-2 text-sm font-semibold leading-6 text-slate-600">删除后该分组会从分组列表中移除。确认删除「{{ state.confirmDeleteGroup.name }}」吗？</div>
+          <div v-if="groupInUse(state.confirmDeleteGroup)" class="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3">
+            <div class="text-xs font-black text-coral">以下分组已被引用，不能删除</div>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <span class="rounded bg-white px-2 py-1 text-xs font-black text-coral ring-1 ring-rose-100">{{ state.confirmDeleteGroup.name }}</span>
+            </div>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="state.confirmDeleteGroup = null">取消</button>
+            <button class="rounded-lg bg-coral px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="groupInUse(state.confirmDeleteGroup)" @click="confirmDeleteGroup">确认删除</button>
+          </div>
+        </div>
+      </div>
+      <div v-if="state.confirmDeleteSelectedGroups" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
+        <div class="w-full max-w-md rounded-lg bg-white p-5 shadow-soft">
+          <div class="text-lg font-black">确认批量删除分组</div>
+          <div class="mt-2 text-sm font-semibold leading-6 text-slate-600">将删除已选择的 {{ state.selectedGroupIds.length }} 个分组。</div>
+          <div v-if="selectedUsedGroups.length" class="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3">
+            <div class="text-xs font-black text-coral">以下分组已被引用，不能批量删除</div>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <span v-for="group in selectedUsedGroups" :key="group.id" class="rounded bg-white px-2 py-1 text-xs font-black text-coral ring-1 ring-rose-100">{{ group.name }}</span>
+            </div>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="state.confirmDeleteSelectedGroups = false">取消</button>
+            <button class="rounded-lg bg-coral px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="selectedUsedGroups.length > 0" @click="confirmDeleteSelectedGroups">确认删除</button>
+          </div>
+        </div>
+      </div>
+      <div v-if="state.participantModalOpen" class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink/40 px-6 py-8">
+        <form class="w-full max-w-2xl rounded-lg bg-white p-5 shadow-soft" @submit.prevent="submitCandidate">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-lg font-black">{{ state.candidateForm.ticket ? '编辑参与者' : '添加参与者' }}</div>
+              <div class="mt-1 text-xs font-semibold text-slate-500">姓名、手机号、分组为必填项，编号保存后由系统生成</div>
+            </div>
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700" @click="closeParticipantModal">关闭</button>
+          </div>
+          <div class="mt-5 grid grid-cols-[120px_1fr] gap-5">
+            <div>
+              <div class="flex items-center gap-2 text-xs font-bold text-slate-600">图片 <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-500">选填</span></div>
+              <div class="mt-2 flex h-24 w-24 items-center justify-center overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200">
+                <img v-if="state.candidateForm.avatar" :src="state.candidateForm.avatar" alt="" class="h-full w-full object-cover" />
+                <i v-else data-lucide="image-plus" class="h-7 w-7 text-slate-400"></i>
+              </div>
+              <label class="mt-3 flex w-24 cursor-pointer items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700">
+                上传
+                <input class="sr-only" type="file" accept="image/*" @change="handleParticipantAvatar" />
+              </label>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <label class="text-xs font-bold text-slate-600">
+                <span class="flex items-center gap-2">姓名 <span class="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-black text-coral">必填</span></span>
+                <input v-model="state.candidateForm.candidate" required class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" placeholder="请输入姓名" />
+              </label>
+              <label class="text-xs font-bold text-slate-600">
+                <span class="flex items-center gap-2">编号 <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-500">自动</span></span>
+                <input :value="state.candidateForm.ticket || '保存后自动生成'" disabled class="mt-2 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-500" />
+              </label>
+              <label class="text-xs font-bold text-slate-600">
+                <span class="flex items-center gap-2">手机号 <span class="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-black text-coral">必填</span></span>
+                <input v-model="state.candidateForm.phone" required class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" placeholder="请输入手机号" />
+              </label>
+              <label class="text-xs font-bold text-slate-600">
+                <span class="flex items-center gap-2">分组 <span class="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-black text-coral">必填</span></span>
+                <select v-model="state.candidateForm.className" required class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink">
+                  <option value="" disabled>请选择分组</option>
+                  <option v-for="group in groups" :key="group.id" :value="group.name">{{ group.name }}</option>
+                </select>
+              </label>
+              <label class="col-span-2 text-xs font-bold text-slate-600">
+                <span class="flex items-center gap-2">邮箱 <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-500">选填</span></span>
+                <input v-model="state.candidateForm.email" type="email" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" placeholder="选填" />
+              </label>
+              <label class="col-span-2 text-xs font-bold text-slate-600">
+                <span class="flex items-center gap-2">描述 <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-500">选填</span></span>
+                <textarea v-model="state.candidateForm.description" rows="4" class="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-6 text-ink" placeholder="选填"></textarea>
+              </label>
+            </div>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="closeParticipantModal">取消</button>
+            <button type="submit" class="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.candidateSubmitting">
+              {{ state.candidateSubmitting ? '保存中' : '保存' }}
+            </button>
+          </div>
+        </form>
+      </div>
+      <div v-if="state.confirmDeleteParticipant" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
+        <div class="w-full max-w-md rounded-lg bg-white p-5 shadow-soft">
+          <div class="text-lg font-black">确认删除参与者</div>
+          <div class="mt-2 text-sm font-semibold leading-6 text-slate-600">删除后该参与者会从基础信息列表中移除。确认删除「{{ state.confirmDeleteParticipant.candidate }}」吗？</div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="state.confirmDeleteParticipant = null">取消</button>
+            <button class="rounded-lg bg-coral px-4 py-2 text-sm font-bold text-white" @click="confirmDeleteParticipant">确认删除</button>
+          </div>
+        </div>
+      </div>
+      <div v-if="state.confirmDeleteSelectedParticipants" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
+        <div class="w-full max-w-md rounded-lg bg-white p-5 shadow-soft">
+          <div class="text-lg font-black">确认批量删除</div>
+          <div class="mt-2 text-sm font-semibold leading-6 text-slate-600">将删除已选择的 {{ state.selectedParticipantTickets.length }} 条参与者信息。该操作需要重新添加才能恢复。</div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="state.confirmDeleteSelectedParticipants = false">取消</button>
+            <button class="rounded-lg bg-coral px-4 py-2 text-sm font-bold text-white" @click="confirmDeleteSelectedParticipants">确认删除</button>
+          </div>
+        </div>
+      </div>
       <div v-if="state.editingQuestion && state.questionEditForm" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
         <form class="w-full max-w-3xl rounded-lg bg-white p-5 shadow-soft" @submit.prevent="saveQuestionEdit">
           <div class="flex items-start justify-between">
@@ -1889,7 +2827,7 @@ app.mount("#app");
 
 function currentRoute() {
   const { route } = parseHashRoute();
-  return ["authoring", "papers", "proctor", "candidate", "analysis"].includes(route) ? route : "home";
+  return ["authoring", "papers", "participants", "assignments", "proctor", "candidate", "analysis"].includes(route) ? route : "home";
 }
 
 function currentAuthoringPaperId() {
@@ -1951,6 +2889,28 @@ function formatDateTime(value) {
   });
 }
 
+function formatDateTimeWithYear(value) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDateOnly(value) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
 function formatDateTimeFull(value) {
   const date = new Date(value);
   if (!value || Number.isNaN(date.getTime())) return "";
@@ -1960,7 +2920,6 @@ function formatDateTimeFull(value) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
   });
 }
 
@@ -1974,51 +2933,6 @@ function proctorEventTypeText(type) {
 
 function parseCandidateFromMessage(message = "") {
   return String(message).split(/[：:]/)[0] || "";
-}
-
-async function readAssignmentWorkbook(file) {
-  const ext = file.name.split(".").pop()?.toLowerCase();
-  const buffer = await file.arrayBuffer();
-  if (window.XLSX && ["xlsx", "xls"].includes(ext)) {
-    const workbook = XLSX.read(buffer, { type: "array" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-    return normalizeAssignmentRows(rows);
-  }
-  const text = new TextDecoder("utf-8").decode(buffer);
-  const rows = text
-    .split(/\r?\n/)
-    .map((line) => line.split(/,|\t/).map((cell) => String(cell || "").trim()))
-    .filter((row) => row.some(Boolean));
-  return normalizeAssignmentRows(rows);
-}
-
-function normalizeAssignmentRows(rows = []) {
-  const cleanRows = rows
-    .map((row) => row.map((cell) => String(cell ?? "").trim()))
-    .filter((row) => row.some(Boolean));
-  if (!cleanRows.length) return [];
-  const header = cleanRows[0].map(normalizeHeader);
-  const hasHeader = header.some((item) => ["candidate", "ticket", "className"].includes(item));
-  const candidateIndex = hasHeader ? header.indexOf("candidate") : 0;
-  const ticketIndex = hasHeader ? header.indexOf("ticket") : 1;
-  const classIndex = hasHeader ? header.indexOf("className") : 2;
-  return cleanRows
-    .slice(hasHeader ? 1 : 0)
-    .map((row) => ({
-      candidate: row[candidateIndex] || "",
-      ticket: row[ticketIndex] || "",
-      className: classIndex >= 0 ? row[classIndex] || "" : "",
-    }))
-    .filter((item) => item.candidate || item.ticket || item.className);
-}
-
-function normalizeHeader(value) {
-  const text = String(value || "").trim().toLowerCase();
-  if (["考生姓名", "姓名", "考生", "name", "candidate"].includes(text)) return "candidate";
-  if (["准考证号", "准考证", "学号", "ticket", "examid", "exam_id"].includes(text)) return "ticket";
-  if (["班级", "班", "class", "classname", "class_name"].includes(text)) return "className";
-  return text;
 }
 
 function downloadExcelTable(sheetName, rows, filename) {

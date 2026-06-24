@@ -63,6 +63,9 @@ async function handleApi(req, res, url) {
       questions: state.questions,
       paper,
       papers: state.papers || [],
+      groups: state.groups || [],
+      participants: state.candidates || [],
+      candidates: state.candidates || [],
       assignments: buildAssignmentSummary(state.sessions, state.papers || []),
       sessions: state.sessions,
       analysis: analyzeExam(state.questions, state.sessions, state.gradingResults, state.paper),
@@ -73,6 +76,124 @@ async function handleApi(req, res, url) {
       proctorEvents: proctorEvents(state.auditLog),
       auditLog: state.auditLog.slice(-8).reverse(),
     });
+    return;
+  }
+
+  if (req.method === "GET" && ["/api/participants", "/api/candidates"].includes(url.pathname)) {
+    sendJson(res, 200, { participants: state.candidates || [], candidates: state.candidates || [] });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/groups") {
+    sendJson(res, 200, { groups: state.groups || [] });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/groups") {
+    const body = await readJson(req);
+    const result = await updateState((current) => createGroup(current, body));
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 201, result);
+    return;
+  }
+
+  if (req.method === "PATCH" && url.pathname.startsWith("/api/groups/")) {
+    const id = decodeURIComponent(url.pathname.split("/").pop());
+    const body = await readJson(req);
+    const result = await updateState((current) => updateGroup(current, id, body));
+    if (!result) {
+      sendJson(res, 404, { error: "Group Not Found" });
+      return;
+    }
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/groups/")) {
+    const id = decodeURIComponent(url.pathname.split("/").pop());
+    const result = await updateState((current) => deleteGroup(current, id));
+    if (!result) {
+      sendJson(res, 404, { error: "Group Not Found" });
+      return;
+    }
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "POST" && ["/api/participants/import-preview", "/api/candidates/import-preview"].includes(url.pathname)) {
+    const body = await readJson(req);
+    sendJson(res, 200, previewCandidateImport(body, state));
+    return;
+  }
+
+  if (req.method === "POST" && ["/api/participants/batch", "/api/candidates/batch"].includes(url.pathname)) {
+    const body = await readJson(req);
+    const result = await updateState((current) => createCandidateBatch(current, body));
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 201, result);
+    return;
+  }
+
+  if (req.method === "POST" && ["/api/participants", "/api/candidates"].includes(url.pathname)) {
+    const body = await readJson(req);
+    const result = await updateState((current) => createCandidateBatch(current, { candidates: [body] }));
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 201, result.candidates[0]);
+    return;
+  }
+
+  if (req.method === "PATCH" && (url.pathname.startsWith("/api/participants/") || url.pathname.startsWith("/api/candidates/"))) {
+    const ticket = decodeURIComponent(url.pathname.split("/").pop());
+    const body = await readJson(req);
+    const result = await updateState((current) => updateCandidate(current, ticket, body));
+    if (!result) {
+      sendJson(res, 404, { error: "Participant Not Found" });
+      return;
+    }
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/participants/delete-batch") {
+    const body = await readJson(req);
+    const result = await updateState((current) => deleteCandidateBatch(current, body.tickets || body.ids || []));
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "DELETE" && (url.pathname.startsWith("/api/participants/") || url.pathname.startsWith("/api/candidates/"))) {
+    const ticket = decodeURIComponent(url.pathname.split("/").pop());
+    const result = await updateState((current) => deleteCandidate(current, ticket));
+    if (!result) {
+      sendJson(res, 404, { error: "Participant Not Found" });
+      return;
+    }
+    sendJson(res, 200, result);
     return;
   }
 
@@ -121,6 +242,17 @@ async function handleApi(req, res, url) {
       sendJson(res, 404, { error: "Session Not Found" });
       return;
     }
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/assignments/delete-batch") {
+    const body = await readJson(req);
+    const result = await updateState((current) => deleteAssignmentBatch(current, body.ids || body.sessionIds || []));
     if (result.error) {
       sendJson(res, result.statusCode || 409, result);
       return;
@@ -622,16 +754,79 @@ function publishedPaperOptions(state) {
   return snapshots;
 }
 
+function groupNameSet(state = {}) {
+  return new Set((state.groups || []).map((item) => item.name));
+}
+
+function createGroup(state, body = {}) {
+  state.groups = Array.isArray(state.groups) ? state.groups : [];
+  const name = String(body.name || "").trim();
+  if (!name) return { error: "分组名称不能为空", statusCode: 400 };
+  if (state.groups.some((item) => item.name === name)) return { error: "分组名称已存在", statusCode: 409 };
+  const now = new Date().toISOString();
+  const group = {
+    id: `group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    description: String(body.description || "").trim(),
+    createdAt: now,
+    updatedAt: null,
+  };
+  state.groups.push(group);
+  state.auditLog.push(logItem("group-create", `新建分组：${group.name}`));
+  return group;
+}
+
+function updateGroup(state, id, body = {}) {
+  state.groups = Array.isArray(state.groups) ? state.groups : [];
+  const group = state.groups.find((item) => item.id === id || item.name === id);
+  if (!group) return null;
+  const nextName = String(body.name ?? group.name).trim();
+  if (!nextName) return { error: "分组名称不能为空", statusCode: 400 };
+  if (state.groups.some((item) => item.id !== group.id && item.name === nextName)) {
+    return { error: "分组名称已存在", statusCode: 409 };
+  }
+  const previousName = group.name;
+  group.name = nextName;
+  group.description = String(body.description ?? group.description ?? "").trim();
+  group.updatedAt = new Date().toISOString();
+  if (previousName !== nextName) {
+    (state.candidates || []).forEach((item) => {
+      if (item.className === previousName) item.className = nextName;
+    });
+    (state.sessions || []).forEach((item) => {
+      if (item.className === previousName) item.className = nextName;
+    });
+  }
+  state.auditLog.push(logItem("group-update", `更新分组：${group.name}`));
+  return group;
+}
+
+function deleteGroup(state, id) {
+  state.groups = Array.isArray(state.groups) ? state.groups : [];
+  const index = state.groups.findIndex((item) => item.id === id || item.name === id);
+  if (index < 0) return null;
+  const group = state.groups[index];
+  if ((state.candidates || []).some((item) => item.className === group.name) || (state.sessions || []).some((item) => item.className === group.name)) {
+    return { error: "分组已被使用，不能删除", statusCode: 409 };
+  }
+  state.groups.splice(index, 1);
+  state.auditLog.push(logItem("group-delete", `删除分组：${group.name}`));
+  return { deleted: true, group };
+}
+
 function previewAssignmentImport(body = {}, state = {}) {
   const candidates = normalizeCandidateRows(body.candidates || body.text || "");
   const existingTickets = new Set((state.sessions || []).map((item) => item.ticket));
+  const groupNames = groupNameSet(state);
   const seen = new Set();
   const rows = candidates.map((candidate, index) => {
     const errors = [];
     if (!candidate.candidate) errors.push("缺少姓名");
-    if (!candidate.ticket) errors.push("缺少准考证号");
-    if (candidate.ticket && existingTickets.has(candidate.ticket)) errors.push("准考证号已存在");
-    if (candidate.ticket && seen.has(candidate.ticket)) errors.push("名单内准考证号重复");
+    if (!candidate.ticket) errors.push("缺少编号");
+    if (!candidate.className) errors.push("请选择分组");
+    if (candidate.className && !groupNames.has(candidate.className)) errors.push("分组不存在");
+    if (candidate.ticket && existingTickets.has(candidate.ticket)) errors.push("编号已存在");
+    if (candidate.ticket && seen.has(candidate.ticket)) errors.push("名单内编号重复");
     if (candidate.ticket) seen.add(candidate.ticket);
     return { ...candidate, row: index + 1, valid: errors.length === 0, errors };
   });
@@ -643,25 +838,162 @@ function previewAssignmentImport(body = {}, state = {}) {
   };
 }
 
+function previewCandidateImport(body = {}, state = {}) {
+  const rows = normalizeCandidateRows(body.candidates || body.text || "");
+  const existingTickets = new Set((state.candidates || []).map((item) => item.ticket));
+  const groupNames = groupNameSet(state);
+  const seen = new Set();
+  const previewRows = rows.map((candidate, index) => {
+    const errors = [];
+    if (!candidate.candidate) errors.push("缺少姓名");
+    if (!candidate.ticket) errors.push("缺少编号");
+    if (!candidate.className) errors.push("请选择分组");
+    if (candidate.className && !groupNames.has(candidate.className)) errors.push("分组不存在");
+    if (candidate.ticket && existingTickets.has(candidate.ticket)) errors.push("编号已存在");
+    if (candidate.ticket && seen.has(candidate.ticket)) errors.push("名单内编号重复");
+    if (candidate.ticket) seen.add(candidate.ticket);
+    return { ...candidate, row: index + 1, valid: errors.length === 0, errors };
+  });
+  return {
+    rows: previewRows,
+    validCount: previewRows.filter((item) => item.valid).length,
+    invalidCount: previewRows.filter((item) => !item.valid).length,
+  };
+}
+
+function createCandidateBatch(state, body = {}) {
+  state.candidates = Array.isArray(state.candidates) ? state.candidates : [];
+  state.groups = Array.isArray(state.groups) ? state.groups : [];
+  const rows = normalizeCandidateRows(body.candidates || body.text || [body]);
+  if (!rows.length) return { error: "没有可添加的参与者", statusCode: 400 };
+
+  const now = new Date().toISOString();
+  const existingTickets = new Set(state.candidates.map((item) => item.ticket));
+  const groupNames = groupNameSet(state);
+  const batchTickets = new Set();
+  const created = [];
+  const skipped = [];
+
+  rows.forEach((candidate, index) => {
+    const errors = [];
+    if (!candidate.candidate) errors.push("参与者姓名不能为空");
+    if (!candidate.phone) errors.push("手机号不能为空");
+    if (!candidate.className) errors.push("请选择分组");
+    if (candidate.className && !groupNames.has(candidate.className)) errors.push("分组不存在");
+    if (!candidate.ticket) candidate.ticket = nextParticipantTicket(state, batchTickets);
+    if (candidate.ticket && existingTickets.has(candidate.ticket)) errors.push("编号已存在");
+    if (candidate.ticket && batchTickets.has(candidate.ticket)) errors.push("名单内编号重复");
+    if (errors.length) {
+      skipped.push({ ...candidate, index, errors });
+      return;
+    }
+
+    batchTickets.add(candidate.ticket);
+    const record = {
+      id: `cand-${candidate.ticket}`,
+      candidate: candidate.candidate,
+      ticket: candidate.ticket,
+      className: candidate.className || "",
+      phone: candidate.phone || "",
+      email: candidate.email || "",
+      description: candidate.description || "",
+      avatar: candidate.avatar || "",
+      tags: [],
+      createdAt: now,
+      updatedAt: null,
+    };
+    state.candidates.push(record);
+    created.push(record);
+  });
+
+  if (!created.length) {
+    return { error: skipped[0]?.errors?.[0] || "没有可添加的参与者", skipped, statusCode: skipped.length ? 409 : 400 };
+  }
+  state.auditLog.push(logItem("candidate-create", `添加 ${created.length} 名参与者${skipped.length ? `，跳过 ${skipped.length} 名` : ""}`));
+  return { candidates: created, skipped };
+}
+
+function updateCandidate(state, ticket, body = {}) {
+  state.candidates = Array.isArray(state.candidates) ? state.candidates : [];
+  const target = String(ticket || "").trim();
+  const participant = state.candidates.find((item) => item.ticket === target || item.id === target);
+  if (!participant) return null;
+  const nextGroup = String(body.className ?? participant.className ?? "").trim();
+  if (!String(body.candidate ?? participant.candidate ?? "").trim()) return { error: "参与者姓名不能为空", statusCode: 400 };
+  if (!String(body.phone ?? participant.phone ?? "").trim()) return { error: "手机号不能为空", statusCode: 400 };
+  if (!nextGroup) return { error: "请选择分组", statusCode: 400 };
+  if (!groupNameSet(state).has(nextGroup)) return { error: "分组不存在", statusCode: 409 };
+  Object.assign(participant, {
+    candidate: String(body.candidate ?? participant.candidate).trim(),
+    className: nextGroup,
+    phone: String(body.phone ?? participant.phone ?? "").trim(),
+    email: String(body.email ?? participant.email ?? "").trim(),
+    description: String(body.description ?? participant.description ?? "").trim(),
+    avatar: String(body.avatar ?? participant.avatar ?? "").trim(),
+    updatedAt: new Date().toISOString(),
+  });
+  state.auditLog.push(logItem("participant-update", `更新参与者：${participant.candidate}`));
+  return participant;
+}
+
+function deleteCandidate(state, ticket) {
+  state.candidates = Array.isArray(state.candidates) ? state.candidates : [];
+  const target = String(ticket || "").trim();
+  const index = state.candidates.findIndex((item) => item.ticket === target || item.id === target);
+  if (index < 0) return null;
+  const [candidate] = state.candidates.splice(index, 1);
+  state.auditLog.push(logItem("candidate-delete", `删除参与者：${candidate.candidate}`));
+  return { deleted: true, candidate };
+}
+
+function deleteCandidateBatch(state, tickets = []) {
+  state.candidates = Array.isArray(state.candidates) ? state.candidates : [];
+  const targets = new Set((Array.isArray(tickets) ? tickets : []).map((item) => String(item || "").trim()).filter(Boolean));
+  if (!targets.size) return { error: "请选择要删除的参与者", statusCode: 400 };
+  const deleted = [];
+  state.candidates = state.candidates.filter((item) => {
+    const match = targets.has(item.ticket) || targets.has(item.id);
+    if (match) deleted.push(item);
+    return !match;
+  });
+  if (!deleted.length) return { error: "未找到可删除的参与者", statusCode: 404 };
+  state.auditLog.push(logItem("participant-delete-batch", `批量删除 ${deleted.length} 名参与者`));
+  return { deleted: true, participants: deleted };
+}
+
+function nextParticipantTicket(state, reserved = new Set()) {
+  const used = new Set([...(state.candidates || []).map((item) => item.ticket), ...(state.sessions || []).map((item) => item.ticket), ...reserved]);
+  let index = used.size + 1;
+  let ticket = "";
+  do {
+    ticket = `P${String(index).padStart(6, "0")}`;
+    index += 1;
+  } while (used.has(ticket));
+  return ticket;
+}
+
 function createAssignmentBatch(state, body = {}) {
   const paper = resolveAssignablePaper(state, body.paperId);
   if (!paper) return { error: "请选择已发布试卷", statusCode: 409 };
   const candidates = normalizeCandidateRows(body.candidates || [body]);
-  if (!candidates.length) return { error: "没有可分配的考生", statusCode: 400 };
+  if (!candidates.length) return { error: "没有可分配的参与者", statusCode: 400 };
 
   const startTime = String(body.startTime || state.exam.windowStart || "10:00").trim();
   const endTime = String(body.endTime || state.exam.windowEnd || "11:30").trim();
   const existingTickets = new Set(state.sessions.map((item) => item.ticket));
+  const groupNames = groupNameSet(state);
   const batchTickets = new Set();
   const created = [];
   const skipped = [];
 
   candidates.forEach((candidate, index) => {
     const errors = [];
-    if (!candidate.candidate) errors.push("考生姓名不能为空");
-    if (!candidate.ticket) errors.push("准考证号不能为空");
-    if (candidate.ticket && existingTickets.has(candidate.ticket)) errors.push("准考证号已存在");
-    if (candidate.ticket && batchTickets.has(candidate.ticket)) errors.push("名单内准考证号重复");
+    if (!candidate.candidate) errors.push("参与者姓名不能为空");
+    if (!candidate.ticket) errors.push("编号不能为空");
+    if (!candidate.className) errors.push("请选择分组");
+    if (candidate.className && !groupNames.has(candidate.className)) errors.push("分组不存在");
+    if (candidate.ticket && existingTickets.has(candidate.ticket)) errors.push("编号已存在");
+    if (candidate.ticket && batchTickets.has(candidate.ticket)) errors.push("名单内编号重复");
     if (errors.length) {
       skipped.push({ ...candidate, index, errors });
       return;
@@ -674,6 +1006,7 @@ function createAssignmentBatch(state, body = {}) {
       paper,
       startTime,
       endTime,
+      remark: body.remark,
     });
     state.sessions.push(session);
     state.answers[session.id] = {};
@@ -681,10 +1014,31 @@ function createAssignmentBatch(state, body = {}) {
   });
 
   if (!created.length) {
-    return { error: skipped[0]?.errors?.[0] || "没有可分配的考生", skipped, statusCode: skipped.length ? 409 : 400 };
+    return { error: skipped[0]?.errors?.[0] || "没有可分配的参与者", skipped, statusCode: skipped.length ? 409 : 400 };
   }
-  state.auditLog.push(logItem("assignment-create", `分配 ${paper.name} 给 ${created.length} 名考生${skipped.length ? `，跳过 ${skipped.length} 名` : ""}`));
+  ensureCandidateRecords(state, candidates.filter((candidate) => created.some((session) => session.ticket === candidate.ticket)));
+  state.auditLog.push(logItem("assignment-create", `分配 ${paper.name} 给 ${created.length} 名参与者${skipped.length ? `，跳过 ${skipped.length} 名` : ""}`));
   return { sessions: created, skipped, summary: buildAssignmentSummary(state.sessions, state.papers || []) };
+}
+
+function ensureCandidateRecords(state, candidates = []) {
+  state.candidates = Array.isArray(state.candidates) ? state.candidates : [];
+  const existingTickets = new Set(state.candidates.map((item) => item.ticket));
+  const now = new Date().toISOString();
+  candidates.forEach((candidate) => {
+    if (!candidate.ticket || existingTickets.has(candidate.ticket)) return;
+    state.candidates.push({
+      id: `cand-${candidate.ticket}`,
+      candidate: candidate.candidate,
+      ticket: candidate.ticket,
+      className: candidate.className || "",
+      phone: candidate.phone || "",
+      tags: [],
+      createdAt: now,
+      updatedAt: null,
+    });
+    existingTickets.add(candidate.ticket);
+  });
 }
 
 function updateAssignment(state, id, body = {}) {
@@ -692,9 +1046,9 @@ function updateAssignment(state, id, body = {}) {
   if (!session) return null;
   if (session.status === "已提交") return { error: "已提交会话不能修改分配", statusCode: 409 };
   const nextTicket = String(body.ticket || session.ticket).trim();
-  if (!nextTicket) return { error: "准考证号不能为空", statusCode: 400 };
+  if (!nextTicket) return { error: "编号不能为空", statusCode: 400 };
   if (state.sessions.some((item) => item.id !== id && item.ticket === nextTicket)) {
-    return { error: "准考证号已存在", ticket: nextTicket, statusCode: 409 };
+    return { error: "编号已存在", ticket: nextTicket, statusCode: 409 };
   }
   const paper = body.paperId ? resolveAssignablePaper(state, body.paperId) : resolveSessionPaper(state, session);
   if (!paper) return { error: "请选择已发布试卷", statusCode: 409 };
@@ -704,6 +1058,7 @@ function updateAssignment(state, id, body = {}) {
     candidate: String(body.candidate || session.candidate).trim(),
     ticket: nextTicket,
     className: body.className ?? session.className,
+    remark: String(body.remark ?? session.remark ?? "").trim(),
     paperId: paper.id,
     paperName: paper.name,
     paper: paper.name,
@@ -727,6 +1082,26 @@ function deleteAssignment(state, id) {
   delete state.gradingResults[id];
   state.auditLog.push(logItem("assignment-delete", `撤销 ${session.candidate} 的考试分配`));
   return { deleted: true, session };
+}
+
+function deleteAssignmentBatch(state, ids = []) {
+  const targets = new Set((Array.isArray(ids) ? ids : []).map((item) => String(item || "").trim()).filter(Boolean));
+  if (!targets.size) return { error: "请选择要删除的试卷分配", statusCode: 400 };
+  const blocked = state.sessions.filter((item) => targets.has(item.id) && item.status === "已提交");
+  if (blocked.length) return { error: "已提交会话不能撤销", blocked, statusCode: 409 };
+  const deleted = [];
+  state.sessions = state.sessions.filter((item) => {
+    const match = targets.has(item.id);
+    if (match) deleted.push(item);
+    return !match;
+  });
+  if (!deleted.length) return { error: "未找到可删除的试卷分配", statusCode: 404 };
+  deleted.forEach((session) => {
+    delete state.answers[session.id];
+    delete state.gradingResults[session.id];
+  });
+  state.auditLog.push(logItem("assignment-delete-batch", `批量撤销 ${deleted.length} 条试卷分配`));
+  return { deleted: true, sessions: deleted };
 }
 
 function upsertPaperSnapshot(state, paper) {
@@ -806,6 +1181,7 @@ function buildAssignedSession(state, assignment) {
     candidate: assignment.candidate,
     ticket: assignment.ticket,
     className: assignment.className || "",
+    remark: String(assignment.remark || "").trim(),
     paperId: assignment.paper.id,
     paperName: assignment.paper.name,
     paper: assignment.paper.name,
@@ -832,8 +1208,8 @@ function normalizeCandidateRows(input) {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const [candidate, ticket, className] = line.split(/[,，\t]/).map((item) => String(item || "").trim());
-        return { candidate, ticket, className: className || "" };
+        const [candidate, ticket, className, phone, email, description] = line.split(/[,，\t]/).map((item) => String(item || "").trim());
+        return { candidate, ticket, className: className || "", phone: phone || "", email: email || "", description: description || "" };
       });
   }
   const rows = Array.isArray(input) ? input : [input];
@@ -842,8 +1218,12 @@ function normalizeCandidateRows(input) {
       candidate: String(item.candidate || item.name || "").trim(),
       ticket: String(item.ticket || "").trim(),
       className: String(item.className || item.class || "").trim(),
+      phone: String(item.phone || item.mobile || "").trim(),
+      email: String(item.email || "").trim(),
+      description: String(item.description || item.remark || "").trim(),
+      avatar: String(item.avatar || "").trim(),
     }))
-    .filter((item) => item.candidate || item.ticket || item.className);
+    .filter((item) => item.candidate || item.ticket || item.className || item.phone || item.email || item.description);
 }
 
 function randomToken() {

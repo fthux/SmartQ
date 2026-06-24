@@ -97,7 +97,7 @@ export const questions = [
   {
     id: "q-007",
     type: "判断",
-    stem: "断线重连时，考试会话应恢复到考生自己的答题状态。",
+    stem: "断线重连时，测试会话应恢复到参与者自己的作答状态。",
     options: ["正确", "错误"],
     answer: "正确",
     score: 3,
@@ -168,14 +168,14 @@ export const questions = [
 ];
 
 export const sessions = [
-  { id: "s-001", candidate: "林同学", ticket: "202606230891", paper: "A 卷", time: "10:00-11:30", remainingMinutes: 42, progress: 46, status: "答题中", risk: "高", events: ["离开页面 3 次"], camera: "在线" },
-  { id: "s-002", candidate: "周同学", ticket: "202606230892", paper: "B 卷", time: "10:15-11:45", remainingMinutes: 57, progress: 40, status: "答题中", risk: "中", events: ["多人声提醒"], camera: "人脸偏移" },
-  { id: "s-003", candidate: "陈同学", ticket: "202606230893", paper: "A 卷", time: "10:00-11:30", remainingMinutes: 43, progress: 46, status: "答题中", risk: "低", events: [], camera: "稳定" },
-  { id: "s-004", candidate: "王同学", ticket: "202606230894", paper: "专项卷", time: "09:45-11:15", remainingMinutes: 27, progress: 51, status: "答题中", risk: "低", events: [], camera: "稳定" },
-  { id: "s-005", candidate: "赵同学", ticket: "202606230895", paper: "B 卷", time: "10:15-11:45", remainingMinutes: 58, progress: 36, status: "答题中", risk: "低", events: ["重连 1 次"], camera: "网络波动" },
-  { id: "s-006", candidate: "吴同学", ticket: "202606230896", paper: "A 卷", time: "10:00-11:30", remainingMinutes: 41, progress: 39, status: "答题中", risk: "低", events: [], camera: "稳定" },
-  { id: "s-007", candidate: "郑同学", ticket: "202606230897", paper: "补考卷", time: "09:00-10:30", remainingMinutes: 0, progress: 100, status: "已提交", risk: "低", events: [], camera: "已提交" },
-  { id: "s-008", candidate: "孙同学", ticket: "202606230898", paper: "专项卷", time: "09:45-11:15", remainingMinutes: 26, progress: 44, status: "答题中", risk: "低", events: [], camera: "稳定" },
+  { id: "s-001", candidate: "参与者 01", ticket: "202606230891", paper: "A 卷", time: "10:00-11:30", remainingMinutes: 42, progress: 46, status: "答题中", risk: "高", events: ["离开页面 3 次"], camera: "在线" },
+  { id: "s-002", candidate: "参与者 02", ticket: "202606230892", paper: "B 卷", time: "10:15-11:45", remainingMinutes: 57, progress: 40, status: "答题中", risk: "中", events: ["多人声提醒"], camera: "人脸偏移" },
+  { id: "s-003", candidate: "参与者 03", ticket: "202606230893", paper: "A 卷", time: "10:00-11:30", remainingMinutes: 43, progress: 46, status: "答题中", risk: "低", events: [], camera: "稳定" },
+  { id: "s-004", candidate: "参与者 04", ticket: "202606230894", paper: "专项卷", time: "09:45-11:15", remainingMinutes: 27, progress: 51, status: "答题中", risk: "低", events: [], camera: "稳定" },
+  { id: "s-005", candidate: "参与者 05", ticket: "202606230895", paper: "B 卷", time: "10:15-11:45", remainingMinutes: 58, progress: 36, status: "答题中", risk: "低", events: ["重连 1 次"], camera: "网络波动" },
+  { id: "s-006", candidate: "参与者 06", ticket: "202606230896", paper: "A 卷", time: "10:00-11:30", remainingMinutes: 41, progress: 39, status: "答题中", risk: "低", events: [], camera: "稳定" },
+  { id: "s-007", candidate: "参与者 07", ticket: "202606230897", paper: "补考卷", time: "09:00-10:30", remainingMinutes: 0, progress: 100, status: "已提交", risk: "低", events: [], camera: "已提交" },
+  { id: "s-008", candidate: "参与者 08", ticket: "202606230898", paper: "专项卷", time: "09:45-11:15", remainingMinutes: 26, progress: 44, status: "答题中", risk: "低", events: [], camera: "稳定" },
 ];
 
 export const answers = new Map([

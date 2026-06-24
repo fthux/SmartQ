@@ -43,11 +43,93 @@ try {
   assert(dashboard.exam.totalScore === 50, "exam total score is 50");
   assert(dashboard.paper.score === 50, "paper score is 50");
   assert(dashboard.questions.length === 12, "dashboard has 12 questions");
+  assert(Array.isArray(dashboard.participants) && dashboard.participants.length >= 1, "dashboard exposes participant information list");
+  assert(Array.isArray(dashboard.groups) && dashboard.groups.length >= 1, "dashboard exposes group list");
+
+  const createdGroup = await postJson("/api/groups", {
+    name: "验证组",
+    description: "验证流程创建的分组",
+  }, { expectedStatus: 201 });
+  assert(createdGroup.name === "验证组", "group creation works");
+  assert(createdGroup.description.includes("验证流程"), "group creation preserves description");
+  const duplicateGroup = await postJson("/api/groups", {
+    name: "验证组",
+  }, { expectedStatus: 409 });
+  assert(duplicateGroup.error.includes("分组"), "group creation rejects duplicate name");
+  const updatedGroup = await patchJson(`/api/groups/${createdGroup.id}`, {
+    name: "验证组",
+    description: "更新后的验证备注",
+  });
+  assert(updatedGroup.description.includes("更新后"), "group update works");
+  const tempGroup = await postJson("/api/groups", {
+    name: "临时组",
+    description: "可删除分组",
+  }, { expectedStatus: 201 });
+  const deletedTempGroup = await deleteJson(`/api/groups/${tempGroup.id}`);
+  assert(deletedTempGroup.deleted === true, "unused group can be deleted");
+  await Promise.all(["A组", "B组", "C组"].map((name) => postJson("/api/groups", { name, description: `${name} 验证分组` }, { expectedStatus: 201 })));
+  const invalidGroupParticipant = await postJson("/api/participants", {
+    candidate: "无效分组参与者",
+    ticket: "202606230000",
+    className: "不存在分组",
+    phone: "13800000000",
+  }, { expectedStatus: 409 });
+  assert(invalidGroupParticipant.error.includes("分组"), "participant creation requires existing group");
+
+  const createdCandidate = await postJson("/api/participants", {
+    candidate: "导入前参与者",
+    className: "验证组",
+    phone: "13800000001",
+    email: "participant@example.com",
+    description: "验证创建的参与者",
+  }, { expectedStatus: 201 });
+  assert(/^P\d{6}$/.test(createdCandidate.ticket), "single participant creation generates ticket");
+  assert(createdCandidate.phone === "13800000001", "single candidate creation preserves phone");
+  assert(createdCandidate.email === "participant@example.com", "single participant creation preserves email");
+  const updatedCandidate = await patchJson(`/api/participants/${createdCandidate.ticket}`, {
+    candidate: "更新后参与者",
+    className: "验证组",
+    phone: "13900000001",
+    email: "updated@example.com",
+    description: "已更新描述",
+    avatar: "data:image/png;base64,AA==",
+  });
+  assert(updatedCandidate.candidate === "更新后参与者", "participant update works");
+  assert(updatedCandidate.email === "updated@example.com", "participant update preserves optional fields");
+  const deleteUsedGroup = await deleteJson(`/api/groups/${createdGroup.id}`, { expectedStatus: 409 });
+  assert(deleteUsedGroup.error.includes("不能删除"), "used group cannot be deleted");
+  const duplicateCandidate = await postJson("/api/participants", {
+    candidate: "重复参与者",
+    ticket: createdCandidate.ticket,
+    className: "验证组",
+    phone: "13800000009",
+  }, { expectedStatus: 409 });
+  assert(duplicateCandidate.error.includes("编号"), "candidate creation rejects duplicate ticket");
+  const candidatePreview = await postJson("/api/participants/import-preview", {
+    text: `预览参与者,202606230002,验证组,13800000002\n重复预览,${createdCandidate.ticket},验证组,13800000003`,
+  });
+  assert(candidatePreview.validCount === 1, "candidate import preview counts valid rows");
+  assert(candidatePreview.invalidCount === 1, "candidate import preview catches duplicate tickets");
+  const candidateBatch = await postJson("/api/participants/batch", {
+    candidates: [
+      { candidate: "批量参与者甲", ticket: "202606230003", className: "验证组", phone: "13800000003" },
+      { candidate: "批量参与者乙", ticket: "202606230004", className: "验证组", phone: "13800000004" },
+    ],
+  }, { expectedStatus: 201 });
+  assert(candidateBatch.candidates.length === 2, "candidate batch import creates candidates");
+  const candidatesAfterBatch = await getJson("/api/participants");
+  assert(candidatesAfterBatch.participants.some((item) => item.ticket === "202606230004"), "participant list returns imported participants");
+  const deletedCandidate = await deleteJson("/api/participants/202606230004");
+  assert(deletedCandidate.deleted === true, "candidate delete works");
+  const batchDeletedCandidate = await postJson("/api/participants/delete-batch", {
+    tickets: ["202606230003"],
+  });
+  assert(batchDeletedCandidate.deleted === true && batchDeletedCandidate.participants.length === 1, "participant batch delete works");
 
   const firstSession = await getJson("/api/candidate/session/s-001");
   const secondSession = await getJson("/api/candidate/session/s-002");
   assert(secondSession.session.id === "s-002", "candidate endpoint loads requested session");
-  assert(secondSession.session.candidate === "周同学", "candidate endpoint returns requested candidate");
+  assert(secondSession.session.candidate === "参与者 02", "candidate endpoint returns requested candidate");
   assert(secondSession.session.paper === "B 卷", "candidate endpoint preserves legacy session label");
   assert(firstSession.questions[0].id === secondSession.questions[0].id, "candidate sessions use the assigned paper order without variant strategy");
   assert(secondSession.questions.reduce((sum, item) => sum + item.score, 0) === 50, "session paper score stays 50");
@@ -166,8 +248,9 @@ try {
   assert(startedSession.status === "答题中", "heartbeat starts existing session after repaper");
 
   const assignedSession = await postJson("/api/proctor/sessions", {
-    candidate: "测试考生",
+    candidate: "测试参与者",
     ticket: "202606239999",
+    className: "验证组",
     paperId: paper.id,
     startTime: "10:30",
     endTime: "12:00",
@@ -178,12 +261,13 @@ try {
   assert(assignedSession.paperName === generationSpec.paperName, "session assignment stores paper name");
   assert(assignedSession.remainingMinutes === 90, "session assignment computes remaining minutes");
   const duplicateTicket = await postJson("/api/proctor/sessions", {
-    candidate: "重复考生",
+    candidate: "重复参与者",
     ticket: "202606239999",
+    className: "验证组",
   }, { expectedStatus: 409 });
-  assert(duplicateTicket.error.includes("准考证号"), "session assignment rejects duplicate ticket");
+  assert(duplicateTicket.error.includes("编号"), "session assignment rejects duplicate ticket");
   const assignedCandidate = await getJson(`/api/candidate/session/${assignedSession.id}`);
-  assert(assignedCandidate.session.candidate === "测试考生", "candidate endpoint loads assigned session");
+  assert(assignedCandidate.session.candidate === "测试参与者", "candidate endpoint loads assigned session");
   assert(assignedCandidate.session.paper === generationSpec.paperName, "assigned session uses selected paper without variant strategy");
   assert(assignedCandidate.paper.id === paper.id, "assigned candidate receives bound paper snapshot");
   assert(assignedCandidate.access.canSubmit === false, "assigned session cannot submit before start");
@@ -203,27 +287,28 @@ try {
     startTime: "10:45",
     endTime: "12:15",
     candidates: [
-      { candidate: "批量甲", ticket: "202606240001", className: "一班" },
-      { candidate: "批量乙", ticket: "202606240002", className: "一班" },
+      { candidate: "批量甲", ticket: "202606240001", className: "A组" },
+      { candidate: "批量乙", ticket: "202606240002", className: "A组" },
     ],
   }, { expectedStatus: 201 });
   assert(batchAssignment.sessions.length === 2, "batch assignment creates candidate sessions");
   assert(batchAssignment.sessions.every((item) => item.paper === generationSpec.paperName), "batch assignment uses selected paper without variants");
   const assignmentPreview = await postJson("/api/assignments/import-preview", {
-    text: "预览甲,202606240003,二班\n预览乙,202606240001,二班",
+    text: "预览甲,202606240003,B组\n预览乙,202606240001,B组",
   });
   assert(assignmentPreview.validCount === 1, "assignment import preview counts valid rows");
   assert(assignmentPreview.invalidCount === 1, "assignment import preview catches duplicate tickets");
   const excelStylePreview = await postJson("/api/assignments/import-preview", {
     candidates: [
-      { candidate: "模板甲", ticket: "202606240011", className: "三班" },
-      { candidate: "模板乙", ticket: "202606240012", className: "三班" },
+      { candidate: "模板甲", ticket: "202606240011", className: "C组" },
+      { candidate: "模板乙", ticket: "202606240012", className: "C组" },
     ],
   });
   assert(excelStylePreview.validCount === 2, "assignment import preview accepts rows parsed from Excel templates");
   const dateTimeAssigned = await postJson("/api/assignments", {
-    candidate: "日期考生",
+    candidate: "日期参与者",
     ticket: "202606240013",
+    className: "B组",
     paperId: paper.id,
     startTime: "2026-06-24T09:00",
     endTime: "2026-06-24T10:30",
@@ -339,8 +424,9 @@ try {
   const secondPaper = await postJson("/api/papers/build", {});
   await postJson("/api/papers/publish", {});
   const secondAssigned = await postJson("/api/assignments", {
-    candidate: "第二卷考生",
+    candidate: "第二卷参与者",
     ticket: "202606240099",
+    className: "C组",
     paperId: secondPaper.id,
     startTime: "13:00",
     endTime: "14:30",

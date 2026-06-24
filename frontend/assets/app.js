@@ -92,6 +92,7 @@ const app = createApp({
         email: "",
         description: "",
         avatar: "",
+        password: "",
       },
       candidateSubmitting: false,
       participantModalOpen: false,
@@ -126,6 +127,13 @@ const app = createApp({
         heartbeatTimer: null,
         loading: false,
         submitting: false,
+        loginPhone: "",
+        loginPassword: "",
+        authToken: localStorage.getItem("smartqCandidateToken") || "",
+        authUser: null,
+        exams: [],
+        loginLoading: false,
+        examsLoading: false,
       },
       spec: { ...defaultSpec },
     });
@@ -347,8 +355,12 @@ const app = createApp({
     function go(route, params = {}) {
       state.route = route;
       if (route === "candidate") {
-        state.candidate.sessionId = params.session || state.candidate.sessionId || "s-001";
-        loadCandidateSession(state.candidate.sessionId).catch((error) => notify(`测试会话加载失败：${error.message}`));
+        state.candidate.sessionId = params.session || state.candidate.sessionId || "";
+        if (params.session) {
+          loadCandidateSession(state.candidate.sessionId).catch((error) => notify(`测试会话加载失败：${error.message}`));
+        } else {
+          loadCandidateExams().catch((error) => notify(`考试列表加载失败：${error.message}`));
+        }
       }
       if (route === "authoring") {
         state.authoringPaperId = params.paperid || params.paperId || params.papeid || "";
@@ -761,6 +773,7 @@ const app = createApp({
         description: String(form.description || "").trim(),
         avatar: String(form.avatar || "").trim(),
       };
+      if (String(form.password || "").trim()) payload.password = String(form.password || "").trim();
       const editing = Boolean(form.ticket);
       state.candidateSubmitting = true;
       try {
@@ -789,6 +802,7 @@ const app = createApp({
         email: participant?.email || "",
         description: participant?.description || "",
         avatar: participant?.avatar || "",
+        password: "",
       });
       state.participantModalOpen = true;
       mountIcons();
@@ -796,7 +810,7 @@ const app = createApp({
 
     function closeParticipantModal() {
       state.participantModalOpen = false;
-      Object.assign(state.candidateForm, { id: "", candidate: "", ticket: "", className: groups.value[0]?.name || "", phone: "", email: "", description: "", avatar: "" });
+      Object.assign(state.candidateForm, { id: "", candidate: "", ticket: "", className: groups.value[0]?.name || "", phone: "", email: "", description: "", avatar: "", password: "" });
     }
 
     async function handleParticipantAvatar(event) {
@@ -1248,19 +1262,78 @@ const app = createApp({
         candidate: participant?.candidate || String(form.candidate || "").trim(),
         ticket: participant?.ticket || String(form.ticket || "").trim(),
         className: participant?.className || String(form.className || "").trim(),
+        phone: participant?.phone || "",
+        email: participant?.email || "",
         remark: String(form.remark || "").trim(),
       };
     }
 
     function copyCandidateUrl(sessionId) {
-      const url = `${window.location.origin}/#/candidate?session=${encodeURIComponent(sessionId)}`;
+      const url = `${window.location.origin}/#/candidate`;
       navigator.clipboard?.writeText(url).catch(() => { });
+    }
+
+    async function loginCandidate() {
+      state.candidate.loginLoading = true;
+      try {
+        const result = await request("/api/candidate/login", {
+          method: "POST",
+          body: JSON.stringify({
+            phone: state.candidate.loginPhone,
+            password: state.candidate.loginPassword,
+          }),
+        });
+        state.candidate.authToken = result.token;
+        state.candidate.authUser = result.candidate;
+        state.candidate.exams = result.exams || [];
+        state.candidate.loginPassword = "";
+        localStorage.setItem("smartqCandidateToken", result.token);
+        notify("登录成功");
+      } catch (error) {
+        notify(`登录失败：${error.message}`);
+      } finally {
+        state.candidate.loginLoading = false;
+        mountIcons();
+      }
+    }
+
+    function logoutCandidate() {
+      state.candidate.authToken = "";
+      state.candidate.authUser = null;
+      state.candidate.exams = [];
+      state.candidate.session = null;
+      state.candidate.questions = [];
+      state.candidate.answers = {};
+      localStorage.removeItem("smartqCandidateToken");
+      notify("已退出考生系统");
+    }
+
+    async function loadCandidateExams() {
+      if (!state.candidate.authToken) return;
+      state.candidate.examsLoading = true;
+      try {
+        const data = await request(`/api/candidate/exams?token=${encodeURIComponent(state.candidate.authToken)}`);
+        state.candidate.authUser = data.candidate;
+        state.candidate.exams = data.exams || [];
+      } catch (error) {
+        localStorage.removeItem("smartqCandidateToken");
+        state.candidate.authToken = "";
+        notify(`考试列表加载失败：${error.message}`);
+      } finally {
+        state.candidate.examsLoading = false;
+      }
+    }
+
+    async function enterCandidateExam(sessionId) {
+      state.candidate.sessionId = sessionId;
+      await loadCandidateSession(sessionId);
     }
 
     async function loadCandidateSession(sessionId = state.candidate.sessionId || "s-001") {
       state.candidate.loading = true;
       try {
-        const data = await request(`/api/candidate/session/${encodeURIComponent(sessionId)}`);
+        const query = state.candidate.authToken ? `?token=${encodeURIComponent(state.candidate.authToken)}` : "";
+        const data = await request(`/api/candidate/session/${encodeURIComponent(sessionId)}${query}`);
         state.candidate.sessionId = sessionId;
         state.candidate.session = data.session;
         state.candidate.exam = data.exam;
@@ -1334,7 +1407,8 @@ const app = createApp({
 
     async function saveCandidateDraft(options = {}) {
       if (!state.candidate.session?.id) return null;
-      const result = await request(`/api/candidate/session/${state.candidate.session.id}`, {
+      const query = state.candidate.authToken ? `?token=${encodeURIComponent(state.candidate.authToken)}` : "";
+      const result = await request(`/api/candidate/session/${state.candidate.session.id}${query}`, {
         method: "POST",
         body: JSON.stringify({ answers: state.candidate.answers, submit: false }),
       });
@@ -1350,7 +1424,8 @@ const app = createApp({
       }
       state.candidate.submitting = true;
       try {
-        const result = await request(`/api/candidate/session/${state.candidate.session.id}`, {
+        const query = state.candidate.authToken ? `?token=${encodeURIComponent(state.candidate.authToken)}` : "";
+        const result = await request(`/api/candidate/session/${state.candidate.session.id}${query}`, {
           method: "POST",
           body: JSON.stringify({ answers: state.candidate.answers, submit: true }),
         });
@@ -1374,7 +1449,8 @@ const app = createApp({
 
     async function sendCandidateHeartbeat(visibility) {
       if (!state.candidate.session?.id) return;
-      const session = await request(`/api/candidate/session/${state.candidate.session.id}/heartbeat`, {
+      const query = state.candidate.authToken ? `?token=${encodeURIComponent(state.candidate.authToken)}` : "";
+      const session = await request(`/api/candidate/session/${state.candidate.session.id}/heartbeat${query}`, {
         method: "POST",
         body: JSON.stringify({ progress: candidateProgress.value, visibility }),
       });
@@ -1481,7 +1557,10 @@ const app = createApp({
         await activatePaper(state.authoringPaperId, { silent: true });
       }
       if (state.route === "candidate") {
-        await loadCandidateSession(state.candidate.sessionId);
+        if (state.candidate.authToken) await loadCandidateExams();
+        if (state.candidate.sessionId) {
+          await loadCandidateSession(state.candidate.sessionId);
+        }
       }
       setInterval(() => refresh().catch(() => { }), 15000);
     });
@@ -1592,6 +1671,10 @@ const app = createApp({
       assignmentProgressText,
       assignmentRiskText,
       recordProctorRisk,
+      loginCandidate,
+      logoutCandidate,
+      loadCandidateExams,
+      enterCandidateExam,
       loadCandidateSession,
       updateCandidateAnswer,
       candidateAnswerSelected,
@@ -2336,7 +2419,7 @@ const app = createApp({
               </div>
               <div class="mt-3 text-xs font-semibold text-slate-500">{{ item.status }} · {{ item.camera }}</div>
               <div class="mt-3 grid grid-cols-3 gap-2">
-                <a :href="'/#/candidate?session=' + encodeURIComponent(item.id)" target="_blank" class="rounded bg-slate-50 px-2 py-1.5 text-center text-xs font-black text-slate-700">进入</a>
+                <a href="/#/candidate" target="_blank" class="rounded bg-slate-50 px-2 py-1.5 text-center text-xs font-black text-slate-700">入口</a>
                 <button class="rounded bg-slate-50 px-2 py-1.5 text-xs font-black text-slate-700" @click="recordProctorRisk(item.id)">风险</button>
                 <button class="rounded bg-slate-50 px-2 py-1.5 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40" :disabled="item.status === '已提交'" @click="askDeleteAssignment(item)">撤销</button>
               </div>
@@ -2344,7 +2427,59 @@ const app = createApp({
           </div>
         </section>
 
-        <section v-if="state.route === 'candidate'" class="mt-6 grid grid-cols-[1fr_360px] items-start gap-5 pb-8">
+        <section v-if="state.route === 'candidate' && !state.candidate.authToken" class="mt-6 flex justify-center">
+          <form class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-soft" @submit.prevent="loginCandidate">
+            <div class="text-sm font-bold text-ocean">考生系统</div>
+            <h1 class="mt-2 text-3xl font-black">手机号登录</h1>
+            <div class="mt-1 text-sm font-semibold text-slate-500">登录后查看已分配的考试</div>
+            <label class="mt-6 block text-xs font-bold text-slate-600">手机号
+              <input v-model="state.candidate.loginPhone" required autocomplete="username" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" placeholder="请输入手机号" />
+            </label>
+            <label class="mt-4 block text-xs font-bold text-slate-600">密码
+              <input v-model="state.candidate.loginPassword" required type="password" autocomplete="current-password" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" placeholder="请输入密码" />
+            </label>
+            <button type="submit" class="mt-6 flex h-11 w-full items-center justify-center rounded-lg bg-ink text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.candidate.loginLoading">
+              {{ state.candidate.loginLoading ? '登录中' : '登录' }}
+            </button>
+          </form>
+        </section>
+
+        <section v-if="state.route === 'candidate' && state.candidate.authToken && !state.candidate.session" class="mt-6 space-y-5">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <div class="text-sm font-bold text-ocean">{{ state.candidate.authUser?.candidate || '考生' }}</div>
+                <h1 class="mt-2 text-3xl font-black">我的考试</h1>
+                <div class="mt-1 text-sm font-semibold text-slate-500">查看当前账号已分配的考试</div>
+              </div>
+              <div class="flex gap-2">
+                <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="loadCandidateExams">刷新</button>
+                <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="logoutCandidate">退出</button>
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-4">
+            <div v-for="exam in state.candidate.exams" :key="exam.id" class="rounded-lg border border-slate-200 bg-white p-4 shadow-soft">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="truncate text-base font-black text-ink">{{ exam.paperName }}</div>
+                  <div class="mt-1 text-xs font-semibold text-slate-500">{{ formatDateTimeFull(exam.startTime) || exam.startTime }} - {{ formatDateTimeFull(exam.endTime) || exam.endTime }}</div>
+                </div>
+                <span class="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-600">{{ exam.status }}</span>
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-2 text-sm">
+                <div class="rounded bg-slate-50 p-2"><div class="font-black">{{ exam.progress || 0 }}%</div><div class="text-xs font-bold text-slate-500">进度</div></div>
+                <div class="rounded bg-slate-50 p-2"><div class="font-black">{{ exam.paperStatus || '-' }}</div><div class="text-xs font-bold text-slate-500">试卷状态</div></div>
+              </div>
+              <button class="mt-4 flex h-10 w-full items-center justify-center rounded-lg bg-ink text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300" :disabled="!exam.canEnter || state.candidate.loading" @click="enterCandidateExam(exam.id)">
+                {{ exam.status === '已提交' ? '已提交' : '进入考试' }}
+              </button>
+            </div>
+            <div v-if="!state.candidate.exams.length" class="col-span-3 rounded-lg border border-dashed border-slate-200 bg-white px-4 py-12 text-center text-sm font-bold text-slate-500">暂无已分配考试</div>
+          </div>
+        </section>
+
+        <section v-if="state.route === 'candidate' && state.candidate.session" class="mt-6 grid grid-cols-[1fr_360px] items-start gap-5 pb-8">
           <div class="space-y-5">
             <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
               <div class="flex items-start justify-between gap-6">
@@ -2359,6 +2494,7 @@ const app = createApp({
                     <span class="rounded bg-slate-100 px-3 py-1.5">总分：{{ state.candidate.paper?.score || state.candidate.exam?.totalScore || 0 }}</span>
                   </div>
                 </div>
+                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700" @click="state.candidate.session = null; state.candidate.questions = []; loadCandidateExams()">我的考试</button>
                 <div class="grid min-w-[360px] grid-cols-3 gap-2">
                   <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"><div class="text-xl font-black">{{ candidateQuestionCount }}</div><div class="text-xs font-semibold text-slate-500">题目</div></div>
                   <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"><div class="text-xl font-black text-leaf">{{ candidateAnsweredCount }}</div><div class="text-xs font-semibold text-slate-500">已答</div></div>
@@ -2743,6 +2879,10 @@ const app = createApp({
                 <input v-model="state.candidateForm.email" type="email" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" placeholder="选填" />
               </label>
               <label class="col-span-2 text-xs font-bold text-slate-600">
+                <span class="flex items-center gap-2">登录密码 <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-500">{{ state.candidateForm.ticket ? '留空不变' : '默认手机号后6位' }}</span></span>
+                <input v-model="state.candidateForm.password" type="password" autocomplete="new-password" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" :placeholder="state.candidateForm.ticket ? '填写后将重置密码' : '不填则使用手机号后6位'" />
+              </label>
+              <label class="col-span-2 text-xs font-bold text-slate-600">
                 <span class="flex items-center gap-2">描述 <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-500">选填</span></span>
                 <textarea v-model="state.candidateForm.description" rows="4" class="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-6 text-ink" placeholder="选填"></textarea>
               </label>
@@ -2837,7 +2977,7 @@ function currentAuthoringPaperId() {
 
 function currentCandidateSessionId() {
   const { route, params } = parseHashRoute();
-  return route === "candidate" ? params.get("session") || "s-001" : "s-001";
+  return route === "candidate" ? params.get("session") || "" : "";
 }
 
 function parseHashRoute() {

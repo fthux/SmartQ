@@ -82,10 +82,12 @@ try {
     phone: "13800000001",
     email: "participant@example.com",
     description: "验证创建的参与者",
+    password: "pass-000001",
   }, { expectedStatus: 201 });
   assert(/^P\d{6}$/.test(createdCandidate.ticket), "single participant creation generates ticket");
   assert(createdCandidate.phone === "13800000001", "single candidate creation preserves phone");
   assert(createdCandidate.email === "participant@example.com", "single participant creation preserves email");
+  assert(createdCandidate.hasPassword === true && !createdCandidate.passwordHash, "participant response exposes password status without hash");
   const updatedCandidate = await patchJson(`/api/participants/${createdCandidate.ticket}`, {
     candidate: "更新后参与者",
     className: "验证组",
@@ -119,6 +121,7 @@ try {
   assert(candidateBatch.candidates.length === 2, "candidate batch import creates candidates");
   const candidatesAfterBatch = await getJson("/api/participants");
   assert(candidatesAfterBatch.participants.some((item) => item.ticket === "202606230004"), "participant list returns imported participants");
+  assert(candidatesAfterBatch.participants.every((item) => !item.passwordHash), "participant list never exposes password hashes");
   const deletedCandidate = await deleteJson("/api/participants/202606230004");
   assert(deletedCandidate.deleted === true, "candidate delete works");
   const batchDeletedCandidate = await postJson("/api/participants/delete-batch", {
@@ -281,6 +284,36 @@ try {
   assert(assignedHeartbeat.status === "答题中", "heartbeat starts assigned session");
   const activeAssignedCandidate = await getJson(`/api/candidate/session/${assignedSession.id}`);
   assert(activeAssignedCandidate.access.canSubmit === true, "active assigned session can submit after paper publish");
+
+  const ownedAssignment = await postJson("/api/assignments", {
+    candidate: updatedCandidate.candidate,
+    ticket: updatedCandidate.ticket,
+    className: updatedCandidate.className,
+    phone: updatedCandidate.phone,
+    paperId: paper.id,
+    startTime: "10:30",
+    endTime: "12:00",
+    remark: "登录验证考试",
+  }, { expectedStatus: 201 });
+  const badLogin = await postJson("/api/candidate/login", {
+    phone: updatedCandidate.phone,
+    password: "wrong-password",
+  }, { expectedStatus: 401 });
+  assert(badLogin.error.includes("错误"), "candidate login rejects bad password");
+  const candidateLogin = await postJson("/api/candidate/login", {
+    phone: updatedCandidate.phone,
+    password: "pass-000001",
+  });
+  assert(candidateLogin.token && candidateLogin.candidate.phone === updatedCandidate.phone, "candidate login returns auth token and candidate");
+  assert(candidateLogin.exams.some((item) => item.id === ownedAssignment.id), "candidate login returns assigned exams");
+  const candidateExams = await getJson(`/api/candidate/exams?token=${encodeURIComponent(candidateLogin.token)}`);
+  assert(candidateExams.exams.some((item) => item.id === ownedAssignment.id), "candidate exams endpoint lists owned assignment");
+  const unauthenticatedOwnedSession = await getJson(`/api/candidate/session/${ownedAssignment.id}`, { expectedStatus: 401 });
+  assert(unauthenticatedOwnedSession.error.includes("登录"), "owned candidate session requires login token");
+  const authorizedSession = await getJson(`/api/candidate/session/${ownedAssignment.id}?token=${encodeURIComponent(candidateLogin.token)}`);
+  assert(authorizedSession.session.id === ownedAssignment.id, "candidate token can access owned session");
+  const forbiddenSession = await getJson(`/api/candidate/session/${assignedSession.id}?token=${encodeURIComponent(candidateLogin.token)}`, { expectedStatus: 403 });
+  assert(forbiddenSession.error.includes("无权"), "candidate token cannot access another participant session");
 
   const batchAssignment = await postJson("/api/assignments/batch", {
     paperId: paper.id,

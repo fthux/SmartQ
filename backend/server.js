@@ -1,4 +1,5 @@
 import "./lib/env.js";
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
@@ -64,8 +65,8 @@ async function handleApi(req, res, url) {
       paper,
       papers: state.papers || [],
       groups: state.groups || [],
-      participants: state.candidates || [],
-      candidates: state.candidates || [],
+      participants: publicCandidates(state.candidates || []),
+      candidates: publicCandidates(state.candidates || []),
       assignments: buildAssignmentSummary(state.sessions, state.papers || []),
       sessions: state.sessions,
       analysis: analyzeExam(state.questions, state.sessions, state.gradingResults, state.paper),
@@ -80,7 +81,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && ["/api/participants", "/api/candidates"].includes(url.pathname)) {
-    sendJson(res, 200, { participants: state.candidates || [], candidates: state.candidates || [] });
+    sendJson(res, 200, { participants: publicCandidates(state.candidates || []), candidates: publicCandidates(state.candidates || []) });
     return;
   }
 
@@ -155,7 +156,7 @@ async function handleApi(req, res, url) {
       sendJson(res, result.statusCode || 409, result);
       return;
     }
-    sendJson(res, 201, result.candidates[0]);
+    sendJson(res, 201, publicCandidate(result.candidates[0]));
     return;
   }
 
@@ -171,7 +172,28 @@ async function handleApi(req, res, url) {
       sendJson(res, result.statusCode || 409, result);
       return;
     }
+    sendJson(res, 200, publicCandidate(result));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/candidate/login") {
+    const body = await readJson(req);
+    const result = await updateState((current) => loginCandidate(current, body));
+    if (result.error) {
+      sendJson(res, result.statusCode || 401, result);
+      return;
+    }
     sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/candidate/exams") {
+    const auth = authenticateCandidate(state, authToken(req, url));
+    if (auth.error) {
+      sendJson(res, auth.statusCode || 401, auth);
+      return;
+    }
+    sendJson(res, 200, candidateExamList(state, auth.candidate));
     return;
   }
 
@@ -566,6 +588,12 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname.startsWith("/api/candidate/session/") && url.pathname.endsWith("/heartbeat")) {
     const id = url.pathname.split("/").at(-2);
     const body = await readJson(req);
+    const targetSession = state.sessions.find((item) => item.id === id);
+    const auth = sessionRequiresCandidateAuth(state, targetSession) || authToken(req, url) ? authenticateCandidate(state, authToken(req, url), id) : null;
+    if (auth?.error) {
+      sendJson(res, auth.statusCode || 401, auth);
+      return;
+    }
     const session = await updateState((current) => {
       const target = current.sessions.find((item) => item.id === id);
       if (!target) return null;
@@ -596,6 +624,11 @@ async function handleApi(req, res, url) {
       sendJson(res, 404, { error: "Session Not Found" });
       return;
     }
+    const auth = sessionRequiresCandidateAuth(state, session) || authToken(req, url) ? authenticateCandidate(state, authToken(req, url), id) : null;
+    if (auth?.error) {
+      sendJson(res, auth.statusCode || 401, auth);
+      return;
+    }
     const assignedPaper = resolveSessionPaper(state, session);
     const paperQuestions = questionsForAssignedSession(state, session);
     const access = buildAccessState(assignedPaper, session);
@@ -616,6 +649,11 @@ async function handleApi(req, res, url) {
     const existingSession = state.sessions.find((item) => item.id === id);
     if (!existingSession) {
       sendJson(res, 404, { error: "Session Not Found" });
+      return;
+    }
+    const auth = sessionRequiresCandidateAuth(state, existingSession) || authToken(req, url) ? authenticateCandidate(state, authToken(req, url), id) : null;
+    if (auth?.error) {
+      sendJson(res, auth.statusCode || 401, auth);
       return;
     }
     const existingPaper = resolveSessionPaper(state, existingSession);
@@ -752,6 +790,19 @@ function publishedPaperOptions(state) {
     return [buildPaper(state.questions, state.paper)];
   }
   return snapshots;
+}
+
+function publicCandidates(candidates = []) {
+  return candidates.map(publicCandidate).filter(Boolean);
+}
+
+function publicCandidate(candidate) {
+  if (!candidate) return null;
+  const { passwordHash, loginToken, loginTokenExpiresAt, ...safe } = candidate;
+  return {
+    ...safe,
+    hasPassword: Boolean(passwordHash),
+  };
 }
 
 function groupNameSet(state = {}) {
@@ -898,6 +949,8 @@ function createCandidateBatch(state, body = {}) {
       email: candidate.email || "",
       description: candidate.description || "",
       avatar: candidate.avatar || "",
+      passwordHash: hashPassword(candidate.password || defaultCandidatePassword(candidate.phone)),
+      passwordUpdatedAt: now,
       tags: [],
       createdAt: now,
       updatedAt: null,
@@ -932,6 +985,12 @@ function updateCandidate(state, ticket, body = {}) {
     avatar: String(body.avatar ?? participant.avatar ?? "").trim(),
     updatedAt: new Date().toISOString(),
   });
+  if (body.password !== undefined && String(body.password || "").trim()) {
+    participant.passwordHash = hashPassword(body.password);
+    participant.passwordUpdatedAt = participant.updatedAt;
+    participant.loginToken = null;
+    participant.loginTokenExpiresAt = null;
+  }
   state.auditLog.push(logItem("participant-update", `更新参与者：${participant.candidate}`));
   return participant;
 }
@@ -1003,6 +1062,8 @@ function createAssignmentBatch(state, body = {}) {
       candidate: candidate.candidate,
       ticket: candidate.ticket,
       className: candidate.className,
+      phone: candidate.phone,
+      email: candidate.email,
       paper,
       startTime,
       endTime,
@@ -1033,6 +1094,11 @@ function ensureCandidateRecords(state, candidates = []) {
       ticket: candidate.ticket,
       className: candidate.className || "",
       phone: candidate.phone || "",
+      email: candidate.email || "",
+      description: candidate.description || "",
+      avatar: candidate.avatar || "",
+      passwordHash: hashPassword(candidate.password || defaultCandidatePassword(candidate.phone)),
+      passwordUpdatedAt: now,
       tags: [],
       createdAt: now,
       updatedAt: null,
@@ -1102,6 +1168,103 @@ function deleteAssignmentBatch(state, ids = []) {
   });
   state.auditLog.push(logItem("assignment-delete-batch", `批量撤销 ${deleted.length} 条试卷分配`));
   return { deleted: true, sessions: deleted };
+}
+
+function loginCandidate(state, body = {}) {
+  state.candidates = Array.isArray(state.candidates) ? state.candidates : [];
+  const phone = String(body.phone || "").trim();
+  const password = String(body.password || "");
+  if (!phone || !password) return { error: "请输入手机号和密码", statusCode: 400 };
+  const candidate = state.candidates.find((item) => item.phone === phone);
+  if (!candidate) return { error: "手机号或密码错误", statusCode: 401 };
+  if (!candidate.passwordHash) {
+    candidate.passwordHash = hashPassword(defaultCandidatePassword(candidate.phone));
+    candidate.passwordUpdatedAt = new Date().toISOString();
+  }
+  if (!verifyPassword(password, candidate.passwordHash)) return { error: "手机号或密码错误", statusCode: 401 };
+  const token = randomToken(32);
+  candidate.loginToken = token;
+  candidate.loginTokenExpiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  candidate.lastLoginAt = new Date().toISOString();
+  state.auditLog.push(logItem("candidate-login", `${candidate.candidate} 登录考生系统`));
+  return {
+    token,
+    expiresAt: candidate.loginTokenExpiresAt,
+    candidate: publicCandidate(candidate),
+    exams: candidateExamList(state, candidate).exams,
+  };
+}
+
+function authenticateCandidate(state, token, sessionId = "") {
+  const value = String(token || "").trim();
+  if (!value) return { error: "请先登录考生系统", statusCode: 401 };
+  const candidate = (state.candidates || []).find((item) => item.loginToken === value);
+  if (!candidate) return { error: "登录已失效，请重新登录", statusCode: 401 };
+  const expiresAt = new Date(candidate.loginTokenExpiresAt || 0).getTime();
+  if (!expiresAt || expiresAt < Date.now()) return { error: "登录已过期，请重新登录", statusCode: 401 };
+  if (sessionId) {
+    const session = (state.sessions || []).find((item) => item.id === sessionId);
+    if (!session) return { error: "Session Not Found", statusCode: 404 };
+    if (session.ticket !== candidate.ticket && session.phone !== candidate.phone) {
+      return { error: "无权访问该考试", statusCode: 403 };
+    }
+  }
+  return { candidate };
+}
+
+function sessionRequiresCandidateAuth(state, session = null) {
+  if (!session) return false;
+  return Boolean(session.phone) && (state.candidates || []).some((candidate) => candidate.phone && candidate.phone === session.phone);
+}
+
+function authToken(req, url) {
+  const header = req.headers.authorization || "";
+  if (header.toLowerCase().startsWith("bearer ")) return header.slice(7).trim();
+  return url.searchParams.get("token") || "";
+}
+
+function candidateExamList(state, candidate) {
+  const exams = (state.sessions || [])
+    .filter((session) => session.ticket === candidate.ticket || session.phone === candidate.phone)
+    .map((session) => {
+      const paper = resolveSessionPaper(state, session);
+      return {
+        id: session.id,
+        candidate: session.candidate,
+        ticket: session.ticket,
+        className: session.className || "",
+        paperId: session.paperId || null,
+        paperName: session.paperName || session.paper || paper.name || "",
+        startTime: session.startTime || "",
+        endTime: session.endTime || "",
+        time: session.time || "",
+        status: session.status || "待开考",
+        progress: Number(session.progress || 0),
+        remark: session.remark || "",
+        canEnter: paper.status === "已发布" && session.status !== "已提交",
+        paperStatus: paper.status,
+      };
+    });
+  return { candidate: publicCandidate(candidate), exams };
+}
+
+function hashPassword(password) {
+  const salt = randomBytes(16).toString("hex");
+  const hash = pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
+  return `pbkdf2$120000$${salt}$${hash}`;
+}
+
+function verifyPassword(password, stored = "") {
+  const [scheme, iterations, salt, hash] = String(stored || "").split("$");
+  if (scheme !== "pbkdf2" || !iterations || !salt || !hash) return false;
+  const computed = pbkdf2Sync(String(password || ""), salt, Number(iterations), 32, "sha256");
+  const expected = Buffer.from(hash, "hex");
+  return expected.length === computed.length && timingSafeEqual(expected, computed);
+}
+
+function defaultCandidatePassword(phone = "") {
+  const digits = String(phone || "").replace(/\D/g, "");
+  return digits.slice(-6) || "123456";
 }
 
 function upsertPaperSnapshot(state, paper) {
@@ -1181,6 +1344,8 @@ function buildAssignedSession(state, assignment) {
     candidate: assignment.candidate,
     ticket: assignment.ticket,
     className: assignment.className || "",
+    phone: assignment.phone || "",
+    email: assignment.email || "",
     remark: String(assignment.remark || "").trim(),
     paperId: assignment.paper.id,
     paperName: assignment.paper.name,
@@ -1208,8 +1373,8 @@ function normalizeCandidateRows(input) {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const [candidate, ticket, className, phone, email, description] = line.split(/[,，\t]/).map((item) => String(item || "").trim());
-        return { candidate, ticket, className: className || "", phone: phone || "", email: email || "", description: description || "" };
+        const [candidate, ticket, className, phone, email, description, password] = line.split(/[,，\t]/).map((item) => String(item || "").trim());
+        return { candidate, ticket, className: className || "", phone: phone || "", email: email || "", description: description || "", password: password || "" };
       });
   }
   const rows = Array.isArray(input) ? input : [input];
@@ -1222,12 +1387,13 @@ function normalizeCandidateRows(input) {
       email: String(item.email || "").trim(),
       description: String(item.description || item.remark || "").trim(),
       avatar: String(item.avatar || "").trim(),
+      password: String(item.password || "").trim(),
     }))
     .filter((item) => item.candidate || item.ticket || item.className || item.phone || item.email || item.description);
 }
 
-function randomToken() {
-  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
+function randomToken(size = 16) {
+  return randomBytes(size).toString("base64url");
 }
 
 function invalidateExamProgress(state, reason) {

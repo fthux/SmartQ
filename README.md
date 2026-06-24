@@ -17,7 +17,7 @@ SmartQ 是一个通用考试 / 测评平台 MVP。当前版本按正式考试流
 
 ## 项目结构
 
-- `frontend/`：运营控制台、考生端页面和前端交互脚本
+- `frontend/`：Vue 单页应用和前端交互脚本
 - `backend/`：Node API 服务、AI 封装、运行时存储和初始数据
 - `scripts/`：端到端验证脚本
 - `Dockerfile` / `docker-compose.yml`：Docker 一键部署配置
@@ -33,7 +33,7 @@ npm start
 打开：
 
 - 运营控制台：http://localhost:3000
-- 考生端：http://localhost:3000/candidate.html
+- 考生端：http://localhost:3000/#/candidate?session=s-001
 - 健康检查：http://localhost:3000/api/health
 
 验证核心流程：

@@ -63,6 +63,7 @@ async function handleApi(req, res, url) {
       questions: state.questions,
       paper,
       papers: state.papers || [],
+      assignments: buildAssignmentSummary(state.sessions, state.papers || []),
       sessions: state.sessions,
       analysis: analyzeExam(state.questions, state.sessions, state.gradingResults, state.paper),
       quality: validateQuestions(state.questions),
@@ -72,6 +73,74 @@ async function handleApi(req, res, url) {
       proctorEvents: proctorEvents(state.auditLog),
       auditLog: state.auditLog.slice(-8).reverse(),
     });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/assignments") {
+    sendJson(res, 200, {
+      sessions: state.sessions,
+      papers: publishedPaperOptions(state),
+      summary: buildAssignmentSummary(state.sessions, state.papers || []),
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/assignments/import-preview") {
+    const body = await readJson(req);
+    sendJson(res, 200, previewAssignmentImport(body, state));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/assignments/batch") {
+    const body = await readJson(req);
+    const result = await updateState((current) => createAssignmentBatch(current, body));
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 201, result);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/assignments") {
+    const body = await readJson(req);
+    const result = await updateState((current) => createAssignmentBatch(current, { ...body, candidates: [body] }));
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 201, result.sessions[0]);
+    return;
+  }
+
+  if (req.method === "PATCH" && url.pathname.startsWith("/api/assignments/")) {
+    const id = url.pathname.split("/").pop();
+    const body = await readJson(req);
+    const result = await updateState((current) => updateAssignment(current, id, body));
+    if (!result) {
+      sendJson(res, 404, { error: "Session Not Found" });
+      return;
+    }
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/assignments/")) {
+    const id = url.pathname.split("/").pop();
+    const result = await updateState((current) => deleteAssignment(current, id));
+    if (!result) {
+      sendJson(res, 404, { error: "Session Not Found" });
+      return;
+    }
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
+      return;
+    }
+    sendJson(res, 200, result);
     return;
   }
 
@@ -333,41 +402,12 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/proctor/sessions") {
     const body = await readJson(req);
-    const created = await updateState((current) => {
-      const candidate = String(body.candidate || "").trim();
-      const ticket = String(body.ticket || "").trim();
-      if (!candidate || !ticket) {
-        return { error: "考生姓名和准考证号不能为空" };
-      }
-      if (current.sessions.some((item) => item.ticket === ticket)) {
-        return { error: "准考证号已存在", ticket };
-      }
-      const startTime = String(body.startTime || current.exam.windowStart || "10:00").trim();
-      const endTime = String(body.endTime || current.exam.windowEnd || "11:30").trim();
-      const session = {
-        id: nextSessionId(current.sessions),
-        candidate,
-        ticket,
-        paper: normalizePaperName(body.paper),
-        time: `${startTime}-${endTime}`,
-        remainingMinutes: minutesBetween(startTime, endTime),
-        progress: 0,
-        status: "待开考",
-        risk: "低",
-        events: [],
-        camera: "待接入",
-        createdAt: new Date().toISOString(),
-      };
-      current.sessions.push(session);
-      current.answers[session.id] = {};
-      current.auditLog.push(logItem("session-create", `${session.candidate} 已分配 ${session.paper}，准考证 ${session.ticket}`));
-      return session;
-    });
-    if (created.error) {
-      sendJson(res, 409, created);
+    const result = await updateState((current) => createAssignmentBatch(current, { ...body, candidates: [body] }));
+    if (result.error) {
+      sendJson(res, result.statusCode || 409, result);
       return;
     }
-    sendJson(res, 201, created);
+    sendJson(res, 201, result.sessions[0]);
     return;
   }
 
@@ -424,12 +464,13 @@ async function handleApi(req, res, url) {
       sendJson(res, 404, { error: "Session Not Found" });
       return;
     }
-    const paperQuestions = paperQuestionsForSession(session, state.questions, state.paper);
-    const access = buildAccessState(state.paper, session);
+    const assignedPaper = resolveSessionPaper(state, session);
+    const paperQuestions = questionsForAssignedSession(state, session);
+    const access = buildAccessState(assignedPaper, session);
     sendJson(res, 200, {
       exam: state.exam,
       session,
-      paper: state.paper,
+      paper: assignedPaper,
       access,
       questions: paperQuestions,
       answers: state.answers[session.id] || {},
@@ -445,8 +486,9 @@ async function handleApi(req, res, url) {
       sendJson(res, 404, { error: "Session Not Found" });
       return;
     }
-    if (body.submit && state.paper.status !== "已发布") {
-      sendJson(res, 409, { error: "试卷尚未发布，不能提交", paperStatus: state.paper.status });
+    const existingPaper = resolveSessionPaper(state, existingSession);
+    if (body.submit && existingPaper.status !== "已发布") {
+      sendJson(res, 409, { error: "试卷尚未发布，不能提交", paperStatus: existingPaper.status });
       return;
     }
     if (existingSession.status === "已提交") {
@@ -463,8 +505,8 @@ async function handleApi(req, res, url) {
       const session = current.sessions.find((item) => item.id === id);
       let grading = null;
       if (session) {
-        const paperQuestions = paperQuestionsForSession(session, current.questions, current.paper);
-        session.progress = Math.round((Object.keys(current.answers[id]).length / paperQuestions.length) * 100);
+        const paperQuestions = questionsForAssignedSession(current, session);
+        session.progress = paperQuestions.length ? Math.round((Object.keys(current.answers[id]).length / paperQuestions.length) * 100) : 0;
         if (!body.submit && session.status === "待开考") session.status = "答题中";
         if (body.submit) {
           session.status = "已提交";
@@ -488,12 +530,13 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/grading/grade") {
     const body = await readJson(req);
-    if (state.paper.status !== "已发布") {
-      sendJson(res, 409, { error: "试卷尚未发布，不能阅卷", paperStatus: state.paper.status });
+    const session = state.sessions.find((item) => item.id === body.sessionId);
+    const gradingPaper = session ? resolveSessionPaper(state, session) : state.paper;
+    if (gradingPaper.status !== "已发布") {
+      sendJson(res, 409, { error: "试卷尚未发布，不能阅卷", paperStatus: gradingPaper.status });
       return;
     }
-    const session = state.sessions.find((item) => item.id === body.sessionId);
-    const gradingQuestions = session ? paperQuestionsForSession(session, state.questions, state.paper) : buildPaper(state.questions, state.paper).questions;
+    const gradingQuestions = session ? questionsForAssignedSession(state, session) : buildPaper(state.questions, state.paper).questions;
     const result = gradeAnswers(body.answers || {}, gradingQuestions);
     if (body.sessionId) {
       await updateState((current) => {
@@ -537,7 +580,6 @@ async function handleApi(req, res, url) {
 function proctorEvents(auditLog = []) {
   return auditLog
     .filter((item) => item.type === "proctor-event" || item.type === "exam-submit" || item.type === "answer-save")
-    .slice(-12)
     .reverse();
 }
 
@@ -548,6 +590,143 @@ function buildGradingQueue(gradingResults = {}) {
     subjectivePending: results.reduce((sum, result) => sum + Number(result.subjectivePending || 0), 0),
     reviewDone: results.filter((result) => result.reviewStatus === "已完成").length,
   };
+}
+
+function buildAssignmentSummary(sessions = [], papers = []) {
+  const publishedIds = new Set((papers || []).filter((item) => item.status === "已发布").map((item) => item.id));
+  const byPaper = sessions.reduce((acc, session) => {
+    const key = session.paperId || session.paperName || session.paper || "未绑定试卷";
+    const label = session.paperName || session.paper || key;
+    const current = acc.get(key) || { paperId: session.paperId || null, paperName: label, assigned: 0, active: 0, submitted: 0 };
+    current.assigned += 1;
+    if (session.status === "答题中") current.active += 1;
+    if (session.status === "已提交") current.submitted += 1;
+    acc.set(key, current);
+    return acc;
+  }, new Map());
+  return {
+    assigned: sessions.length,
+    publishedPapers: publishedIds.size,
+    waiting: sessions.filter((item) => item.status === "待开考").length,
+    active: sessions.filter((item) => item.status === "答题中").length,
+    submitted: sessions.filter((item) => item.status === "已提交").length,
+    byPaper: [...byPaper.values()],
+  };
+}
+
+function publishedPaperOptions(state) {
+  const snapshots = (state.papers || []).filter((item) => item.status === "已发布");
+  if (!snapshots.length && state.paper.status === "已发布") {
+    return [buildPaper(state.questions, state.paper)];
+  }
+  return snapshots;
+}
+
+function previewAssignmentImport(body = {}, state = {}) {
+  const candidates = normalizeCandidateRows(body.candidates || body.text || "");
+  const existingTickets = new Set((state.sessions || []).map((item) => item.ticket));
+  const seen = new Set();
+  const rows = candidates.map((candidate, index) => {
+    const errors = [];
+    if (!candidate.candidate) errors.push("缺少姓名");
+    if (!candidate.ticket) errors.push("缺少准考证号");
+    if (candidate.ticket && existingTickets.has(candidate.ticket)) errors.push("准考证号已存在");
+    if (candidate.ticket && seen.has(candidate.ticket)) errors.push("名单内准考证号重复");
+    if (candidate.ticket) seen.add(candidate.ticket);
+    return { ...candidate, row: index + 1, valid: errors.length === 0, errors };
+  });
+  return {
+    rows,
+    validCount: rows.filter((item) => item.valid).length,
+    invalidCount: rows.filter((item) => !item.valid).length,
+    papers: publishedPaperOptions(state),
+  };
+}
+
+function createAssignmentBatch(state, body = {}) {
+  const paper = resolveAssignablePaper(state, body.paperId);
+  if (!paper) return { error: "请选择已发布试卷", statusCode: 409 };
+  const candidates = normalizeCandidateRows(body.candidates || [body]);
+  if (!candidates.length) return { error: "没有可分配的考生", statusCode: 400 };
+
+  const startTime = String(body.startTime || state.exam.windowStart || "10:00").trim();
+  const endTime = String(body.endTime || state.exam.windowEnd || "11:30").trim();
+  const existingTickets = new Set(state.sessions.map((item) => item.ticket));
+  const batchTickets = new Set();
+  const created = [];
+  const skipped = [];
+
+  candidates.forEach((candidate, index) => {
+    const errors = [];
+    if (!candidate.candidate) errors.push("考生姓名不能为空");
+    if (!candidate.ticket) errors.push("准考证号不能为空");
+    if (candidate.ticket && existingTickets.has(candidate.ticket)) errors.push("准考证号已存在");
+    if (candidate.ticket && batchTickets.has(candidate.ticket)) errors.push("名单内准考证号重复");
+    if (errors.length) {
+      skipped.push({ ...candidate, index, errors });
+      return;
+    }
+    batchTickets.add(candidate.ticket);
+    const session = buildAssignedSession(state, {
+      candidate: candidate.candidate,
+      ticket: candidate.ticket,
+      className: candidate.className,
+      paper,
+      startTime,
+      endTime,
+    });
+    state.sessions.push(session);
+    state.answers[session.id] = {};
+    created.push(session);
+  });
+
+  if (!created.length) {
+    return { error: skipped[0]?.errors?.[0] || "没有可分配的考生", skipped, statusCode: skipped.length ? 409 : 400 };
+  }
+  state.auditLog.push(logItem("assignment-create", `分配 ${paper.name} 给 ${created.length} 名考生${skipped.length ? `，跳过 ${skipped.length} 名` : ""}`));
+  return { sessions: created, skipped, summary: buildAssignmentSummary(state.sessions, state.papers || []) };
+}
+
+function updateAssignment(state, id, body = {}) {
+  const session = state.sessions.find((item) => item.id === id);
+  if (!session) return null;
+  if (session.status === "已提交") return { error: "已提交会话不能修改分配", statusCode: 409 };
+  const nextTicket = String(body.ticket || session.ticket).trim();
+  if (!nextTicket) return { error: "准考证号不能为空", statusCode: 400 };
+  if (state.sessions.some((item) => item.id !== id && item.ticket === nextTicket)) {
+    return { error: "准考证号已存在", ticket: nextTicket, statusCode: 409 };
+  }
+  const paper = body.paperId ? resolveAssignablePaper(state, body.paperId) : resolveSessionPaper(state, session);
+  if (!paper) return { error: "请选择已发布试卷", statusCode: 409 };
+  const startTime = String(body.startTime || session.startTime || session.time?.split("-")[0] || state.exam.windowStart || "10:00").trim();
+  const endTime = String(body.endTime || session.endTime || session.time?.split("-")[1] || state.exam.windowEnd || "11:30").trim();
+  Object.assign(session, {
+    candidate: String(body.candidate || session.candidate).trim(),
+    ticket: nextTicket,
+    className: body.className ?? session.className,
+    paperId: paper.id,
+    paperName: paper.name,
+    paper: paper.name,
+    paperSnapshotVersion: paper.publishedAt || paper.createdAt || null,
+    startTime,
+    endTime,
+    time: `${startTime}-${endTime}`,
+    remainingMinutes: minutesBetween(startTime, endTime),
+  });
+  state.auditLog.push(logItem("assignment-update", `${session.candidate} 分配信息已更新`));
+  return session;
+}
+
+function deleteAssignment(state, id) {
+  const index = state.sessions.findIndex((item) => item.id === id);
+  if (index < 0) return null;
+  const session = state.sessions[index];
+  if (session.status === "已提交") return { error: "已提交会话不能撤销", statusCode: 409 };
+  state.sessions.splice(index, 1);
+  delete state.answers[id];
+  delete state.gradingResults[id];
+  state.auditLog.push(logItem("assignment-delete", `撤销 ${session.candidate} 的考试分配`));
+  return { deleted: true, session };
 }
 
 function upsertPaperSnapshot(state, paper) {
@@ -579,6 +758,96 @@ function paperSnapshotDetail(paper, sourceQuestions = []) {
     ...paper,
     questions,
   };
+}
+
+function resolveAssignablePaper(state, paperId) {
+  const papers = publishedPaperOptions(state);
+  if (!papers.length) return null;
+  const target = paperId ? papers.find((item) => item.id === paperId) : papers[0];
+  return target && target.status === "已发布" ? paperSnapshotDetail(target, state.questions) : null;
+}
+
+function resolveSessionPaper(state, session = {}) {
+  if (session.paperId) {
+    const target = (state.papers || []).find((item) => item.id === session.paperId);
+    if (target) return paperSnapshotDetail(target, state.questions);
+    return {
+      id: session.paperId,
+      name: session.paperName || session.paper || "已删除试卷",
+      status: null,
+      score: 0,
+      questionCount: 0,
+      questionIds: [],
+      questions: [],
+    };
+  }
+  if (Array.isArray(state.questions) && state.questions.length) return buildPaper(state.questions, state.paper);
+  return {
+    id: session.paperId || null,
+    name: session.paperName || session.paper || "",
+    status: null,
+    score: 0,
+    questionCount: 0,
+    questionIds: [],
+    questions: [],
+  };
+}
+
+function questionsForAssignedSession(state, session = {}) {
+  const paper = resolveSessionPaper(state, session);
+  const sourceQuestions = Array.isArray(paper.questions) && paper.questions.length ? paper.questions : state.questions;
+  return paperQuestionsForSession({ ...session, paper: "A 卷" }, sourceQuestions, paper);
+}
+
+function buildAssignedSession(state, assignment) {
+  const id = nextSessionId(state.sessions);
+  return {
+    id,
+    candidate: assignment.candidate,
+    ticket: assignment.ticket,
+    className: assignment.className || "",
+    paperId: assignment.paper.id,
+    paperName: assignment.paper.name,
+    paper: assignment.paper.name,
+    paperSnapshotVersion: assignment.paper.publishedAt || assignment.paper.createdAt || null,
+    time: `${assignment.startTime}-${assignment.endTime}`,
+    startTime: assignment.startTime,
+    endTime: assignment.endTime,
+    remainingMinutes: minutesBetween(assignment.startTime, assignment.endTime),
+    progress: 0,
+    status: "待开考",
+    risk: "低",
+    events: [],
+    camera: "待接入",
+    accessToken: randomToken(),
+    assignedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function normalizeCandidateRows(input) {
+  if (typeof input === "string") {
+    return input
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [candidate, ticket, className] = line.split(/[,，\t]/).map((item) => String(item || "").trim());
+        return { candidate, ticket, className: className || "" };
+      });
+  }
+  const rows = Array.isArray(input) ? input : [input];
+  return rows
+    .map((item) => ({
+      candidate: String(item.candidate || item.name || "").trim(),
+      ticket: String(item.ticket || "").trim(),
+      className: String(item.className || item.class || "").trim(),
+    }))
+    .filter((item) => item.candidate || item.ticket || item.className);
+}
+
+function randomToken() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
 }
 
 function invalidateExamProgress(state, reason) {
@@ -627,26 +896,27 @@ function buildAccessMessage(published, active, submitted) {
 }
 
 function nextSessionId(sessions = []) {
-  const max = sessions.reduce((value, item) => {
-    const match = String(item.id || "").match(/s-(\d+)/);
-    return match ? Math.max(value, Number(match[1])) : value;
-  }, 0);
-  return `s-${String(max + 1).padStart(3, "0")}`;
-}
-
-function normalizePaperName(value) {
-  return ["A 卷", "B 卷", "专项卷", "补考卷"].includes(value) ? value : "A 卷";
+  let id = "";
+  do {
+    id = `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  } while (sessions.some((item) => item.id === id));
+  return id;
 }
 
 function minutesBetween(start, end) {
-  const startMinutes = parseClock(start);
-  const endMinutes = parseClock(end);
+  const startMinutes = parseTimePoint(start);
+  const endMinutes = parseTimePoint(end);
   if (endMinutes <= startMinutes) return 0;
   return endMinutes - startMinutes;
 }
 
-function parseClock(value) {
-  const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+function parseTimePoint(value) {
+  const text = String(value || "").trim();
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime()) && /T|\d{4}-\d{2}-\d{2}/.test(text)) {
+    return Math.round(date.getTime() / 60000);
+  }
+  const match = text.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return 0;
   return Number(match[1]) * 60 + Number(match[2]);
 }

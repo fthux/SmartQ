@@ -79,7 +79,7 @@ function normalizeState(input) {
   return {
     exam: input.exam || exam,
     questions: Array.isArray(input.questions) ? input.questions : questions,
-    sessions: Array.isArray(input.sessions) ? input.sessions : sessions,
+    sessions: (Array.isArray(input.sessions) ? input.sessions : sessions).map(normalizeSession),
     answers: input.answers && typeof input.answers === "object" ? input.answers : Object.fromEntries(answers.entries()),
     paper: {
       id: input.paper?.id || null,
@@ -93,6 +93,24 @@ function normalizeState(input) {
     generationTask: input.generationTask || null,
     gradingResults: input.gradingResults && typeof input.gradingResults === "object" ? input.gradingResults : {},
     auditLog: Array.isArray(input.auditLog) ? input.auditLog : [],
+  };
+}
+
+function normalizeSession(item) {
+  const time = item.time || `${item.startTime || "10:00"}-${item.endTime || "11:30"}`;
+  const [startTime = "10:00", endTime = "11:30"] = String(time).split("-");
+  return {
+    ...item,
+    paper: item.paperName || item.paper || "未绑定试卷",
+    paperId: item.paperId || null,
+    paperName: item.paperName || item.paper || "未绑定试卷",
+    paperVariant: item.paperVariant || null,
+    paperSnapshotVersion: item.paperSnapshotVersion || null,
+    startTime: item.startTime || startTime,
+    endTime: item.endTime || endTime,
+    time,
+    accessToken: item.accessToken || null,
+    assignedAt: item.assignedAt || item.createdAt || null,
   };
 }
 

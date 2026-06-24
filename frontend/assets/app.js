@@ -66,6 +66,31 @@ const app = createApp({
       questionEditForm: null,
       editingPaperId: null,
       authoringPaperId: currentAuthoringPaperId(),
+      assignmentForm: {
+        paperId: "",
+        startTime: defaultDateTimeLocal(10, 0),
+        endTime: defaultDateTimeLocal(11, 30),
+        candidate: "新考生",
+        ticket: "202606239999",
+        className: "一班",
+        batchText: "",
+      },
+      assignmentPreview: null,
+      assignmentSubmitting: false,
+      candidate: {
+        sessionId: currentCandidateSessionId(),
+        session: null,
+        exam: null,
+        paper: null,
+        access: null,
+        questions: [],
+        answers: {},
+        saveState: "未同步",
+        autosaveTimer: null,
+        heartbeatTimer: null,
+        loading: false,
+        submitting: false,
+      },
       spec: { ...defaultSpec },
     });
 
@@ -83,6 +108,7 @@ const app = createApp({
     const analysis = computed(() => state.dashboard?.analysis || {});
     const sessions = computed(() => state.dashboard?.sessions || []);
     const papers = computed(() => state.dashboard?.papers || []);
+    const publishedPapers = computed(() => papers.value.filter((item) => item.status === "已发布"));
     const gradingQueue = computed(() => state.dashboard?.gradingQueue || {});
     const isEditingPaper = computed(() => state.route === "authoring" && Boolean(state.authoringPaperId));
     const authoringPaperReady = computed(() => !isEditingPaper.value || paper.value.id === state.authoringPaperId);
@@ -221,6 +247,16 @@ const app = createApp({
         latest: riskRows.slice(0, 4),
       };
     });
+    const assignmentSummary = computed(() => state.dashboard?.assignments || {});
+    const assignmentPaperCounts = computed(() => assignmentSummary.value.byPaper || []);
+    const proctorEvents = computed(() => state.dashboard?.proctorEvents || state.dashboard?.auditLog || []);
+    const candidateAnsweredCount = computed(() => Object.keys(state.candidate.answers || {}).length);
+    const candidateQuestionCount = computed(() => state.candidate.questions.length);
+    const candidateProgress = computed(() => {
+      if (!candidateQuestionCount.value) return 0;
+      return Math.round((candidateAnsweredCount.value / candidateQuestionCount.value) * 100);
+    });
+    const candidateMissingCount = computed(() => Math.max(0, candidateQuestionCount.value - candidateAnsweredCount.value));
 
     async function refresh() {
       state.loading = true;
@@ -228,6 +264,9 @@ const app = createApp({
         const [dashboard, config] = await Promise.all([request("/api/dashboard"), request("/api/config")]);
         state.dashboard = dashboard;
         state.config = config;
+        if (!state.assignmentForm.paperId) {
+          state.assignmentForm.paperId = (dashboard.papers || []).find((item) => item.status === "已发布")?.id || "";
+        }
       } catch (error) {
         notify(`数据加载失败：${error.message}`);
       } finally {
@@ -238,6 +277,10 @@ const app = createApp({
 
     function go(route, params = {}) {
       state.route = route;
+      if (route === "candidate") {
+        state.candidate.sessionId = params.session || state.candidate.sessionId || "s-001";
+        loadCandidateSession(state.candidate.sessionId).catch((error) => notify(`考生会话加载失败：${error.message}`));
+      }
       if (route === "authoring") {
         state.authoringPaperId = params.paperid || params.paperId || params.papeid || "";
         state.editingPaperId = state.authoringPaperId || null;
@@ -617,6 +660,261 @@ const app = createApp({
       notify(`${sessionId} 主观题复核完成`);
     }
 
+    async function submitAssignment() {
+      const payload = readAssignmentForm();
+      state.assignmentSubmitting = true;
+      try {
+        const endpoint = Array.isArray(payload.candidates) ? "/api/assignments/batch" : "/api/assignments";
+        const result = await request(endpoint, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        await refresh();
+        state.assignmentPreview = null;
+        const firstSession = Array.isArray(result.sessions) ? result.sessions[0] : result;
+        if (firstSession?.id) copyCandidateUrl(firstSession.id);
+        notify(Array.isArray(result.sessions) ? `已分配 ${result.sessions.length} 名考生` : `${firstSession.candidate} 已分配考试`);
+      } catch (error) {
+        notify(`分配失败：${error.message}`);
+      } finally {
+        state.assignmentSubmitting = false;
+      }
+    }
+
+    async function previewAssignments() {
+      try {
+        state.assignmentPreview = await request("/api/assignments/import-preview", {
+          method: "POST",
+          body: JSON.stringify({ text: state.assignmentForm.batchText }),
+        });
+        const invalid = state.assignmentPreview.invalidCount || 0;
+        notify(invalid ? `名单预览：${state.assignmentPreview.validCount} 人可分配，${invalid} 人需修正` : `名单预览：${state.assignmentPreview.validCount} 人可分配`);
+      } catch (error) {
+        notify(`预览失败：${error.message}`);
+      }
+    }
+
+    async function importAssignmentExcel(event) {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      try {
+        const rows = await readAssignmentWorkbook(file);
+        if (!rows.length) {
+          notify("未读取到可导入的考生名单");
+          return;
+        }
+        state.assignmentForm.batchText = rows.map((item) => [item.candidate, item.ticket, item.className].join(",")).join("\n");
+        await previewAssignments();
+        notify(`已导入 ${rows.length} 名考生`);
+      } catch (error) {
+        notify(`导入失败：${error.message}`);
+      }
+    }
+
+    function downloadAssignmentTemplate() {
+      const rows = [
+        { 考生姓名: "张同学", 准考证号: "202606240001", 班级: "一班" },
+        { 考生姓名: "李同学", 准考证号: "202606240002", 班级: "一班" },
+      ];
+      if (window.XLSX) {
+        const worksheet = XLSX.utils.json_to_sheet(rows, { header: ["考生姓名", "准考证号", "班级"] });
+        worksheet["!cols"] = [{ wch: 18 }, { wch: 22 }, { wch: 16 }];
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "考生名单");
+        XLSX.writeFile(workbook, "SmartQ-考生批量分配模板.xlsx");
+        notify("Excel 模板已下载");
+        return;
+      }
+      downloadExcelTable("SmartQ 考生批量分配模板", rows, "SmartQ-考生批量分配模板.xls");
+      notify("Excel 模板已下载");
+    }
+
+    async function deleteAssignment(sessionId) {
+      try {
+        await request(`/api/assignments/${sessionId}`, { method: "DELETE" });
+        await refresh();
+        notify("考试分配已撤销");
+      } catch (error) {
+        notify(`撤销失败：${error.message}`);
+      }
+    }
+
+    async function recordProctorRisk(sessionId) {
+      try {
+        await request(`/api/proctor/sessions/${sessionId}/events`, {
+          method: "POST",
+          body: JSON.stringify({ risk: "高", event: "监考员手动记录风险" }),
+        });
+        await refresh();
+        notify("风险事件已记录");
+      } catch (error) {
+        notify(`记录失败：${error.message}`);
+      }
+    }
+
+    function readAssignmentForm() {
+      const form = state.assignmentForm;
+      const base = {
+        paperId: form.paperId || publishedPapers.value[0]?.id || "",
+        startTime: form.startTime,
+        endTime: form.endTime,
+      };
+      const batchText = String(form.batchText || "").trim();
+      if (batchText) {
+        return {
+          ...base,
+          candidates: parseBatchCandidates(batchText),
+        };
+      }
+      return {
+        ...base,
+        candidate: String(form.candidate || "").trim(),
+        ticket: String(form.ticket || "").trim(),
+        className: String(form.className || "").trim(),
+      };
+    }
+
+    function parseBatchCandidates(text) {
+      return text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [candidate, ticket, className] = line.split(/[,，\t]/).map((item) => String(item || "").trim());
+          return { candidate, ticket, className: className || "" };
+        });
+    }
+
+    function copyCandidateUrl(sessionId) {
+      const url = `${window.location.origin}/#/candidate?session=${encodeURIComponent(sessionId)}`;
+      navigator.clipboard?.writeText(url).catch(() => {});
+    }
+
+    async function loadCandidateSession(sessionId = state.candidate.sessionId || "s-001") {
+      state.candidate.loading = true;
+      try {
+        const data = await request(`/api/candidate/session/${encodeURIComponent(sessionId)}`);
+        state.candidate.sessionId = sessionId;
+        state.candidate.session = data.session;
+        state.candidate.exam = data.exam;
+        state.candidate.paper = data.paper;
+        state.candidate.access = data.access;
+        state.candidate.questions = data.questions || [];
+        state.candidate.answers = data.answers || {};
+        state.candidate.saveState = "已同步";
+        startCandidateHeartbeat();
+      } finally {
+        state.candidate.loading = false;
+        mountIcons();
+      }
+    }
+
+    function updateCandidateAnswer(question, value, checked = true) {
+      if (!question?.id) return;
+      if (question.type === "多选") {
+        const current = Array.isArray(state.candidate.answers[question.id]) ? [...state.candidate.answers[question.id]] : [];
+        const next = checked ? [...new Set([...current, value])] : current.filter((item) => item !== value);
+        if (next.length) state.candidate.answers[question.id] = next.sort();
+        else delete state.candidate.answers[question.id];
+      } else if (value !== undefined && value !== null && String(value).trim()) {
+        state.candidate.answers[question.id] = String(value).trim();
+      } else {
+        delete state.candidate.answers[question.id];
+      }
+      markCandidateAutosavePending();
+    }
+
+    function candidateAnswerSelected(questionId, value) {
+      const answer = state.candidate.answers[questionId];
+      return Array.isArray(answer) ? answer.includes(value) : answer === value;
+    }
+
+    function candidateStatus(question, index) {
+      if (state.candidate.answers[question.id] !== undefined) return "已答";
+      return index === 7 ? "已标记" : "未答";
+    }
+
+    function candidateStatusClass(question, index) {
+      const status = candidateStatus(question, index);
+      if (status === "已答") return "bg-emerald-50 text-emerald-700";
+      if (status === "已标记") return "bg-amber-50 text-amber-700";
+      return "bg-white text-slate-500 ring-1 ring-slate-200";
+    }
+
+    function candidateOptionClass(question, value) {
+      const selected = candidateAnswerSelected(question.id, value);
+      if (!selected) return "border-slate-200 bg-white text-slate-700";
+      if (question.type === "多选") return "border-iris bg-indigo-50 text-iris";
+      return "border-ocean bg-cyan-50 text-ocean";
+    }
+
+    function candidateOptionMarkClass(question, value) {
+      const selected = candidateAnswerSelected(question.id, value);
+      if (selected && question.type === "多选") return "rounded bg-iris text-white";
+      if (selected) return "rounded-full bg-ocean text-white";
+      return question.type === "多选" ? "rounded border border-slate-300" : "rounded-full border border-slate-300";
+    }
+
+    function markCandidateAutosavePending() {
+      state.candidate.saveState = "待保存";
+      clearTimeout(state.candidate.autosaveTimer);
+      state.candidate.autosaveTimer = setTimeout(() => {
+        saveCandidateDraft({ silent: true }).catch(() => {
+          state.candidate.saveState = "保存失败";
+        });
+      }, 1200);
+    }
+
+    async function saveCandidateDraft(options = {}) {
+      if (!state.candidate.session?.id) return null;
+      const result = await request(`/api/candidate/session/${state.candidate.session.id}`, {
+        method: "POST",
+        body: JSON.stringify({ answers: state.candidate.answers, submit: false }),
+      });
+      state.candidate.saveState = `已同步 · ${formatClock(result.savedAt)}`;
+      if (!options.silent) notify("草稿已保存");
+      return result;
+    }
+
+    async function submitCandidateExam() {
+      if (!state.candidate.access?.canSubmit) {
+        notify(state.candidate.access?.message || "当前不能提交");
+        return;
+      }
+      state.candidate.submitting = true;
+      try {
+        const result = await request(`/api/candidate/session/${state.candidate.session.id}`, {
+          method: "POST",
+          body: JSON.stringify({ answers: state.candidate.answers, submit: true }),
+        });
+        const grading = result.grading;
+        notify(grading ? `提交成功，当前自动评分 ${grading.totalScore}/${grading.maxScore}` : "提交成功，已进入阅卷队列");
+        await loadCandidateSession(state.candidate.session.id);
+      } catch (error) {
+        notify(`提交失败：${error.message}`);
+      } finally {
+        state.candidate.submitting = false;
+      }
+    }
+
+    function startCandidateHeartbeat() {
+      if (state.candidate.heartbeatTimer) clearInterval(state.candidate.heartbeatTimer);
+      sendCandidateHeartbeat(document.visibilityState).catch(() => {});
+      state.candidate.heartbeatTimer = setInterval(() => {
+        sendCandidateHeartbeat(document.visibilityState).catch(() => {});
+      }, 15000);
+    }
+
+    async function sendCandidateHeartbeat(visibility) {
+      if (!state.candidate.session?.id) return;
+      const session = await request(`/api/candidate/session/${state.candidate.session.id}/heartbeat`, {
+        method: "POST",
+        body: JSON.stringify({ progress: candidateProgress.value, visibility }),
+      });
+      state.candidate.session = session;
+    }
+
     function readSpec() {
       const typeCounts = {
         single: clampNumber(state.spec.singleCount, 0, 50, 0),
@@ -664,20 +962,60 @@ const app = createApp({
       notify("分析报告已导出");
     }
 
+    function exportProctorEvents() {
+      const rows = proctorEvents.value.map((event, index) => {
+        const session = findSessionForEvent(event);
+        return {
+          序号: index + 1,
+          事件时间: formatDateTimeFull(event.createdAt),
+          事件类型: proctorEventTypeText(event.type),
+          考生: session?.candidate || parseCandidateFromMessage(event.message) || "",
+          准考证号: session?.ticket || "",
+          会话ID: session?.id || "",
+          试卷: session?.paperName || session?.paper || "",
+          当前风险: session?.risk || "",
+          事件内容: event.message || "",
+        };
+      });
+      if (!rows.length) {
+        notify("暂无可导出的风险记录");
+        return;
+      }
+      downloadExcelTable("SmartQ 风险记录", rows, `smartq-risk-events-${dateStamp()}.xls`);
+      notify(`已导出 ${rows.length} 条风险记录`);
+    }
+
+    function findSessionForEvent(event = {}) {
+      const message = String(event.message || "");
+      return sessions.value.find((session) => message.includes(session.id) || message.includes(session.candidate) || message.includes(session.ticket));
+    }
+
     onMounted(async () => {
       window.addEventListener("hashchange", () => {
         state.route = currentRoute();
         state.authoringPaperId = currentAuthoringPaperId();
+        state.candidate.sessionId = currentCandidateSessionId();
         state.editingPaperId = state.route === "authoring" && state.authoringPaperId ? state.authoringPaperId : null;
         if (state.route === "papers") clearSelectedPaper();
+        if (state.route === "candidate") {
+          loadCandidateSession(state.candidate.sessionId).catch((error) => notify(`考生会话加载失败：${error.message}`));
+        }
         if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
           activatePaper(state.authoringPaperId, { silent: true }).catch(() => { });
         }
         mountIcons();
       });
+      document.addEventListener("visibilitychange", () => {
+        if (state.route === "candidate" && document.visibilityState === "hidden") {
+          sendCandidateHeartbeat("hidden").catch(() => { });
+        }
+      });
       await refresh();
       if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
         await activatePaper(state.authoringPaperId, { silent: true });
+      }
+      if (state.route === "candidate") {
+        await loadCandidateSession(state.candidate.sessionId);
       }
       setInterval(() => refresh().catch(() => { }), 15000);
     });
@@ -695,6 +1033,7 @@ const app = createApp({
       analysis,
       sessions,
       papers,
+      publishedPapers,
       paperRows,
       gradingQueue,
       reviewedCount,
@@ -708,6 +1047,14 @@ const app = createApp({
       todos,
       recentPapers,
       proctorSummary,
+      assignmentSummary,
+      assignmentPaperCounts,
+      proctorEvents,
+      candidateAnsweredCount,
+      candidateQuestionCount,
+      candidateProgress,
+      candidateMissingCount,
+      refresh,
       go,
       setWorkflowStep,
       generateDraft,
@@ -726,7 +1073,23 @@ const app = createApp({
       closeQuestionEditor,
       saveQuestionEdit,
       reviewNextGrading,
+      submitAssignment,
+      previewAssignments,
+      importAssignmentExcel,
+      downloadAssignmentTemplate,
+      deleteAssignment,
+      recordProctorRisk,
+      loadCandidateSession,
+      updateCandidateAnswer,
+      candidateAnswerSelected,
+      candidateStatus,
+      candidateStatusClass,
+      candidateOptionClass,
+      candidateOptionMarkClass,
+      saveCandidateDraft,
+      submitCandidateExam,
       exportAnalysis,
+      exportProctorEvents,
       typeClass,
       displayQuestionOptions,
       displayPaperStatus,
@@ -1132,28 +1495,296 @@ const app = createApp({
 
         <section v-if="state.route === 'proctor'" class="mt-6 space-y-5">
           <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-            <h1 class="text-3xl font-black">监考工作台</h1>
-            <div class="mt-1 text-sm font-semibold text-slate-500">同时监控多个在线考生考试状态</div>
-            <div class="mt-5 grid grid-cols-4 gap-3">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h1 class="text-3xl font-black">监考工作台</h1>
+                <div class="mt-1 text-sm font-semibold text-slate-500">在当前控制台分配已发布试卷、生成考生入口并监控考试状态</div>
+              </div>
+              <button class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700" @click="refresh">刷新</button>
+            </div>
+            <div class="mt-5 grid grid-cols-5 gap-3">
               <div class="rounded-lg bg-cyan-50 p-4"><div class="text-2xl font-black text-ocean">{{ proctorSummary.online }}</div><div class="text-xs font-bold text-slate-500">在线考生</div></div>
               <div class="rounded-lg bg-rose-50 p-4"><div class="text-2xl font-black text-coral">{{ proctorSummary.highRisk }}</div><div class="text-xs font-bold text-slate-500">高风险</div></div>
               <div class="rounded-lg bg-amber-50 p-4"><div class="text-2xl font-black text-honey">{{ proctorSummary.mediumRisk }}</div><div class="text-xs font-bold text-slate-500">中风险</div></div>
-              <div class="rounded-lg bg-indigo-50 p-4"><div class="text-2xl font-black text-iris">{{ sessions.length }}</div><div class="text-xs font-bold text-slate-500">考生会话</div></div>
+              <div class="rounded-lg bg-indigo-50 p-4"><div class="text-2xl font-black text-iris">{{ assignmentSummary.waiting || 0 }}</div><div class="text-xs font-bold text-slate-500">待开考</div></div>
+              <div class="rounded-lg bg-emerald-50 p-4"><div class="text-2xl font-black text-leaf">{{ assignmentSummary.submitted || 0 }}</div><div class="text-xs font-bold text-slate-500">已提交</div></div>
             </div>
           </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-black">分配试卷与考生</h2>
+                <div class="mt-1 text-xs font-semibold text-slate-500">选择已发布试卷后，可单人分配、上传 Excel 或批量粘贴名单</div>
+              </div>
+              <button class="flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.assignmentSubmitting || !publishedPapers.length" @click="submitAssignment">
+                <i data-lucide="user-plus" class="h-4 w-4"></i>
+                {{ state.assignmentSubmitting ? '分配中' : '分配' }}
+              </button>
+            </div>
+            <div class="mt-4 grid grid-cols-[1fr_1fr] gap-4">
+              <div class="space-y-3">
+                <div class="grid grid-cols-[1fr_180px_180px] gap-3">
+                  <label class="text-xs font-bold text-slate-600">已发布试卷
+                    <select v-model="state.assignmentForm.paperId" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink">
+                      <option value="" disabled>请选择试卷</option>
+                    <option v-for="item in publishedPapers" :key="item.id" :value="item.id">{{ item.name }} · {{ item.score || 0 }} 分 · {{ item.questionCount || 0 }} 题</option>
+                  </select>
+                </label>
+                <label class="text-xs font-bold text-slate-600">开始时间
+                  <input v-model="state.assignmentForm.startTime" type="datetime-local" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
+                </label>
+                  <label class="text-xs font-bold text-slate-600">结束时间
+                    <input v-model="state.assignmentForm.endTime" type="datetime-local" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
+                  </label>
+                </div>
+                <div class="grid grid-cols-[1fr_1.2fr_1fr] gap-3">
+                  <label class="text-xs font-bold text-slate-600">考生姓名
+                    <input v-model="state.assignmentForm.candidate" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
+                  </label>
+                  <label class="text-xs font-bold text-slate-600">准考证号
+                    <input v-model="state.assignmentForm.ticket" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
+                  </label>
+                  <label class="text-xs font-bold text-slate-600">班级
+                    <input v-model="state.assignmentForm.className" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" />
+                  </label>
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="text-xs font-black text-slate-600">批量名单</div>
+                  <div class="flex items-center gap-2">
+                    <button class="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700" @click="downloadAssignmentTemplate">
+                      <i data-lucide="download" class="h-3.5 w-3.5"></i>
+                      下载模板
+                    </button>
+                    <label class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700">
+                      <i data-lucide="upload" class="h-3.5 w-3.5"></i>
+                      上传 Excel
+                      <input class="sr-only" type="file" accept=".xlsx,.xls,.csv,.tsv" @change="importAssignmentExcel" />
+                    </label>
+                    <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700" @click="previewAssignments">预览名单</button>
+                  </div>
+                </div>
+                <textarea v-model="state.assignmentForm.batchText" rows="5" class="mt-3 w-full resize-y rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold text-ink" placeholder="姓名,准考证号,班级&#10;李同学,202606240001,一班"></textarea>
+                <div class="mt-2 text-xs font-semibold text-slate-500">
+                  <span v-if="state.assignmentPreview">可分配 {{ state.assignmentPreview.validCount }} 人，需修正 {{ state.assignmentPreview.invalidCount }} 人</span>
+                  <span v-else>未填写批量名单时，将按上方单个考生分配</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-black">试卷分配概览</h2>
+                <div class="mt-1 text-xs font-semibold text-slate-500">查看各试卷分配人数、提交状态和完整风险记录</div>
+              </div>
+              <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!proctorEvents.length" @click="exportProctorEvents">
+                <i data-lucide="download" class="h-4 w-4"></i>
+                导出风险记录
+              </button>
+            </div>
+            <div class="mt-4 grid grid-cols-[0.9fr_1.1fr] gap-4">
+              <div class="space-y-3">
+                <div v-for="item in assignmentPaperCounts" :key="item.paperId || item.paperName" class="rounded-lg bg-slate-50 px-4 py-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0 truncate text-sm font-black">{{ item.paperName }}</div>
+                    <div class="text-sm font-black text-ocean">{{ item.assigned }}</div>
+                  </div>
+                  <div class="mt-1 text-xs font-semibold text-slate-500">答题中 {{ item.active }} · 已提交 {{ item.submitted }}</div>
+                </div>
+                <div v-if="!assignmentPaperCounts.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">暂无试卷分配</div>
+              </div>
+              <div class="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div v-for="event in proctorEvents" :key="event.id" class="flex items-center justify-between gap-3 rounded bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                  <span class="truncate">{{ event.message }}</span>
+                  <span>{{ formatDateTime(event.createdAt) }}</span>
+                </div>
+                <div v-if="!proctorEvents.length" class="rounded bg-slate-50 px-3 py-6 text-center text-xs font-bold text-slate-500">暂无风险事件</div>
+              </div>
+            </div>
+          </div>
+
           <div class="grid grid-cols-4 gap-3">
             <div v-for="item in sessions" :key="item.id" class="rounded-lg border border-slate-200 bg-white p-4 shadow-soft">
-              <div class="flex items-start justify-between">
-                <div><div class="text-base font-black">{{ item.candidate }}</div><div class="mt-1 text-xs font-bold text-slate-500">{{ item.ticket }}</div></div>
-                <span class="rounded px-2 py-1 text-xs font-black" :class="item.risk === '高' ? 'bg-rose-50 text-coral' : item.risk === '中' ? 'bg-amber-50 text-honey' : 'bg-emerald-50 text-emerald-700'">{{ item.risk }}</span>
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="truncate text-base font-black">{{ item.candidate }}</div>
+                  <div class="mt-1 truncate text-xs font-bold text-slate-500">{{ item.ticket }}</div>
+                  <div class="mt-1 truncate text-xs font-semibold text-slate-500">{{ item.paperName || item.paper }} · {{ item.time }}</div>
+                </div>
+                <span class="rounded px-2 py-1 text-xs font-black" :class="item.risk === '高' ? 'bg-rose-50 text-coral' : item.risk === '中' ? 'bg-amber-50 text-honey' : 'bg-emerald-50 text-emerald-700'">{{ item.status === '已提交' ? '完' : item.risk }}</span>
               </div>
               <div class="mt-4 grid grid-cols-2 gap-2 text-sm">
                 <div class="rounded bg-slate-50 p-2"><div class="font-black">{{ item.progress }}%</div><div class="text-xs font-bold text-slate-500">进度</div></div>
                 <div class="rounded bg-slate-50 p-2"><div class="font-black">{{ item.remainingMinutes }}</div><div class="text-xs font-bold text-slate-500">分钟</div></div>
               </div>
               <div class="mt-3 text-xs font-semibold text-slate-500">{{ item.status }} · {{ item.camera }}</div>
+              <div class="mt-3 grid grid-cols-3 gap-2">
+                <a :href="'/#/candidate?session=' + encodeURIComponent(item.id)" target="_blank" class="rounded bg-slate-50 px-2 py-1.5 text-center text-xs font-black text-slate-700">进入</a>
+                <button class="rounded bg-slate-50 px-2 py-1.5 text-xs font-black text-slate-700" @click="recordProctorRisk(item.id)">风险</button>
+                <button class="rounded bg-slate-50 px-2 py-1.5 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40" :disabled="item.status === '已提交'" @click="deleteAssignment(item.id)">撤销</button>
+              </div>
             </div>
           </div>
+        </section>
+
+        <section v-if="state.route === 'candidate'" class="mt-6 grid grid-cols-[1fr_360px] items-start gap-5 pb-8">
+          <div class="space-y-5">
+            <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+              <div class="flex items-start justify-between gap-6">
+                <div>
+                  <div class="text-sm font-bold text-ocean">考生会话 {{ state.candidate.session?.id || state.candidate.sessionId }}</div>
+                  <h1 class="mt-2 text-3xl font-black">{{ state.candidate.exam?.title || '考试加载中' }}</h1>
+                  <div class="mt-3 flex flex-wrap gap-2 text-sm font-semibold text-slate-600">
+                    <span class="rounded bg-slate-100 px-3 py-1.5">考生：{{ state.candidate.session?.candidate || '-' }}</span>
+                    <span class="rounded bg-slate-100 px-3 py-1.5">准考证：{{ state.candidate.session?.ticket || '-' }}</span>
+                    <span class="rounded bg-slate-100 px-3 py-1.5">试卷：{{ state.candidate.paper?.name || state.candidate.session?.paper || '-' }}</span>
+                    <span class="rounded bg-slate-100 px-3 py-1.5">时段：{{ state.candidate.session?.time || '-' }}</span>
+                    <span class="rounded bg-slate-100 px-3 py-1.5">总分：{{ state.candidate.paper?.score || state.candidate.exam?.totalScore || 0 }}</span>
+                  </div>
+                </div>
+                <div class="grid min-w-[360px] grid-cols-3 gap-2">
+                  <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"><div class="text-xl font-black">{{ candidateQuestionCount }}</div><div class="text-xs font-semibold text-slate-500">题目</div></div>
+                  <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"><div class="text-xl font-black text-leaf">{{ candidateAnsweredCount }}</div><div class="text-xs font-semibold text-slate-500">已答</div></div>
+                  <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"><div class="text-xl font-black text-honey">{{ candidateProgress }}%</div><div class="text-xs font-semibold text-slate-500">进度</div></div>
+                </div>
+              </div>
+
+              <div class="mt-6 grid grid-cols-4 gap-3">
+                <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><div class="flex items-center justify-between"><div class="text-sm font-black text-emerald-700">摄像头</div><i data-lucide="video" class="h-5 w-5 text-emerald-700"></i></div><div class="mt-2 text-xs font-semibold text-emerald-700">{{ state.candidate.session?.camera || '待接入' }}</div></div>
+                <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><div class="flex items-center justify-between"><div class="text-sm font-black text-emerald-700">麦克风</div><i data-lucide="mic" class="h-5 w-5 text-emerald-700"></i></div><div class="mt-2 text-xs font-semibold text-emerald-700">环境正常</div></div>
+                <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><div class="flex items-center justify-between"><div class="text-sm font-black text-emerald-700">屏幕共享</div><i data-lucide="monitor-up" class="h-5 w-5 text-emerald-700"></i></div><div class="mt-2 text-xs font-semibold text-emerald-700">窗口正常</div></div>
+                <div class="rounded-lg border border-amber-200 bg-amber-50 p-4"><div class="flex items-center justify-between"><div class="text-sm font-black text-amber-700">自动保存</div><i data-lucide="cloud-check" class="h-5 w-5 text-amber-700"></i></div><div class="mt-2 text-xs font-semibold text-amber-700">{{ state.candidate.saveState }}</div></div>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-slate-200 bg-white shadow-soft">
+              <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+                <div>
+                  <h2 class="text-lg font-black">试卷内容</h2>
+                  <div class="mt-1 text-xs font-semibold text-slate-500">全部题目在当前页面连续展示</div>
+                </div>
+                <button class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700" @click="loadCandidateSession(state.candidate.sessionId)">
+                  <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+                  刷新
+                </button>
+              </div>
+
+              <div class="divide-y divide-slate-100 px-5">
+                <article v-for="(question, index) in state.candidate.questions" :key="question.id" class="py-5">
+                  <div class="flex items-start justify-between gap-4">
+                    <div>
+                      <div class="text-sm font-black">{{ index + 1 }}. {{ question.type }}题 <span class="ml-2 text-slate-400">{{ question.score }} 分</span></div>
+                      <p class="mt-3 text-base font-semibold">{{ question.stem }}</p>
+                    </div>
+                    <span class="rounded px-2 py-1 text-xs font-bold" :class="candidateStatusClass(question, index)">{{ candidateStatus(question, index) }}</span>
+                  </div>
+
+                  <div v-if="['单选','多选'].includes(question.type)" class="mt-4 grid grid-cols-2 gap-3">
+                    <label v-for="(option, optionIndex) in question.options" :key="optionIndex" class="flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm font-semibold" :class="candidateOptionClass(question, String.fromCharCode(65 + optionIndex))">
+                      <input
+                        class="sr-only"
+                        :type="question.type === '多选' ? 'checkbox' : 'radio'"
+                        :name="question.id"
+                        :value="String.fromCharCode(65 + optionIndex)"
+                        :checked="candidateAnswerSelected(question.id, String.fromCharCode(65 + optionIndex))"
+                        @change="updateCandidateAnswer(question, String.fromCharCode(65 + optionIndex), $event.target.checked)"
+                      />
+                      <span class="flex h-6 w-6 items-center justify-center" :class="candidateOptionMarkClass(question, String.fromCharCode(65 + optionIndex))">{{ String.fromCharCode(65 + optionIndex) }}</span>
+                      {{ option }}
+                    </label>
+                  </div>
+
+                  <div v-else-if="question.type === '判断'" class="mt-4 flex gap-3">
+                    <label v-for="value in ['正确','错误']" :key="value" class="flex w-36 cursor-pointer items-center justify-center rounded-lg border p-3 text-sm font-black" :class="candidateAnswerSelected(question.id, value) ? 'border-leaf bg-emerald-50 text-leaf' : 'border-slate-200 bg-white text-slate-500'">
+                      <input class="sr-only" type="radio" :name="question.id" :value="value" :checked="candidateAnswerSelected(question.id, value)" @change="updateCandidateAnswer(question, value, true)" />
+                      {{ value }}
+                    </label>
+                  </div>
+
+                  <input
+                    v-else-if="question.type === '填空'"
+                    class="mt-4 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none focus:border-ocean focus:bg-white"
+                    :value="state.candidate.answers[question.id] || ''"
+                    placeholder="请输入答案"
+                    @input="updateCandidateAnswer(question, $event.target.value, true)"
+                  />
+
+                  <textarea
+                    v-else
+                    class="mt-4 min-h-28 w-full resize-y rounded-lg border p-4 text-sm font-semibold leading-6 text-slate-700 outline-none focus:border-ocean focus:bg-white"
+                    :class="state.candidate.answers[question.id] !== undefined ? 'border-ocean bg-cyan-50' : 'border-slate-200 bg-slate-50'"
+                    :value="state.candidate.answers[question.id] || ''"
+                    placeholder="请输入作答内容"
+                    @input="updateCandidateAnswer(question, $event.target.value, true)"
+                  ></textarea>
+                </article>
+                <div v-if="!state.candidate.questions.length" class="px-5 py-12 text-center text-sm font-bold text-slate-500">暂无可作答题目</div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="space-y-5">
+            <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+              <div class="flex items-center justify-between">
+                <h2 class="text-lg font-black">答题卡</h2>
+                <span class="rounded bg-cyan-50 px-2.5 py-1 text-xs font-black text-ocean">一页试卷</span>
+              </div>
+              <div class="mt-4 grid grid-cols-6 gap-2">
+                <button v-for="(question, index) in state.candidate.questions" :key="question.id" class="h-10 rounded-lg text-sm font-black" :class="state.candidate.answers[question.id] !== undefined ? 'bg-ink text-white' : index === 7 ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200' : 'bg-white text-slate-500 ring-1 ring-slate-200'">{{ index + 1 }}</button>
+              </div>
+              <div class="mt-5 grid grid-cols-3 gap-2 text-center text-xs font-bold">
+                <div class="rounded bg-ink px-2 py-2 text-white">已答 {{ candidateAnsweredCount }}</div>
+                <div class="rounded bg-white px-2 py-2 text-slate-500 ring-1 ring-slate-200">未答 {{ candidateMissingCount }}</div>
+                <div class="rounded bg-amber-100 px-2 py-2 text-amber-700">标记 1</div>
+              </div>
+
+              <div class="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div class="text-sm font-black">监考画面</div>
+                <div class="mt-3 flex h-32 items-center justify-center rounded bg-slate-900 text-xs font-bold text-white">{{ state.candidate.session?.camera || '摄像头预览' }}</div>
+                <div class="mt-3 grid grid-cols-2 gap-2 text-xs font-bold">
+                  <div class="rounded bg-emerald-50 px-2 py-2 text-emerald-700">人脸正常</div>
+                  <div class="rounded px-2 py-2" :class="state.candidate.session?.risk === '低' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">风险 {{ state.candidate.session?.risk || '-' }}</div>
+                </div>
+              </div>
+
+              <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+                {{ state.candidate.access?.message || '离开考试页面、关闭监考权限或切换屏幕会被记录为风险事件。' }}。离开考试页面、关闭监考权限或切换屏幕会被记录为风险事件。
+              </div>
+
+              <button class="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-sm font-black text-slate-700" @click="saveCandidateDraft">
+                <i data-lucide="save" class="h-4 w-4"></i>
+                保存草稿
+              </button>
+              <button class="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-lg text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300" :class="state.candidate.access?.canSubmit ? 'bg-ink' : 'bg-slate-300'" :disabled="!state.candidate.access?.canSubmit || state.candidate.submitting" @click="submitCandidateExam">
+                <i data-lucide="send" class="h-4 w-4"></i>
+                {{ state.candidate.submitting ? '提交中' : '提交试卷' }}
+              </button>
+            </div>
+
+            <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+              <h2 class="text-lg font-black">当前状态</h2>
+              <div class="mt-4 space-y-3">
+                <div class="flex items-center justify-between rounded bg-slate-50 px-3 py-2 text-sm font-bold"><span>开始时间</span><span>{{ state.candidate.session?.startTime || state.candidate.session?.time?.split('-')[0] || '-' }}</span></div>
+                <div class="flex items-center justify-between rounded bg-slate-50 px-3 py-2 text-sm font-bold"><span>结束时间</span><span>{{ state.candidate.session?.endTime || state.candidate.session?.time?.split('-')[1] || '-' }}</span></div>
+                <div class="flex items-center justify-between rounded bg-slate-50 px-3 py-2 text-sm font-bold"><span>剩余分钟</span><span class="text-honey">{{ state.candidate.session?.remainingMinutes ?? '-' }}</span></div>
+                <div class="flex items-center justify-between rounded bg-slate-50 px-3 py-2 text-sm font-bold"><span>保存状态</span><span class="text-leaf">{{ state.candidate.saveState }}</span></div>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+              <h2 class="text-lg font-black">提交检查</h2>
+              <div class="mt-4 space-y-3 text-sm font-semibold">
+                <div class="flex items-center justify-between"><span class="text-slate-600">已答题目</span><span class="font-black">{{ candidateAnsweredCount }} / {{ candidateQuestionCount }}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-600">未答题目</span><span class="font-black text-coral">{{ candidateMissingCount }}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-600">标记题目</span><span class="font-black text-honey">1</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-600">会话状态</span><span class="font-black text-leaf">{{ state.candidate.session?.status || '-' }}</span></div>
+              </div>
+            </div>
+          </aside>
         </section>
 
         <section v-if="state.route === 'analysis'" class="mt-6 space-y-5">
@@ -1258,12 +1889,17 @@ app.mount("#app");
 
 function currentRoute() {
   const { route } = parseHashRoute();
-  return ["authoring", "papers", "proctor", "analysis"].includes(route) ? route : "home";
+  return ["authoring", "papers", "proctor", "candidate", "analysis"].includes(route) ? route : "home";
 }
 
 function currentAuthoringPaperId() {
   const { route, params } = parseHashRoute();
   return route === "authoring" ? params.get("paperid") || params.get("paperId") || params.get("papeid") || "" : "";
+}
+
+function currentCandidateSessionId() {
+  const { route, params } = parseHashRoute();
+  return route === "candidate" ? params.get("session") || "s-001" : "s-001";
 }
 
 function parseHashRoute() {
@@ -1313,6 +1949,125 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatDateTimeFull(value) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function proctorEventTypeText(type) {
+  return {
+    "proctor-event": "监考风险",
+    "exam-submit": "提交试卷",
+    "answer-save": "保存答题",
+  }[type] || type || "事件";
+}
+
+function parseCandidateFromMessage(message = "") {
+  return String(message).split(/[：:]/)[0] || "";
+}
+
+async function readAssignmentWorkbook(file) {
+  const ext = file.name.split(".").pop()?.toLowerCase();
+  const buffer = await file.arrayBuffer();
+  if (window.XLSX && ["xlsx", "xls"].includes(ext)) {
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    return normalizeAssignmentRows(rows);
+  }
+  const text = new TextDecoder("utf-8").decode(buffer);
+  const rows = text
+    .split(/\r?\n/)
+    .map((line) => line.split(/,|\t/).map((cell) => String(cell || "").trim()))
+    .filter((row) => row.some(Boolean));
+  return normalizeAssignmentRows(rows);
+}
+
+function normalizeAssignmentRows(rows = []) {
+  const cleanRows = rows
+    .map((row) => row.map((cell) => String(cell ?? "").trim()))
+    .filter((row) => row.some(Boolean));
+  if (!cleanRows.length) return [];
+  const header = cleanRows[0].map(normalizeHeader);
+  const hasHeader = header.some((item) => ["candidate", "ticket", "className"].includes(item));
+  const candidateIndex = hasHeader ? header.indexOf("candidate") : 0;
+  const ticketIndex = hasHeader ? header.indexOf("ticket") : 1;
+  const classIndex = hasHeader ? header.indexOf("className") : 2;
+  return cleanRows
+    .slice(hasHeader ? 1 : 0)
+    .map((row) => ({
+      candidate: row[candidateIndex] || "",
+      ticket: row[ticketIndex] || "",
+      className: classIndex >= 0 ? row[classIndex] || "" : "",
+    }))
+    .filter((item) => item.candidate || item.ticket || item.className);
+}
+
+function normalizeHeader(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (["考生姓名", "姓名", "考生", "name", "candidate"].includes(text)) return "candidate";
+  if (["准考证号", "准考证", "学号", "ticket", "examid", "exam_id"].includes(text)) return "ticket";
+  if (["班级", "班", "class", "classname", "class_name"].includes(text)) return "className";
+  return text;
+}
+
+function downloadExcelTable(sheetName, rows, filename) {
+  const headers = Object.keys(rows[0] || {});
+  const table = [
+    "<table>",
+    "<thead><tr>",
+    ...headers.map((header) => `<th>${escapeHtml(header)}</th>`),
+    "</tr></thead>",
+    "<tbody>",
+    ...rows.map((row) => `<tr>${headers.map((header) => `<td>${escapeHtml(row[header] ?? "")}</td>`).join("")}</tr>`),
+    "</tbody>",
+    "</table>",
+  ].join("");
+  const html = `
+    <html>
+      <head>
+        <meta charset="UTF-8" />
+        <style>
+          table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px; }
+          th { background: #12201f; color: #ffffff; font-weight: 700; }
+          th, td { border: 1px solid #d9e2e1; padding: 6px 8px; mso-number-format:"\\@"; }
+        </style>
+      </head>
+      <body>
+        <h3>${escapeHtml(sheetName)}</h3>
+        ${table}
+      </body>
+    </html>
+  `;
+  const blob = new Blob(["\ufeff", html], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function dateStamp() {
+  const date = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+function defaultDateTimeLocal(hour, minute) {
+  const date = new Date();
+  date.setHours(hour, minute, 0, 0);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function splitList(value) {

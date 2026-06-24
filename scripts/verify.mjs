@@ -31,6 +31,9 @@ try {
 
   const health = await getJson("/api/health");
   assert(health.ok === true, "health ok");
+  const appShell = await getText("/");
+  assert(appShell.includes('<div id="app"'), "root serves Vue SPA shell");
+  assert(appShell.includes("/assets/app.js"), "root SPA loads app.js");
   const config = await getJson("/api/config");
   assert(config.aiReady === true, "config reports AI layer ready");
   assert(config.mode === "mock", "verification explicitly enables mock mode");
@@ -45,8 +48,8 @@ try {
   const secondSession = await getJson("/api/candidate/session/s-002");
   assert(secondSession.session.id === "s-002", "candidate endpoint loads requested session");
   assert(secondSession.session.candidate === "周同学", "candidate endpoint returns requested candidate");
-  assert(secondSession.session.paper === "B 卷", "candidate endpoint preserves per-candidate paper");
-  assert(firstSession.questions[0].id !== secondSession.questions[0].id, "different paper sessions return different question order");
+  assert(secondSession.session.paper === "B 卷", "candidate endpoint preserves legacy session label");
+  assert(firstSession.questions[0].id === secondSession.questions[0].id, "candidate sessions use the assigned paper order without variant strategy");
   assert(secondSession.questions.reduce((sum, item) => sum + item.score, 0) === 50, "session paper score stays 50");
   const missingSession = await getJson("/api/candidate/session/s-999", { expectedStatus: 404 });
   assert(missingSession.error === "Session Not Found", "candidate endpoint rejects unknown session");
@@ -165,11 +168,14 @@ try {
   const assignedSession = await postJson("/api/proctor/sessions", {
     candidate: "测试考生",
     ticket: "202606239999",
-    paper: "B 卷",
+    paperId: paper.id,
     startTime: "10:30",
     endTime: "12:00",
   }, { expectedStatus: 201 });
-  assert(assignedSession.id === "s-009", "session assignment creates next session id");
+  assert(/^sess-[a-z0-9]+-[a-z0-9]{8}$/.test(assignedSession.id), "session assignment creates long random session id");
+  assert(assignedSession.id.length >= 20, "session id is long enough for candidate links and exports");
+  assert(assignedSession.paperId === paper.id, "session assignment binds published paper id");
+  assert(assignedSession.paperName === generationSpec.paperName, "session assignment stores paper name");
   assert(assignedSession.remainingMinutes === 90, "session assignment computes remaining minutes");
   const duplicateTicket = await postJson("/api/proctor/sessions", {
     candidate: "重复考生",
@@ -178,7 +184,8 @@ try {
   assert(duplicateTicket.error.includes("准考证号"), "session assignment rejects duplicate ticket");
   const assignedCandidate = await getJson(`/api/candidate/session/${assignedSession.id}`);
   assert(assignedCandidate.session.candidate === "测试考生", "candidate endpoint loads assigned session");
-  assert(assignedCandidate.session.paper === "B 卷", "assigned session preserves paper type");
+  assert(assignedCandidate.session.paper === generationSpec.paperName, "assigned session uses selected paper without variant strategy");
+  assert(assignedCandidate.paper.id === paper.id, "assigned candidate receives bound paper snapshot");
   assert(assignedCandidate.access.canSubmit === false, "assigned session cannot submit before start");
   assert(assignedCandidate.access.sessionStatus === "待开考", "assigned session exposes waiting status");
   const blockedAssignedSubmit = await postJson(`/api/candidate/session/${assignedSession.id}`, { submit: true, answers: {} }, { expectedStatus: 409 });
@@ -190,6 +197,38 @@ try {
   assert(assignedHeartbeat.status === "答题中", "heartbeat starts assigned session");
   const activeAssignedCandidate = await getJson(`/api/candidate/session/${assignedSession.id}`);
   assert(activeAssignedCandidate.access.canSubmit === true, "active assigned session can submit after paper publish");
+
+  const batchAssignment = await postJson("/api/assignments/batch", {
+    paperId: paper.id,
+    startTime: "10:45",
+    endTime: "12:15",
+    candidates: [
+      { candidate: "批量甲", ticket: "202606240001", className: "一班" },
+      { candidate: "批量乙", ticket: "202606240002", className: "一班" },
+    ],
+  }, { expectedStatus: 201 });
+  assert(batchAssignment.sessions.length === 2, "batch assignment creates candidate sessions");
+  assert(batchAssignment.sessions.every((item) => item.paper === generationSpec.paperName), "batch assignment uses selected paper without variants");
+  const assignmentPreview = await postJson("/api/assignments/import-preview", {
+    text: "预览甲,202606240003,二班\n预览乙,202606240001,二班",
+  });
+  assert(assignmentPreview.validCount === 1, "assignment import preview counts valid rows");
+  assert(assignmentPreview.invalidCount === 1, "assignment import preview catches duplicate tickets");
+  const excelStylePreview = await postJson("/api/assignments/import-preview", {
+    candidates: [
+      { candidate: "模板甲", ticket: "202606240011", className: "三班" },
+      { candidate: "模板乙", ticket: "202606240012", className: "三班" },
+    ],
+  });
+  assert(excelStylePreview.validCount === 2, "assignment import preview accepts rows parsed from Excel templates");
+  const dateTimeAssigned = await postJson("/api/assignments", {
+    candidate: "日期考生",
+    ticket: "202606240013",
+    paperId: paper.id,
+    startTime: "2026-06-24T09:00",
+    endTime: "2026-06-24T10:30",
+  }, { expectedStatus: 201 });
+  assert(dateTimeAssigned.remainingMinutes === 90, "assignment supports datetime-local start and end values");
 
   const emptyAnalysis = await getJson("/api/analysis");
   assert(emptyAnalysis.averageScore === 0, "analysis has no default demo average before grading");
@@ -280,6 +319,39 @@ try {
   assert(finalDashboard.gradingQueue.reviewDone >= 1, "dashboard reflects reviewed results");
   assert(finalDashboard.stats.risk >= 1, "dashboard reflects risk sessions");
 
+  const firstAssignedBeforeSwitch = await getJson(`/api/candidate/session/${assignedSession.id}`);
+  const firstAssignedStem = firstAssignedBeforeSwitch.questions[0].stem;
+  const secondSpec = {
+    ...generationSpec,
+    paperName: "C++ 工程能力测评 B 卷",
+    direction: "C++ 并发与性能优化",
+    knowledge: ["并发控制", "性能分析", "内存模型", "线程安全", "调试诊断"],
+  };
+  const secondGenerated = await postJson("/api/ai/generate-questions", secondSpec);
+  await postJson("/api/ai/save-question-draft", {
+    questions: secondGenerated.questions,
+    spec: secondGenerated.spec,
+  });
+  const secondDraftDashboard = await getJson("/api/dashboard");
+  await Promise.all(
+    secondDraftDashboard.questions.map((item) => patchJson(`/api/questions/${item.id}`, { status: "已校验", quality: Math.max(92, Number(item.quality || 90)) })),
+  );
+  const secondPaper = await postJson("/api/papers/build", {});
+  await postJson("/api/papers/publish", {});
+  const secondAssigned = await postJson("/api/assignments", {
+    candidate: "第二卷考生",
+    ticket: "202606240099",
+    paperId: secondPaper.id,
+    startTime: "13:00",
+    endTime: "14:30",
+  }, { expectedStatus: 201 });
+  const firstAssignedAfterSwitch = await getJson(`/api/candidate/session/${assignedSession.id}`);
+  const secondAssignedCandidate = await getJson(`/api/candidate/session/${secondAssigned.id}`);
+  assert(firstAssignedAfterSwitch.paper.id === paper.id, "existing assignment keeps first paper after another paper is published");
+  assert(firstAssignedAfterSwitch.questions[0].stem === firstAssignedStem, "existing assignment keeps first paper snapshot questions");
+  assert(secondAssignedCandidate.paper.id === secondPaper.id, "new assignment receives second paper");
+  assert(secondAssignedCandidate.questions.some((item) => item.knowledge.includes(secondSpec.direction)), "second assignment sees second paper questions");
+
   const resetPreview = await postJson("/api/ai/generate-questions", { ...generationSpec, direction: "C++ 语言进阶能力复测" });
   const beforeSaveResetDashboard = await getJson("/api/dashboard");
   assert(beforeSaveResetDashboard.paper.status === "已发布", "unsaved regenerated preview does not reset published paper");
@@ -331,6 +403,16 @@ async function waitForHealth() {
 
 async function getJson(path, options = {}) {
   return readJson(await fetch(`${baseUrl}${path}`), options);
+}
+
+async function getText(path, options = {}) {
+  const response = await fetch(`${baseUrl}${path}`);
+  const expectedStatus = options.expectedStatus || 200;
+  const text = await response.text();
+  if (response.status !== expectedStatus) {
+    throw new Error(`${response.status} ${response.statusText}: ${text}`);
+  }
+  return text;
 }
 
 async function postJson(path, body, options = {}) {

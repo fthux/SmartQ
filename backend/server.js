@@ -2200,7 +2200,19 @@ function buildGradingReviewQueue(state = {}) {
   return Object.entries(state.gradingResults || {})
     .map(([sessionId, result]) => {
       const session = (state.sessions || []).find((item) => item.id === sessionId) || {};
-      const pendingDetails = (result.details || []).filter((item) => item.reviewRequired && item.status !== "人工复核完成");
+      const paper = (state.papers || []).find((item) => item.id === session.paperId) || {};
+      const questionMap = new Map((paper.questions || []).map((question) => [question.id, question]));
+      const details = (result.details || []).map((detail) => {
+        const question = questionMap.get(detail.questionId) || {};
+        return {
+          ...detail,
+          stem: question.stem || detail.stem || "",
+          options: Array.isArray(question.options) ? question.options : Array.isArray(detail.options) ? detail.options : [],
+          standardAnswer: question.answer ?? detail.standardAnswer ?? "",
+          explanation: question.explanation || detail.explanation || "",
+        };
+      });
+      const pendingDetails = details.filter((item) => item.reviewRequired && item.status !== "人工复核完成");
       return {
         sessionId,
         candidate: session.candidate || "",
@@ -2224,7 +2236,7 @@ function buildGradingReviewQueue(state = {}) {
         appealCount: Array.isArray(result.appeals) ? result.appeals.length : 0,
         latestAppeal: latestAppeal(result),
         pendingQuestionIds: pendingDetails.map((item) => item.questionId),
-        details: result.details || [],
+        details,
       };
     })
     .sort((a, b) => {

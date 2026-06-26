@@ -4,4 +4,5 @@ npm-debug.log*
 .DS_Store
 data/runtime.json
 backend/data/runtime.json
+backend/data/backups/
 .codegraph/

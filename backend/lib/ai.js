@@ -683,6 +683,10 @@ export function gradeAnswers(answerMap = {}, sourceQuestions = questions) {
     return {
       questionId: question.id,
       type: question.type,
+      stem: question.stem || "",
+      options: Array.isArray(question.options) ? question.options : [],
+      standardAnswer: question.answer ?? "",
+      explanation: question.explanation || "",
       score: question.score,
       awarded,
       correct,

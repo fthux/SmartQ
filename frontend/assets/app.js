@@ -191,7 +191,7 @@ const app = createApp({
         duplicateWindowSeconds: 10,
       },
       proctorRulesSaving: false,
-      gradingReviewFilter: "pending",
+      gradingReviewFilter: "all",
       selectedReviewSessionId: "",
       reviewForms: {},
       reviewSubmitting: false,
@@ -1475,7 +1475,22 @@ const app = createApp({
     function reviewFormRow(entry, detail) {
       if (!entry?.sessionId || !detail?.questionId) return { awarded: 0, comment: "" };
       initReviewForm(entry);
-      return state.reviewForms[entry.sessionId][detail.questionId];
+      return state.reviewForms[entry.sessionId][detail.questionId] || {
+        awarded: Number(detail.awarded || 0),
+        comment: detail.reviewerComment || detail.aiComment || "",
+      };
+    }
+
+    function reviewAnswerText(value) {
+      if (Array.isArray(value)) return value.length ? value.join("、") : "未作答";
+      const text = String(value ?? "").trim();
+      return text || "未作答";
+    }
+
+    function reviewCorrectText(detail = {}) {
+      if (detail.correct === true) return "正确";
+      if (detail.correct === false) return "错误";
+      return detail.reviewRequired ? "待人工判定" : "无需判定";
     }
 
     async function submitReviewEntry(entry = selectedReviewEntry.value) {
@@ -3417,6 +3432,8 @@ const app = createApp({
       selectReviewEntry,
       initReviewForm,
       reviewFormRow,
+      reviewAnswerText,
+      reviewCorrectText,
       submitReviewEntry,
       publishReviewEntry,
       resolveReviewAppeal,
@@ -5267,15 +5284,41 @@ const app = createApp({
                   <button class="rounded-lg bg-ink px-3 py-2 text-xs font-black text-white disabled:opacity-50" :disabled="state.resolvingAppealId === selectedReviewEntry.latestAppeal.id" @click="resolveReviewAppeal(selectedReviewEntry, 'accept')">受理复核</button>
                 </div>
               </div>
-              <div v-if="selectedReviewEntry" class="mt-4 max-h-[420px] space-y-3 overflow-y-auto">
-                <div v-for="detail in selectedReviewEntry.details.filter((item) => item.reviewRequired)" :key="detail.questionId" class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+              <div v-if="selectedReviewEntry" class="mt-4 max-h-[520px] space-y-3 overflow-y-auto pr-1">
+                <div
+                  v-for="(detail, detailIndex) in selectedReviewEntry.details"
+                  :key="detail.questionId"
+                  class="rounded-lg border p-3 text-sm"
+                  :class="detail.reviewRequired ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-100' : 'border-slate-200 bg-slate-50'"
+                >
                   <div class="flex items-center justify-between gap-3">
-                    <div class="font-black text-ink">{{ detail.questionId }} · {{ detail.type }}</div>
-                    <span class="rounded bg-white px-2 py-1 text-xs font-black text-slate-600">{{ detail.status }}</span>
+                    <div class="min-w-0">
+                      <div class="font-black text-ink">{{ detailIndex + 1 }}. {{ detail.type }}题 <span class="ml-2 text-slate-400">{{ detail.score }} 分</span></div>
+                      <div class="mt-1 truncate text-[11px] font-bold text-slate-400">{{ detail.questionId }}</div>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-1">
+                      <span v-if="detail.reviewRequired" class="rounded bg-amber-100 px-2 py-1 text-xs font-black text-amber-800">需复核</span>
+                      <span class="rounded bg-white px-2 py-1 text-xs font-black text-slate-600">{{ detail.status }}</span>
+                    </div>
                   </div>
-                  <div class="mt-2 text-xs font-semibold leading-5 text-slate-600">作答：{{ Array.isArray(detail.answer) ? detail.answer.join('、') : (detail.answer || '未作答') }}</div>
-                  <div class="mt-1 text-xs font-semibold leading-5 text-slate-500">{{ detail.aiComment || '无 AI 初评意见' }}</div>
-                  <div class="mt-3 grid gap-3 md:grid-cols-[120px_1fr]">
+                  <div class="mt-3 whitespace-pre-line text-sm font-semibold leading-6 text-slate-700">{{ detail.stem || '题干未记录' }}</div>
+                  <div v-if="displayQuestionOptions(detail).length" class="mt-3 grid gap-2 md:grid-cols-2">
+                    <div v-for="(option, optionIndex) in displayQuestionOptions(detail)" :key="optionIndex" class="rounded border border-white bg-white/80 px-3 py-2 text-xs font-semibold text-slate-600">
+                      {{ String.fromCharCode(65 + optionIndex) }}. {{ option }}
+                    </div>
+                  </div>
+                  <div class="mt-3 grid gap-2 text-xs font-semibold text-slate-600 md:grid-cols-2">
+                    <div class="rounded bg-white/80 px-3 py-2">考生作答：{{ reviewAnswerText(detail.answer) }}</div>
+                    <div class="rounded bg-white/80 px-3 py-2">标准答案：{{ reviewAnswerText(detail.standardAnswer) }}</div>
+                    <div class="rounded bg-white/80 px-3 py-2">当前得分：{{ detail.awarded }} / {{ detail.score }}</div>
+                    <div class="rounded bg-white/80 px-3 py-2">判定：{{ reviewCorrectText(detail) }}</div>
+                  </div>
+                  <div v-if="detail.aiComment || detail.reviewerComment || detail.explanation" class="mt-2 space-y-1 text-xs font-semibold leading-5 text-slate-500">
+                    <div v-if="detail.aiComment">{{ detail.aiComment }}</div>
+                    <div v-if="detail.reviewerComment">复核意见：{{ detail.reviewerComment }}</div>
+                    <div v-if="detail.explanation">解析：{{ detail.explanation }}</div>
+                  </div>
+                  <div v-if="detail.reviewRequired" class="mt-3 grid gap-3 md:grid-cols-[120px_1fr]">
                     <label class="text-xs font-bold text-slate-600">得分 / {{ detail.score }}
                       <input :value="reviewFormRow(selectedReviewEntry, detail).awarded" type="number" min="0" :max="detail.score" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-ink" @input="reviewFormRow(selectedReviewEntry, detail).awarded = Number($event.target.value)" />
                     </label>
@@ -5284,7 +5327,7 @@ const app = createApp({
                     </label>
                   </div>
                 </div>
-                <div v-if="!selectedReviewEntry.details.some((item) => item.reviewRequired)" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm font-bold text-slate-500">该答卷无需人工复核</div>
+                <div v-if="!selectedReviewEntry.details.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm font-bold text-slate-500">该答卷暂无阅卷明细</div>
               </div>
               <div v-else class="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-16 text-center text-sm font-bold text-slate-500">请选择一份答卷</div>
             </section>

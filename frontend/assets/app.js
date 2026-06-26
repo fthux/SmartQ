@@ -3561,16 +3561,24 @@ const app = createApp({
   },
   template: `
     <main v-if="state.route === 'candidate'" :class="state.candidate.authToken ? 'min-h-screen w-full bg-slate-50 px-4 py-4 md:px-6' : 'min-h-screen w-full overflow-hidden bg-[#edf8f3]'">
-      <header v-if="state.candidate.authToken" class="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-slate-50/95 backdrop-blur">
-        <div class="min-w-0">
-          <div class="text-sm font-black text-ink">{{ state.candidate.session ? (state.candidate.paper?.name || state.candidate.session?.paper || '考试') : '考生系统' }}</div>
-          <div class="truncate text-xs font-semibold text-slate-500">
-            {{ state.candidate.authUser?.candidate || '未登录' }}
-            <span v-if="state.candidate.authUser"> · {{ state.candidate.authUser?.ticket || '-' }} · {{ state.candidate.authUser?.className || '未分组' }}</span>
-            <span v-if="state.candidate.session"> · {{ state.candidate.session?.status || '-' }} · 剩余 {{ candidateRemainingText }}</span>
+      <header v-if="state.candidate.authToken" class="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/95 backdrop-blur">
+        <div class="flex min-w-0 items-center gap-3">
+          <span class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-1 shadow-[0_8px_18px_rgba(22,167,115,0.18)] ring-1 ring-emerald-100">
+            <img src="/assets/favicon.svg" alt="SmartQ" class="h-full w-full object-contain" />
+          </span>
+          <div class="min-w-0">
+            <div class="flex min-w-0 items-center gap-2">
+              <span class="shrink-0 text-sm font-black text-ink">SmartQ</span>
+              <span class="truncate text-sm font-black text-slate-600">{{ state.candidate.session ? (state.candidate.paper?.name || state.candidate.session?.paper || '考试') : '考生系统' }}</span>
+            </div>
+            <div class="truncate text-xs font-semibold text-slate-500">
+              {{ state.candidate.authUser?.candidate || '未登录' }}
+              <span v-if="state.candidate.authUser"> · {{ state.candidate.authUser?.ticket || '-' }} · {{ state.candidate.authUser?.className || '未分组' }}</span>
+              <span v-if="state.candidate.session"> · {{ state.candidate.session?.status || '-' }} · 剩余 {{ candidateRemainingText }}</span>
+            </div>
           </div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex shrink-0 items-center gap-2">
           <button v-if="state.candidate.session" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700" @click="backToCandidateExams">我的考试</button>
           <button v-if="state.candidate.authToken" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700" @click="logoutCandidate">退出</button>
         </div>
@@ -3877,21 +3885,21 @@ const app = createApp({
             <span class="block text-xs font-medium text-slate-500">通用考试 / 测评平台</span>
           </span>
         </button>
-        <div class="flex flex-wrap items-center justify-end gap-2">
-          <div v-if="state.admin.token" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500">
+        <div class="flex flex-wrap items-center justify-end gap-5">
+          <div v-if="state.admin.token" class="text-xs font-bold text-slate-500">
             {{ state.admin.user?.username || state.admin.username }}
           </div>
           <button
             v-if="state.admin.token"
             v-for="item in visibleNavItems"
             :key="item.key"
-            class="rounded-lg px-3 py-2 text-sm font-bold"
-            :class="state.route === item.key ? 'bg-ink text-white' : 'border border-slate-200 bg-white text-slate-700'"
+            class="relative py-1 text-sm font-bold transition hover:text-ink"
+            :class="state.route === item.key ? 'text-ink after:absolute after:inset-x-0 after:-bottom-1 after:h-0.5 after:rounded-full after:bg-ink' : 'text-slate-500'"
             @click="go(item.key)"
           >
             {{ item.label }}
           </button>
-          <button v-if="state.admin.token" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700" @click="logoutAdmin">退出</button>
+          <button v-if="state.admin.token" class="py-1 text-sm font-bold text-slate-500 transition hover:text-coral" @click="logoutAdmin">退出</button>
         </div>
       </header>
 

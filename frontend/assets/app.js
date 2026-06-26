@@ -3578,7 +3578,9 @@ const app = createApp({
           <div class="flex min-h-[620px] items-center justify-center px-6 py-10 sm:px-10">
             <form novalidate class="w-full max-w-sm" @submit.prevent="loginCandidate">
               <div class="flex items-center gap-3">
-                <span class="flex h-12 w-12 items-center justify-center rounded-lg bg-leaf text-lg font-black text-white shadow-[0_12px_24px_rgba(22,167,115,0.25)]">Q</span>
+                <span class="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg bg-white p-1.5 shadow-[0_12px_24px_rgba(22,167,115,0.25)] ring-1 ring-emerald-100">
+                  <img src="/assets/favicon.svg" alt="SmartQ" class="h-full w-full object-contain" />
+                </span>
                 <span>
                   <span class="block text-xl font-black text-ink">SmartQ</span>
                   <span class="block text-xs font-bold text-slate-400">考生测评入口</span>
@@ -3850,7 +3852,9 @@ const app = createApp({
     <main v-else :class="state.admin.token ? 'min-h-screen w-full px-8 py-6' : 'min-h-screen w-full overflow-hidden bg-[#f2f5fa]'">
       <header v-if="state.admin.token" class="flex h-16 items-center justify-between rounded-lg border border-slate-200/80 bg-white/90 px-5 shadow-soft backdrop-blur">
         <button class="flex items-center gap-4 text-left" @click="go('home')">
-          <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-lg font-black text-white">Q</span>
+          <span class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-white p-1.5 ring-1 ring-slate-200">
+            <img src="/assets/favicon.svg" alt="SmartQ" class="h-full w-full object-contain" />
+          </span>
           <span>
             <span class="block text-lg font-black">SmartQ</span>
             <span class="block text-xs font-medium text-slate-500">通用考试 / 测评平台</span>
@@ -3883,10 +3887,11 @@ const app = createApp({
         <div class="relative z-10 grid w-full max-w-6xl overflow-hidden bg-white/80 shadow-[0_34px_85px_rgba(18,32,31,0.22)] lg:h-[calc(100vh-96px)] lg:min-h-[600px] lg:max-h-[720px] lg:grid-cols-[1fr_1fr]">
           <div class="flex min-h-[600px] flex-col items-center justify-center bg-[#f7f9fd]/95 px-6 py-10 sm:px-10 lg:min-h-0">
             <div class="mb-9 flex flex-col items-center text-center">
-              <div class="relative h-16 w-48">
-                <div class="absolute left-8 top-2 h-10 w-28 -rotate-8 bg-leaf"></div>
-                <div class="absolute left-10 top-0 flex h-12 w-32 -rotate-8 items-center justify-center bg-leaf text-xl font-black text-white shadow-lg">SmartQ</div>
-                <div class="absolute left-20 top-12 text-[11px] font-black uppercase text-slate-400">Console</div>
+              <div class="relative flex h-20 w-48 flex-col items-center justify-center">
+                <div class="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg bg-white p-2 shadow-lg ring-1 ring-emerald-100">
+                  <img src="/assets/favicon.svg" alt="SmartQ" class="h-full w-full object-contain" />
+                </div>
+                <div class="mt-2 text-[11px] font-black uppercase text-slate-400">SmartQ Console</div>
               </div>
             </div>
 

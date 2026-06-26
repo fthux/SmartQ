@@ -10,18 +10,18 @@ const typeClass = {
 };
 
 const defaultSpec = {
-  paperName: "C++ 工程能力测评 A 卷",
-  direction: "C++ 语言基础与工程实践",
+  paperName: "",
+  direction: "",
   difficulty: "中",
-  totalScore: 50,
-  singleCount: 4,
-  multipleCount: 2,
-  judgeCount: 2,
-  blankCount: 2,
-  shortCount: 2,
+  totalScore: 0,
+  singleCount: 0,
+  multipleCount: 0,
+  judgeCount: 0,
+  blankCount: 0,
+  shortCount: 0,
   essayCount: 0,
-  knowledge: "语法基础，STL，内存管理，面向对象，异常处理",
-  requirements: "题干清晰，答案唯一或评分规则明确，适合初中级开发者测评。",
+  knowledge: "",
+  requirements: "",
 };
 
 async function request(path, options = {}) {
@@ -1106,22 +1106,15 @@ const app = createApp({
         setGenerationProgress(Math.max(state.generationProgress, 92), "校验试卷结构");
         state.generatedDraft = generated;
         state.regeneratingDraft = false;
-        state.activeWorkflowStep = "quality";
+        state.activeWorkflowStep = "config";
         if (wasRegenerating) {
           setGenerationProgress(86, "重置旧试卷流程");
           await refresh();
         }
         const failures = (generated.checks?.failures?.length || 0) + (generated.checks?.specFailures?.length || 0);
-        setGenerationProgress(100, failures ? "试卷已生成，进入质量复检" : "试卷已生成，进入质量复检");
+        setGenerationProgress(100, failures ? "试卷已生成，等待确认" : "试卷已生成，等待确认");
         state.generating = false;
-        await saveGeneratedContent(generated, { silent: true });
-        const qualityResult = await qualityCheck({ auto: true });
-        const qualityFailures = qualityResult?.failures?.length || 0;
-        if (qualityFailures > 0) {
-          notify(`试卷已生成，质量复检发现 ${qualityFailures} 个问题，请先自动修复`);
-        } else {
-          notify("试卷已生成并通过质量复检，进入人工审核");
-        }
+        notify("试卷已生成预览，刷新页面不会保留；确认后再进入质量复检");
       } catch (error) {
         stopGenerationProgress();
         state.generatedDraft = previousGeneratedDraft;
@@ -1214,6 +1207,13 @@ const app = createApp({
       }
       try {
         await saveGeneratedContent(state.generatedDraft);
+        const qualityResult = await qualityCheck({ auto: true });
+        const qualityFailures = qualityResult?.failures?.length || 0;
+        if (qualityFailures > 0) {
+          notify(`试卷内容已进入质量复检，发现 ${qualityFailures} 个问题，请先自动修复`);
+        } else {
+          notify("质量复检通过，进入人工审核");
+        }
       } catch (error) {
         notify(`保存失败：${error.message}`);
       }
@@ -3414,6 +3414,8 @@ const app = createApp({
       runQuickAction,
       setWorkflowStep,
       generateDraft,
+      saveDraft,
+      discardDraft,
       regenerate,
       reviewQuestion,
       qualityCheck,
@@ -4417,8 +4419,8 @@ const app = createApp({
             </div>
             <fieldset :disabled="formLocked" class="mt-4">
               <div class="grid grid-cols-[1fr_1.1fr_120px_120px] gap-3">
-                <label class="text-xs font-bold text-slate-600">考卷名称<input v-model="state.spec.paperName" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100 disabled:text-slate-500" :class="state.specFormErrors.paperName ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" /><div :class="fieldErrorClass(state.specFormErrors.paperName)">{{ state.specFormErrors.paperName || '' }}</div></label>
-                <label class="text-xs font-bold text-slate-600">出题方向<input v-model="state.spec.direction" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100 disabled:text-slate-500" :class="state.specFormErrors.direction ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" /><div :class="fieldErrorClass(state.specFormErrors.direction)">{{ state.specFormErrors.direction || '' }}</div></label>
+                <label class="text-xs font-bold text-slate-600">考卷名称<input v-model="state.spec.paperName" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100 disabled:text-slate-500" :class="state.specFormErrors.paperName ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" placeholder="请输入考卷名称" /><div :class="fieldErrorClass(state.specFormErrors.paperName)">{{ state.specFormErrors.paperName || '' }}</div></label>
+                <label class="text-xs font-bold text-slate-600">出题方向<input v-model="state.spec.direction" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100 disabled:text-slate-500" :class="state.specFormErrors.direction ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" placeholder="请输入出题方向" /><div :class="fieldErrorClass(state.specFormErrors.direction)">{{ state.specFormErrors.direction || '' }}</div></label>
                 <label class="text-xs font-bold text-slate-600">难度<select v-model="state.spec.difficulty" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100"><option>中</option><option>易</option><option>难</option><option>混合</option></select></label>
                 <label class="text-xs font-bold text-slate-600">总分<input v-model.number="state.spec.totalScore" type="number" min="1" max="200" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100" :class="state.specFormErrors.totalScore ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" /><div :class="fieldErrorClass(state.specFormErrors.totalScore)">{{ state.specFormErrors.totalScore || '' }}</div></label>
               </div>
@@ -4433,9 +4435,9 @@ const app = createApp({
               <div :class="fieldErrorClass(state.specFormErrors.questionCount)">{{ state.specFormErrors.questionCount || '' }}</div>
               <div class="mt-3 grid grid-cols-[150px_1fr] gap-3">
                 <div class="rounded-lg border border-slate-200 bg-white px-3 py-2"><div class="text-xs font-bold text-slate-500">自动计算题量</div><div class="mt-1 text-lg font-black text-ink">{{ totalQuestionCount }} 题</div></div>
-                <label class="text-xs font-bold text-slate-600">知识点范围<input v-model="state.spec.knowledge" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold disabled:bg-slate-100" /></label>
+                <label class="text-xs font-bold text-slate-600">知识点范围<input v-model="state.spec.knowledge" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold disabled:bg-slate-100" placeholder="请输入知识点范围，用逗号分隔" /></label>
               </div>
-              <label class="mt-3 block text-xs font-bold text-slate-600">补充要求<textarea v-model="state.spec.requirements" class="mt-2 min-h-16 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-6 disabled:bg-slate-100"></textarea></label>
+              <label class="mt-3 block text-xs font-bold text-slate-600">补充要求<textarea v-model="state.spec.requirements" class="mt-2 min-h-16 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-6 disabled:bg-slate-100" placeholder="请输入补充要求"></textarea></label>
             </fieldset>
             <div v-if="state.generatedDraft?.questions?.length" class="mt-4 rounded-lg border border-ocean/20 bg-white p-4">
               <div class="flex items-center justify-between">
@@ -4443,7 +4445,10 @@ const app = createApp({
                   <div class="text-sm font-black text-ink">生成试卷预览</div>
                   <div class="mt-1 text-xs font-semibold text-slate-500">{{ state.generatedDraft.spec?.paperName }} · {{ state.generatedDraft.questions.length }} 题 · {{ state.generatedDraft.spec?.totalScore }} 分</div>
                 </div>
-                <div class="rounded bg-emerald-50 px-2 py-1 text-xs font-black text-emerald-700">已进入质量复检</div>
+                <div class="flex items-center gap-2">
+                  <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700" :disabled="state.saving" @click="discardDraft">丢弃</button>
+                  <button type="button" class="rounded-lg bg-ocean px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-60" :disabled="state.saving" @click="saveDraft">{{ state.saving ? '处理中' : '进入质量复检' }}</button>
+                </div>
               </div>
               <div class="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
                 <div v-for="(item, index) in state.generatedDraft.questions.slice(0, 12)" :key="item.id" class="grid grid-cols-[42px_64px_1fr_54px] items-center gap-2 rounded border border-slate-100 bg-slate-50 px-3 py-2 text-xs">

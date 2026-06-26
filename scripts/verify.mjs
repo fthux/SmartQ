@@ -112,6 +112,9 @@ try {
   assert(appJs.includes("SHA-256"), "frontend exposes proctor evidence attachment digest");
   assert(appJs.includes("提交需全屏") && appJs.includes("提交前需完成"), "frontend exposes active proctor compliance requirements");
   assert(appJs.includes("/api/proctor/stream") && appJs.includes("实时通道"), "frontend connects proctor realtime stream");
+  assert(/const defaultSpec = \{\s+paperName: "",\s+direction: "",\s+difficulty: "中",\s+totalScore: 0,\s+singleCount: 0,\s+multipleCount: 0,\s+judgeCount: 0,\s+blankCount: 0,\s+shortCount: 0,\s+essayCount: 0,\s+knowledge: "",\s+requirements: "",\s+\};/m.test(appJs), "frontend leaves authoring text fields empty, numeric fields zero, and difficulty selected by default");
+  assert(appJs.includes('placeholder="请输入考卷名称"') && appJs.includes('placeholder="请输入出题方向"') && appJs.includes('placeholder="请输入知识点范围，用逗号分隔"') && appJs.includes('placeholder="请输入补充要求"'), "frontend shows authoring form placeholders");
+  assert(!appJs.includes("await saveGeneratedContent(generated, { silent: true })") && appJs.includes("进入质量复检") && appJs.includes("saveDraft"), "frontend keeps generated authoring preview unsaved until explicit confirmation");
   const config = await getJson("/api/config");
   assert(config.aiReady === true, "config reports AI layer ready");
   assert(config.mode === "mock", "verification explicitly enables mock mode");
@@ -394,6 +397,19 @@ try {
   assert(Number.isFinite(quality.schemaPassRate), "quality check returns schema pass rate");
   assert(Array.isArray(quality.failures), "quality check returns failures");
 
+  const judgementQuestion = savedDashboard.questions.find((item) => item.type === "判断");
+  assert(Boolean(judgementQuestion), "generated draft includes a judgement question for answer consistency checks");
+  const badStorageQuestion = await patchJson(`/api/questions/${judgementQuestion.id}`, {
+    stem: "在浏览器中，localStorage 的数据会随每一次同源 HTTP 请求自动发送到服务器，因此适合存储需要每次请求自动携带的会话标识。",
+    answer: "正确",
+    explanation: "localStorage 会自动跟随请求发送。",
+    status: "待确认",
+    quality: 88,
+  });
+  assert(badStorageQuestion.answer === "正确", "invalid known-fact judgement can be saved as draft for quality correction");
+  const knownFactQuality = await postJson("/api/quality/check", {});
+  assert(knownFactQuality.failures.some((item) => item.field === "answer" && item.message.includes("localStorage")), "quality check catches localStorage auto-send answer mismatch");
+
   const blockedPaperBuild = await postJson("/api/papers/build", {}, { expectedStatus: 409 });
   assert(blockedPaperBuild.eligibleCount === 0, "paper save requires reviewed questions");
 
@@ -401,6 +417,8 @@ try {
   assert(repair.questions.length === 12, "quality repair returns questions");
   assert(Number.isFinite(repair.checks.stabilityScore), "quality repair returns stability score");
   assert(repair.questions.every((item) => item.status === "待确认"), "quality repair still requires manual review");
+  const repairedStorageQuestion = repair.questions.find((item) => item.id === judgementQuestion.id);
+  assert(repairedStorageQuestion.answer === "错误" && repairedStorageQuestion.explanation.includes("不会把它们随每次 HTTP 请求自动发送"), "quality repair fixes known localStorage judgement answer");
 
   const invalidDraftQuestion = await patchJson("/api/questions/q-001", { score: 0, status: "待确认" });
   assert(invalidDraftQuestion.score === 0, "invalid question draft can be saved for correction");
@@ -1425,9 +1443,9 @@ function toDateTimeLocal(date) {
 function answerAllQuestions(questions = []) {
   return Object.fromEntries(
     questions.map((question) => {
-      if (question.type === "多选") return [question.id, ["A", "B"].filter((_, index) => index < (question.options || []).length)];
-      if (question.type === "判断") return [question.id, "正确"];
-      if (question.type === "单选") return [question.id, "A"];
+      if (question.type === "多选") return [question.id, Array.isArray(question.answer) ? question.answer : ["A"]];
+      if (question.type === "判断") return [question.id, question.answer || "正确"];
+      if (question.type === "单选") return [question.id, question.answer || "A"];
       return [question.id, "验证作答"];
     }),
   );

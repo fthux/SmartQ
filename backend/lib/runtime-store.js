@@ -518,23 +518,25 @@ function normalizeState(input) {
     : normalizedSessions.map(candidateFromSession).filter(Boolean);
   const normalizedGroups = Array.isArray(input.groups) ? input.groups.map(normalizeGroup).filter(Boolean) : groupsFromRows([...normalizedSessions, ...normalizedCandidates]);
   const groups = normalizedGroups.length ? normalizedGroups : [defaultGroup()];
+  const normalizedPaper = {
+    id: input.paper?.id || null,
+    name: input.paper?.name || "",
+    status: ["已组卷", "已保存"].includes(input.paper?.status) ? "未发布" : input.paper?.status || null,
+    publishedAt: input.paper?.publishedAt || null,
+    questionIds: Array.isArray(input.paper?.questionIds) ? input.paper.questionIds : [],
+    buildSpec: input.paper?.buildSpec || null,
+  };
+  const hasDiscardableAuthoringDraft = Boolean(input.generationTask && !normalizedPaper.id && !normalizedPaper.status);
   return {
     exam: input.exam || exam,
-    questions: Array.isArray(input.questions) ? input.questions : questions,
+    questions: hasDiscardableAuthoringDraft ? [] : (Array.isArray(input.questions) ? input.questions : questions),
     sessions: normalizedSessions,
     candidates: normalizedCandidates,
     groups,
     answers: input.answers && typeof input.answers === "object" ? input.answers : Object.fromEntries(answers.entries()),
-    paper: {
-      id: input.paper?.id || null,
-      name: input.paper?.name || "",
-      status: ["已组卷", "已保存"].includes(input.paper?.status) ? "未发布" : input.paper?.status || null,
-      publishedAt: input.paper?.publishedAt || null,
-      questionIds: Array.isArray(input.paper?.questionIds) ? input.paper.questionIds : [],
-      buildSpec: input.paper?.buildSpec || null,
-    },
+    paper: hasDiscardableAuthoringDraft ? { ...normalizedPaper, questionIds: [], buildSpec: null } : normalizedPaper,
     papers: Array.isArray(input.papers) ? input.papers.map(normalizePaperSnapshot).filter(Boolean) : [],
-    generationTask: input.generationTask || null,
+    generationTask: hasDiscardableAuthoringDraft ? null : (input.generationTask || null),
     gradingResults: input.gradingResults && typeof input.gradingResults === "object" ? input.gradingResults : {},
     adminSessions: input.adminSessions && typeof input.adminSessions === "object" ? input.adminSessions : {},
     loginSecurity: normalizeLoginSecurity(input.loginSecurity),

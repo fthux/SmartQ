@@ -50,7 +50,9 @@ export async function generateQuestions(spec = {}) {
     `题型分布：${normalizedSpec.typeMixText}`,
     `知识点范围：${normalizedSpec.knowledge.join("、")}`,
     `补充要求：${normalizedSpec.requirements || "无"}`,
-    "要求：严格按题型分布和总分生成；选择题答案用 A/B/C/D，多选答案为数组；主观题必须给 rubric；答案唯一或评分规则明确；不输出多余文本。",
+    "要求：严格按题型分布和总分生成；选择题答案用 A/B/C/D，多选答案为数组；判断题答案只用“正确”或“错误”；主观题必须给 rubric；答案唯一或评分规则明确；不输出多余文本。",
+    "自检要求：输出前逐题核对题干事实、选项、答案和解析是否一致；如果无法确认客观题答案，必须改写成可确定答案的题目。",
+    "事实边界示例：localStorage/sessionStorage 不会随 HTTP 请求自动发送到服务器；Cookie 才会在满足 domain/path/SameSite/Secure 等条件时由浏览器随请求携带。",
   ].join("\n");
 
   let response;
@@ -536,10 +538,11 @@ function buildChoiceOptions(type, knowledge, index) {
 function finalizeGeneratedQuestions(items, spec) {
   const normalized = normalizeGeneratedQuestions(items, spec);
   const repaired = ensureSpecCompliance(normalized, spec);
-  const checks = validateQuestions(repaired);
+  const factRepaired = repairKnownObjectiveAnswers(repaired);
+  const checks = validateQuestions(factRepaired);
   const specChecks = validateGenerationSpec(repaired, spec);
   return {
-    questions: repaired,
+    questions: factRepaired,
     checks: {
       ...checks,
       specPass: specChecks.failures.length === 0,
@@ -933,9 +936,18 @@ function normalizeAnswer(value, type) {
     return /^[A-D]$/.test(answer) ? answer : "A";
   }
   if (type === "判断") {
-    return ["正确", "错误"].includes(value) ? value : "正确";
+    return normalizeJudgementAnswer(value);
   }
   return String(value || "参考答案待完善。").trim();
+}
+
+function normalizeJudgementAnswer(value) {
+  if (value === true) return "正确";
+  if (value === false) return "错误";
+  const text = String(value ?? "").trim().toLowerCase();
+  if (["正确", "对", "是", "true", "t", "yes", "y", "1"].includes(text)) return "正确";
+  if (["错误", "错", "否", "false", "f", "no", "n", "0"].includes(text)) return "错误";
+  return "正确";
 }
 
 function normalizeList(value) {
@@ -999,6 +1011,11 @@ export function validateQuestions(items = questions) {
       failures.push({ index, field: "rubric", message: "主观题必须包含评分规则" });
     }
 
+    const knownAnswer = inferKnownObjectiveAnswer(item);
+    if (knownAnswer && !compareAnswer(item.answer, knownAnswer.answer)) {
+      failures.push({ index, field: "answer", message: knownAnswer.message });
+    }
+
     const normalizedStem = String(item.stem || "").replace(/\s+/g, "");
     if (normalizedStem) {
       if (seenStems.has(normalizedStem)) {
@@ -1047,7 +1064,7 @@ export function repairQuestions(items = questions) {
 
     if (next.type === "判断") {
       next.options = ["正确", "错误"];
-      next.answer = ["正确", "错误"].includes(next.answer) ? next.answer : "正确";
+      next.answer = normalizeJudgementAnswer(next.answer);
     }
 
     if (["简答", "论述"].includes(next.type)) {
@@ -1057,13 +1074,65 @@ export function repairQuestions(items = questions) {
 
     next.quality = Math.max(Number(next.quality || 90), 90);
     next.status = "待确认";
-    return next;
+    return repairKnownObjectiveAnswer(next);
   });
 
   return {
     questions: repaired,
     checks: validateQuestions(repaired),
   };
+}
+
+function repairKnownObjectiveAnswers(items = []) {
+  return items.map((item) => repairKnownObjectiveAnswer(item));
+}
+
+function repairKnownObjectiveAnswer(item = {}) {
+  const knownAnswer = inferKnownObjectiveAnswer(item);
+  if (!knownAnswer || compareAnswer(item.answer, knownAnswer.answer)) return item;
+  return {
+    ...item,
+    answer: knownAnswer.answer,
+    explanation: knownAnswer.explanation,
+    quality: Math.max(70, Math.min(100, Number(item.quality || 88) - 6)),
+  };
+}
+
+function inferKnownObjectiveAnswer(item = {}) {
+  if (item.type !== "判断") return null;
+  const text = normalizeFactText(item.stem);
+  const mentionsClientStorage = /\b(localstorage|sessionstorage)\b/.test(text);
+  const mentionsRequestAutoSend =
+    /自动(发送|携带)/.test(text) ||
+    /随.*(http|https)?请求.*(发送|携带|提交|传给|传递|到服务器)/.test(text) ||
+    /每(一)?次.*请求.*(服务器|携带|发送)/.test(text);
+  const negatesRequestAutoSend =
+    /(不|不会|不能|无法|并不会|不应|不适合).{0,12}(随|自动|每次|每一次|请求|发送|携带|服务器)/.test(text) ||
+    /(随|自动|每次|每一次|请求|发送|携带|服务器).{0,12}(不|不会|不能|无法)/.test(text);
+
+  if (mentionsClientStorage && mentionsRequestAutoSend) {
+    return {
+      answer: negatesRequestAutoSend ? "正确" : "错误",
+      message: "答案与浏览器存储事实不一致：localStorage/sessionStorage 不会随 HTTP 请求自动发送",
+      explanation: "localStorage 和 sessionStorage 是客户端 Web Storage，浏览器不会把它们随每次 HTTP 请求自动发送到服务器；需要自动随请求携带的会话标识通常应使用 Cookie，并受 domain、path、SameSite、Secure 等属性约束。",
+    };
+  }
+
+  if (/只需要记忆语法，不需要结合场景判断/.test(text)) {
+    return {
+      answer: "错误",
+      message: "答案与工程能力判断不一致：工程题不能只依赖语法记忆",
+      explanation: "工程能力测评应结合场景、边界条件和运行结果判断，不能只依赖语法记忆。",
+    };
+  }
+
+  return null;
+}
+
+function normalizeFactText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "");
 }
 
 function compareAnswer(value, answer) {

@@ -80,6 +80,7 @@ const app = createApp({
         user: null,
         username: localStorage.getItem("smartqAdminUsername") || "admin",
         password: "",
+        rememberUsername: Boolean(localStorage.getItem("smartqAdminUsername")),
         loading: false,
         error: "",
       },
@@ -850,7 +851,8 @@ const app = createApp({
         state.admin.user = result.admin;
         state.admin.password = "";
         localStorage.setItem("smartqAdminToken", result.token);
-        localStorage.setItem("smartqAdminUsername", username);
+        if (state.admin.rememberUsername) localStorage.setItem("smartqAdminUsername", username);
+        else localStorage.removeItem("smartqAdminUsername");
         notify("运营控制台登录成功");
         if (!canAccessRoute(state.route)) go("home");
         await refresh();
@@ -3268,7 +3270,7 @@ const app = createApp({
         if (state.route === "proctor") startProctorRefresh();
         else stopProctorRefresh();
         if (state.route === "papers") clearSelectedPaper();
-      if (state.route === "candidate") {
+        if (state.route === "candidate") {
           if (state.candidate.sessionId && state.candidate.authToken) loadCandidateSession(state.candidate.sessionId).catch((error) => notify(`考试会话加载失败：${error.message}`));
         }
         if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
@@ -3541,8 +3543,8 @@ const app = createApp({
     };
   },
   template: `
-    <main v-if="state.route === 'candidate'" class="min-h-screen w-full bg-slate-50 px-4 py-4 md:px-6">
-      <header class="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-slate-50/95 backdrop-blur">
+    <main v-if="state.route === 'candidate'" :class="state.candidate.authToken ? 'min-h-screen w-full bg-slate-50 px-4 py-4 md:px-6' : 'min-h-screen w-full overflow-hidden bg-[#edf8f3]'">
+      <header v-if="state.candidate.authToken" class="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-slate-50/95 backdrop-blur">
         <div class="min-w-0">
           <div class="text-sm font-black text-ink">{{ state.candidate.session ? (state.candidate.paper?.name || state.candidate.session?.paper || '考试') : '考生系统' }}</div>
           <div class="truncate text-xs font-semibold text-slate-500">
@@ -3557,26 +3559,61 @@ const app = createApp({
         </div>
       </header>
 
-      <section v-if="!state.candidate.authToken" class="flex min-h-[calc(100vh-88px)] items-center justify-center">
-        <form novalidate class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-soft" @submit.prevent="loginCandidate">
-          <div class="text-sm font-bold text-ocean">考生系统</div>
-          <h1 class="mt-2 text-3xl font-black">手机号登录</h1>
-          <div class="mt-1 text-sm font-semibold text-slate-500">登录后查看已分配的考试</div>
-          <label class="mt-6 block text-xs font-bold text-slate-600">手机号
-            <input v-model="state.candidate.loginPhone" autocomplete="username" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink" :class="state.candidate.loginErrors.loginPhone ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" placeholder="请输入手机号" />
-            <div :class="fieldErrorClass(state.candidate.loginErrors.loginPhone)">{{ state.candidate.loginErrors.loginPhone || '' }}</div>
-          </label>
-          <label class="mt-4 block text-xs font-bold text-slate-600">密码
-            <input v-model="state.candidate.loginPassword" type="password" autocomplete="current-password" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink" :class="state.candidate.loginErrors.loginPassword ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" placeholder="请输入密码" />
-            <div :class="fieldErrorClass(state.candidate.loginErrors.loginPassword)">{{ state.candidate.loginErrors.loginPassword || '' }}</div>
-          </label>
-          <div v-if="state.candidate.loginErrors.form" class="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-coral">
-            {{ state.candidate.loginErrors.form }}
+      <section v-if="!state.candidate.authToken" class="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-8">
+        <div class="absolute left-0 top-0 h-72 w-72 rounded-full bg-leaf/15 blur-3xl"></div>
+        <div class="absolute bottom-0 right-0 h-96 w-96 rounded-full bg-ocean/15 blur-3xl"></div>
+        <div class="absolute left-[8%] top-[14%] hidden h-16 w-16 rotate-45 rounded-md border-[10px] border-leaf/25 lg:block"></div>
+        <div class="absolute bottom-[12%] right-[10%] hidden h-20 w-20 rounded-full border-[12px] border-ocean/20 lg:block"></div>
+
+        <div class="relative z-10 grid w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-[0_30px_90px_rgba(18,32,31,0.16)] lg:min-h-[620px] lg:grid-cols-[1.05fr_0.95fr]">
+          <div class="relative hidden items-center justify-center bg-[#f6fbf8] px-10 py-12 lg:flex">
+            <div class="absolute left-0 top-0 h-full w-24 bg-gradient-to-b from-leaf/15 to-transparent"></div>
+            <div class="relative">
+              <div class="absolute -left-8 -top-8 h-28 w-28 rounded-full bg-leaf/10"></div>
+              <div class="absolute -right-8 bottom-6 h-24 w-24 rounded-full bg-ocean/10"></div>
+              <img src="/assets/candidate-login-illustration.png" alt="" class="relative z-10 w-full max-w-[520px] object-contain drop-shadow-[0_24px_34px_rgba(18,32,31,0.12)]" />
+            </div>
           </div>
-          <button type="submit" class="mt-6 flex h-11 w-full items-center justify-center rounded-lg bg-ink text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.candidate.loginLoading">
-            {{ state.candidate.loginLoading ? '登录中' : '登录' }}
-          </button>
-        </form>
+
+          <div class="flex min-h-[620px] items-center justify-center px-6 py-10 sm:px-10">
+            <form novalidate class="w-full max-w-sm" @submit.prevent="loginCandidate">
+              <div class="flex items-center gap-3">
+                <span class="flex h-12 w-12 items-center justify-center rounded-lg bg-leaf text-lg font-black text-white shadow-[0_12px_24px_rgba(22,167,115,0.25)]">Q</span>
+                <span>
+                  <span class="block text-xl font-black text-ink">SmartQ</span>
+                  <span class="block text-xs font-bold text-slate-400">考生测评入口</span>
+                </span>
+              </div>
+              <div class="mt-10 text-sm font-black text-leaf">欢迎回来</div>
+              <h1 class="mt-2 text-4xl font-black text-ink">考生登录</h1>
+              <div class="mt-3 text-sm font-semibold leading-6 text-slate-500">登录后查看已分配的考试，并在规定时间内完成作答。</div>
+
+              <label class="mt-8 block text-xs font-black text-slate-500">手机号
+                <div class="mt-2 flex h-12 items-center gap-3 rounded-lg border bg-white px-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition" :class="state.candidate.loginErrors.loginPhone ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200 focus-within:border-leaf focus-within:ring-2 focus-within:ring-emerald-100'">
+                  <i data-lucide="smartphone" class="h-4 w-4 text-leaf"></i>
+                  <input v-model="state.candidate.loginPhone" autocomplete="username" class="h-full min-w-0 flex-1 bg-transparent text-sm font-semibold text-ink outline-none" placeholder="请输入手机号" />
+                </div>
+                <div :class="fieldErrorClass(state.candidate.loginErrors.loginPhone)">{{ state.candidate.loginErrors.loginPhone || '' }}</div>
+              </label>
+
+              <label class="mt-4 block text-xs font-black text-slate-500">密码
+                <div class="mt-2 flex h-12 items-center gap-3 rounded-lg border bg-white px-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition" :class="state.candidate.loginErrors.loginPassword ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200 focus-within:border-leaf focus-within:ring-2 focus-within:ring-emerald-100'">
+                  <i data-lucide="lock-keyhole" class="h-4 w-4 text-leaf"></i>
+                  <input v-model="state.candidate.loginPassword" type="password" autocomplete="current-password" class="h-full min-w-0 flex-1 bg-transparent text-sm font-semibold text-ink outline-none" placeholder="请输入密码" />
+                </div>
+                <div :class="fieldErrorClass(state.candidate.loginErrors.loginPassword)">{{ state.candidate.loginErrors.loginPassword || '' }}</div>
+              </label>
+
+              <div v-if="state.candidate.loginErrors.form" class="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-coral">
+                {{ state.candidate.loginErrors.form }}
+              </div>
+              <button type="submit" class="mt-7 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-leaf text-sm font-black text-white shadow-[0_16px_28px_rgba(22,167,115,0.24)] transition hover:bg-[#128a61] disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.candidate.loginLoading">
+                <i data-lucide="log-in" class="h-4 w-4"></i>
+                {{ state.candidate.loginLoading ? '登录中' : '登录' }}
+              </button>
+            </form>
+          </div>
+        </div>
       </section>
 
       <section v-else-if="state.candidate.authUser?.passwordMustChange" class="flex min-h-[calc(100vh-88px)] items-center justify-center">
@@ -3810,8 +3847,8 @@ const app = createApp({
       </div>
     </main>
 
-    <main v-else class="min-h-screen w-full px-8 py-6">
-      <header class="flex h-16 items-center justify-between rounded-lg border border-slate-200/80 bg-white/90 px-5 shadow-soft backdrop-blur">
+    <main v-else :class="state.admin.token ? 'min-h-screen w-full px-8 py-6' : 'min-h-screen w-full overflow-hidden bg-[#f2f5fa]'">
+      <header v-if="state.admin.token" class="flex h-16 items-center justify-between rounded-lg border border-slate-200/80 bg-white/90 px-5 shadow-soft backdrop-blur">
         <button class="flex items-center gap-4 text-left" @click="go('home')">
           <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-lg font-black text-white">Q</span>
           <span>
@@ -3837,25 +3874,81 @@ const app = createApp({
         </div>
       </header>
 
-      <section v-if="!state.admin.token" class="mt-10 flex min-h-[calc(100vh-140px)] items-center justify-center">
-        <form novalidate class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-soft" @submit.prevent="loginAdmin">
-          <div class="text-sm font-bold text-ocean">运营控制台</div>
-          <h1 class="mt-2 text-3xl font-black tracking-normal">管理员登录</h1>
-          <div class="mt-1 text-sm font-semibold text-slate-500">登录后管理出题、分配、监考和阅卷分析</div>
-          <label class="mt-6 block text-sm font-bold text-slate-600">
-            管理员账号
-            <input v-model="state.admin.username" autocomplete="username" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" placeholder="admin" />
-          </label>
-          <label class="mt-4 block text-sm font-bold text-slate-600">
-            登录密码
-            <input v-model="state.admin.password" type="password" autocomplete="current-password" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink" placeholder="请输入密码" />
-          </label>
-          <div v-if="state.admin.error" class="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-coral">{{ state.admin.error }}</div>
-          <button class="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-ink text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.admin.loading">
-            <i data-lucide="log-in" class="h-4 w-4"></i>
-            {{ state.admin.loading ? '登录中' : '登录控制台' }}
-          </button>
-        </form>
+      <section v-if="!state.admin.token" class="relative flex h-screen items-center justify-center overflow-hidden px-4 py-8 sm:px-8">
+        <div class="absolute inset-y-0 right-0 hidden w-1/2 bg-[#dff7ed] lg:block"></div>
+        <div class="absolute left-[17%] top-[9%] hidden h-14 w-14 rotate-45 rounded-md border-[10px] border-emerald-400/70 lg:block"></div>
+        <div class="absolute bottom-[9%] left-[30%] hidden h-20 w-20 rotate-45 rounded-md border-[10px] border-leaf/70 lg:block"></div>
+        <div class="absolute right-[7%] top-[9%] hidden h-14 w-14 rounded-lg border-[10px] border-teal-300/75 lg:block"></div>
+
+        <div class="relative z-10 grid w-full max-w-6xl overflow-hidden bg-white/80 shadow-[0_34px_85px_rgba(18,32,31,0.22)] lg:h-[calc(100vh-96px)] lg:min-h-[600px] lg:max-h-[720px] lg:grid-cols-[1fr_1fr]">
+          <div class="flex min-h-[600px] flex-col items-center justify-center bg-[#f7f9fd]/95 px-6 py-10 sm:px-10 lg:min-h-0">
+            <div class="mb-9 flex flex-col items-center text-center">
+              <div class="relative h-16 w-48">
+                <div class="absolute left-8 top-2 h-10 w-28 -rotate-8 bg-leaf"></div>
+                <div class="absolute left-10 top-0 flex h-12 w-32 -rotate-8 items-center justify-center bg-leaf text-xl font-black text-white shadow-lg">SmartQ</div>
+                <div class="absolute left-20 top-12 text-[11px] font-black uppercase text-slate-400">Console</div>
+              </div>
+            </div>
+
+            <form novalidate class="w-full max-w-[340px] rounded border border-slate-200 bg-white px-6 py-6 shadow-[0_10px_28px_rgba(15,23,42,0.08)]" @submit.prevent="loginAdmin">
+              <label class="block text-xs font-bold text-slate-500">
+                管理员账号
+                <input v-model="state.admin.username" autocomplete="username" class="mt-2 h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-leaf focus:ring-2 focus:ring-emerald-100" placeholder="admin" />
+              </label>
+              <label class="mt-4 block text-xs font-bold text-slate-500">
+                登录密码
+                <input v-model="state.admin.password" type="password" autocomplete="current-password" class="mt-2 h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-leaf focus:ring-2 focus:ring-emerald-100" placeholder="请输入密码" />
+              </label>
+              <div v-if="state.admin.error" class="mt-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-coral">{{ state.admin.error }}</div>
+              <button class="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded bg-leaf text-sm font-black text-white shadow-[0_8px_18px_rgba(22,167,115,0.24)] transition hover:bg-[#128a61] disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.admin.loading">
+                <i data-lucide="log-in" class="h-4 w-4"></i>
+                {{ state.admin.loading ? '登录中' : '登录控制台' }}
+              </button>
+              <div class="mt-4 flex items-center justify-between text-xs font-bold text-slate-400">
+                <label class="flex cursor-pointer items-center gap-2 select-none">
+                  <input v-model="state.admin.rememberUsername" type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-leaf focus:ring-leaf" />
+                  记住账号
+                </label>
+                <span class="text-leaf">安全登录</span>
+              </div>
+              <div class="mt-5 border-t border-slate-100 pt-4 text-center text-xs font-black text-leaf">SmartQ 运营控制台</div>
+            </form>
+
+            <div class="mt-auto pt-8 text-center text-[11px] font-bold text-slate-500">
+              © 2026 SmartQ. All rights reserved.
+            </div>
+          </div>
+
+          <div class="relative hidden min-h-[600px] overflow-hidden bg-[#e7faf1] lg:block">
+            <div class="absolute inset-0 bg-[linear-gradient(180deg,rgba(236,253,245,0.82),rgba(209,250,229,0.92)),radial-gradient(circle_at_70%_28%,rgba(22,167,115,0.18),transparent_34%),linear-gradient(135deg,rgba(22,167,115,0.10)_0_1px,transparent_1px_42px)]"></div>
+            <div class="absolute inset-x-0 bottom-0 h-[46%] opacity-55">
+              <div class="absolute bottom-0 left-0 h-28 w-full bg-[#b7ead7]"></div>
+              <div class="absolute bottom-20 left-10 h-20 w-28 bg-[#8ddfbe]"></div>
+              <div class="absolute bottom-24 left-36 h-14 w-20 bg-[#a7e8d0]"></div>
+              <div class="absolute bottom-20 left-60 h-24 w-32 bg-[#74d5ad]"></div>
+              <div class="absolute bottom-24 right-24 h-32 w-14 bg-[#9be4c9]"></div>
+              <div class="absolute bottom-24 right-44 h-24 w-12 bg-[#7cd9b4]"></div>
+              <div class="absolute bottom-24 right-64 h-16 w-20 bg-[#b6edda]"></div>
+              <div class="absolute bottom-12 left-20 h-6 w-64 -rotate-6 rounded-full bg-[#16a773]/35"></div>
+              <div class="absolute bottom-28 left-16 h-6 w-28 bg-[#16a773]/50"></div>
+              <div class="absolute bottom-28 left-48 h-6 w-28 bg-[#0f9ea8]/35"></div>
+              <div class="absolute bottom-28 left-80 h-6 w-28 bg-[#16a773]/50"></div>
+            </div>
+            <div class="relative z-10 flex h-full min-h-[600px] items-center px-12">
+              <div class="max-w-md text-ink">
+                <div class="text-2xl font-medium">欢迎来到 <span class="font-black">SmartQ</span></div>
+                <div class="mt-4 h-px w-80 max-w-full bg-leaf/35"></div>
+                <p class="mt-6 text-base font-semibold leading-7 text-slate-600">
+                  面向考试运营、AI 命题、监考风控与阅卷分析的一体化控制台，让每一次测评都清晰、稳定、可追踪。
+                </p>
+                <div class="mt-7 inline-flex items-center gap-2 rounded border border-leaf/30 bg-white/70 px-4 py-2 text-sm font-black text-leaf shadow-sm">
+                  <i data-lucide="shield-check" class="h-4 w-4 stroke-[2.6]"></i>
+                  Secure console
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <div v-else-if="state.loading && !state.dashboard" class="mt-6 rounded-lg border border-slate-200 bg-white p-8 text-sm font-bold text-slate-500 shadow-soft">

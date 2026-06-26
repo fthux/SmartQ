@@ -1,0 +1,3022 @@
+{
+  "exam": {
+    "id": "exam-2026-spring",
+    "title": "2026 春季综合能力测评",
+    "subject": "综合能力",
+    "totalScore": 50,
+    "questionCount": 12,
+    "windowStart": "09:00",
+    "windowEnd": "11:45",
+    "blueprint": {
+      "objectiveScore": 33,
+      "subjectiveScore": 17,
+      "knowledgeCoverage": 87,
+      "stabilityScore": 94,
+      "schemaPassRate": 100,
+      "answerConsistency": 97
+    }
+  },
+  "questions": [
+    {
+      "id": "q-001",
+      "type": "单选",
+      "stem": "在 C++17 中，以下哪种写法会在编译期阻止从 double 到 int 的窄化转换？",
+      "options": [
+        "int x = 3.14;",
+        "int x(3.14);",
+        "int x{3.14};",
+        "int x = static_cast<int>(3.14);"
+      ],
+      "answer": "C",
+      "score": 5,
+      "difficulty": "中",
+      "knowledge": [
+        "语法基础"
+      ],
+      "explanation": "列表初始化会禁止窄化转换，int x{3.14} 通常会导致编译错误，从而避免隐式丢失精度。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-002",
+      "type": "单选",
+      "stem": "关于 std::vector<int> v; 执行 v.push_back(x) 后，以下说法最准确的是哪一项？",
+      "options": [
+        "一定不会使任何迭代器失效",
+        "只会使 end() 迭代器失效，其他迭代器一定有效",
+        "如果发生扩容，所有迭代器、指针和引用都可能失效",
+        "只要 x 是 int，就不会发生扩容"
+      ],
+      "answer": "C",
+      "score": 5,
+      "difficulty": "中",
+      "knowledge": [
+        "STL",
+        "内存管理"
+      ],
+      "explanation": "vector 的 push_back 可能触发重新分配存储空间；一旦扩容，原有元素被移动或拷贝到新内存，旧迭代器、指针和引用都会失效。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-003",
+      "type": "单选",
+      "stem": "以下哪种释放方式与 int* p = new int[10]; 正确匹配？",
+      "options": [
+        "delete p;",
+        "delete[] p;",
+        "free(p);",
+        "p = nullptr;"
+      ],
+      "answer": "B",
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "内存管理"
+      ],
+      "explanation": "new[] 分配的数组必须使用 delete[] 释放；delete、free 或仅赋空指针都不能正确匹配该分配方式。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-004",
+      "type": "单选",
+      "stem": "当一个基类指针可能指向派生类对象，并通过该基类指针 delete 对象时，基类析构函数通常应如何声明？",
+      "options": [
+        "声明为 static",
+        "声明为 virtual",
+        "声明为 inline 且非 virtual",
+        "声明为 private 且非 virtual"
+      ],
+      "answer": "B",
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "面向对象",
+        "内存管理"
+      ],
+      "explanation": "通过基类指针删除派生类对象时，基类析构函数应为 virtual，否则可能只调用基类析构函数，导致未定义行为或资源泄漏。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-005",
+      "type": "多选",
+      "stem": "关于 C++ 异常处理和资源管理，下列说法正确的有哪几项？",
+      "options": [
+        "RAII 可以利用对象析构函数在作用域退出时自动释放资源",
+        "catch(...) 会捕获所有异常，因此可以安全忽略所有异常",
+        "析构函数在栈展开期间抛出未捕获异常可能导致 std::terminate",
+        "throw; 可在 catch 块中重新抛出当前捕获的异常"
+      ],
+      "answer": [
+        "A",
+        "C",
+        "D"
+      ],
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "异常处理",
+        "内存管理"
+      ],
+      "explanation": "RAII 是 C++ 资源管理核心方式；栈展开期间析构函数若再抛出未处理异常可能终止程序；catch 中的 throw; 可重新抛出当前异常。catch(...) 虽能捕获多类异常，但直接忽略通常不安全。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-006",
+      "type": "多选",
+      "stem": "关于 STL 容器的常见特性，下列说法正确的有哪几项？",
+      "options": [
+        "std::map 默认按键有序存储",
+        "std::unordered_map 默认保证按键升序遍历",
+        "std::list 在已知位置插入元素通常不会使其他元素的迭代器失效",
+        "std::vector 支持按下标进行常数时间随机访问"
+      ],
+      "answer": [
+        "A",
+        "C",
+        "D"
+      ],
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "STL"
+      ],
+      "explanation": "map 是基于键有序的关联容器；unordered_map 不保证遍历顺序；list 节点式存储，插入通常不影响其他元素迭代器；vector 支持常数时间随机访问。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-007",
+      "type": "判断",
+      "stem": "如果一个类包含虚函数，那么它的析构函数一定会被编译器自动声明为 virtual。",
+      "options": [
+        "正确",
+        "错误"
+      ],
+      "answer": "正确",
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "面向对象"
+      ],
+      "explanation": "类中存在虚函数并不会使析构函数自动变为 virtual。若需要通过基类指针安全删除派生类对象，应显式声明虚析构函数。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-008",
+      "type": "判断",
+      "stem": "std::unique_ptr 允许拷贝构造，因此可以直接将一个 unique_ptr 赋值给另一个 unique_ptr。",
+      "options": [
+        "正确",
+        "错误"
+      ],
+      "answer": "正确",
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "内存管理",
+        "语法基础"
+      ],
+      "explanation": "unique_ptr 表示独占所有权，禁止拷贝，只能通过移动语义转移所有权，例如使用 std::move。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-009",
+      "type": "填空",
+      "stem": "写出以下代码的输出结果：\n#include <iostream>\n#include <vector>\nint main() {\n    std::vector<int> v{1, 2, 3};\n    v.push_back(4);\n    int sum = 0;\n    for (int x : v) sum += x;\n    std::cout << sum;\n}",
+      "options": [],
+      "answer": "10",
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "语法基础",
+        "STL"
+      ],
+      "explanation": "vector 中元素为 1、2、3、4，范围 for 依次累加，结果为 10。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-010",
+      "type": "填空",
+      "stem": "补全代码中唯一缺失的标准库函数名，使 p2 获得 p1 的所有权：\n#include <memory>\nstd::unique_ptr<int> p1(new int(5));\nstd::unique_ptr<int> p2 = std::____(p1);",
+      "options": [],
+      "answer": "move",
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "内存管理",
+        "语法基础"
+      ],
+      "explanation": "unique_ptr 不能拷贝，只能移动；std::move(p1) 将 p1 转换为右值引用，从而转移所有权给 p2。",
+      "rubric": [],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-011",
+      "type": "简答",
+      "stem": "简述 RAII 的核心思想，并说明它如何帮助 C++ 程序减少资源泄漏。请结合至少一种资源举例。",
+      "options": [],
+      "answer": "RAII 将资源的获取绑定到对象初始化，将资源释放绑定到对象析构；对象离开作用域时析构函数自动执行，因此即使发生异常也能释放资源。例如使用 std::unique_ptr 管理动态内存，或使用 std::lock_guard 管理互斥锁。",
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "内存管理",
+        "异常处理",
+        "语法基础"
+      ],
+      "explanation": "本题考查对 RAII 的概念、作用域生命周期、异常安全价值以及工程实践示例的理解。",
+      "rubric": [
+        "概念准确",
+        "覆盖关键步骤",
+        "结合实际场景",
+        "表达清晰"
+      ],
+      "quality": 92,
+      "status": "已校验"
+    },
+    {
+      "id": "q-012",
+      "type": "简答",
+      "stem": "在面向对象设计中，为什么通过基类指针管理派生类对象时通常需要虚析构函数？如果没有虚析构函数，可能产生什么问题？",
+      "options": [],
+      "answer": "因为通过基类指针 delete 派生类对象时，需要动态绑定到派生类析构函数，保证先执行派生类析构再执行基类析构。若基类析构函数不是 virtual，删除派生类对象可能导致未定义行为，派生类资源无法正确释放，造成资源泄漏或对象清理不完整。",
+      "score": 4,
+      "difficulty": "中",
+      "knowledge": [
+        "面向对象",
+        "内存管理"
+      ],
+      "explanation": "本题考查多态对象销毁规则、虚析构函数的必要性以及资源释放风险。",
+      "rubric": [
+        "概念准确",
+        "覆盖关键步骤",
+        "结合实际场景",
+        "表达清晰"
+      ],
+      "quality": 92,
+      "status": "已校验"
+    }
+  ],
+  "sessions": [
+    {
+      "id": "sess-mqs7bigt-fp1ekhvs",
+      "candidate": "张三",
+      "ticket": "P000009",
+      "className": "默认分组",
+      "remark": "",
+      "paperId": "paper-1782232132680",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "paper": "C++ 工程能力测评 A 卷",
+      "paperSnapshotVersion": "2026-06-24T12:22:44.083Z",
+      "time": "2026-06-24T10:00-2026-06-24T11:30",
+      "startTime": "2026-06-24T10:00",
+      "endTime": "2026-06-24T11:30",
+      "remainingMinutes": 0,
+      "progress": 100,
+      "status": "已提交",
+      "risk": "低",
+      "events": [],
+      "camera": "已提交",
+      "accessToken": "utgq9ypxs7bigu",
+      "assignedAt": "2026-06-24T15:01:38.238Z",
+      "createdAt": "2026-06-24T15:01:38.238Z",
+      "paperVariant": null,
+      "lastSeenAt": "2026-06-24T16:00:51.157Z",
+      "submittedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    {
+      "id": "sess-mqtjhahx-25zupp82",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "phone": "13122222222",
+      "email": "",
+      "remark": "",
+      "paperId": "paper-1782232132680",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "paper": "C++ 工程能力测评 A 卷",
+      "paperSnapshotVersion": "2026-06-24T12:22:44.083Z",
+      "time": "2026-06-26T10:00-2026-06-27T11:30",
+      "startTime": "2026-06-26T10:00",
+      "endTime": "2026-06-27T11:30",
+      "remainingMinutes": 0,
+      "progress": 0,
+      "status": "待开考",
+      "risk": "低",
+      "events": [],
+      "camera": "待接入",
+      "accessToken": "zbHW86B1NK2SubDdl4dWQQ",
+      "assignedAt": "2026-06-25T13:29:49.413Z",
+      "createdAt": "2026-06-25T13:29:49.413Z",
+      "paperVariant": null
+    },
+    {
+      "id": "sess-mqtji5xg-ara9yanh",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "phone": "13122222222",
+      "email": "",
+      "remark": "",
+      "paperId": "paper-1782232132680",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "paper": "C++ 工程能力测评 A 卷",
+      "paperSnapshotVersion": "2026-06-24T12:22:44.083Z",
+      "time": "2026-06-25T10:00-2026-06-25T11:30",
+      "startTime": "2026-06-25T10:00",
+      "endTime": "2026-06-25T11:30",
+      "remainingMinutes": 0,
+      "progress": 100,
+      "status": "已提交",
+      "risk": "低",
+      "events": [],
+      "camera": "已提交",
+      "accessToken": "T1AUoqXTCwN0PEFASrqwtQ",
+      "assignedAt": "2026-06-25T13:30:30.149Z",
+      "createdAt": "2026-06-25T13:30:30.149Z",
+      "paperVariant": null,
+      "submittedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    {
+      "id": "sess-mqtjijit-xz4eapii",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "phone": "13122222222",
+      "email": "",
+      "remark": "",
+      "paperId": "paper-1782232132680",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "paper": "C++ 工程能力测评 A 卷",
+      "paperSnapshotVersion": "2026-06-24T12:22:44.083Z",
+      "time": "2026-06-25T10:02-2026-06-25T11:30",
+      "startTime": "2026-06-25T10:02",
+      "endTime": "2026-06-25T11:30",
+      "remainingMinutes": 0,
+      "progress": 100,
+      "status": "已提交",
+      "risk": "低",
+      "events": [],
+      "camera": "已提交",
+      "accessToken": "yxJXK5noKEyCpChz75GTbg",
+      "assignedAt": "2026-06-25T13:30:47.765Z",
+      "createdAt": "2026-06-25T13:30:47.765Z",
+      "paperVariant": null,
+      "submittedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    {
+      "id": "sess-mqtnnz2v-welqy7ty",
+      "candidate": "张三",
+      "ticket": "P000009",
+      "className": "默认分组",
+      "phone": "13111111111",
+      "email": "1111111@11.com",
+      "remark": "",
+      "paperId": "paper-1782232132680",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "paper": "C++ 工程能力测评 A 卷",
+      "paperSnapshotVersion": "2026-06-24T12:22:44.083Z",
+      "time": "2026-06-25T10:00-2026-06-25T11:30",
+      "startTime": "2026-06-25T10:00",
+      "endTime": "2026-06-25T11:30",
+      "remainingMinutes": 0,
+      "progress": 100,
+      "status": "已提交",
+      "risk": "低",
+      "events": [],
+      "camera": "已提交",
+      "accessToken": "HiNniJxrCvHkPC-B07vlkw",
+      "assignedAt": "2026-06-25T15:26:59.672Z",
+      "createdAt": "2026-06-25T15:26:59.672Z",
+      "paperVariant": null,
+      "submittedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    {
+      "id": "sess-mqtno7tp-z4f08r2l",
+      "candidate": "zhaowu",
+      "ticket": "P000003",
+      "className": "默认分组",
+      "phone": "111111",
+      "email": "",
+      "remark": "",
+      "paperId": "paper-1782232132680",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "paper": "C++ 工程能力测评 A 卷",
+      "paperSnapshotVersion": "2026-06-24T12:22:44.083Z",
+      "time": "2026-06-25T10:00-2026-06-25T11:30",
+      "startTime": "2026-06-25T10:00",
+      "endTime": "2026-06-25T11:30",
+      "remainingMinutes": 0,
+      "progress": 100,
+      "status": "已提交",
+      "risk": "低",
+      "events": [],
+      "camera": "已提交",
+      "accessToken": "gJhDzQav637zgLixtCZ5Gg",
+      "assignedAt": "2026-06-25T15:27:11.005Z",
+      "createdAt": "2026-06-25T15:27:11.005Z",
+      "paperVariant": null,
+      "submittedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    {
+      "id": "sess-mqtnow41-xpeq8j9s",
+      "candidate": "zhaowu",
+      "ticket": "P000003",
+      "className": "默认分组",
+      "phone": "111111",
+      "email": "",
+      "remark": "",
+      "paperId": "paper-1782232132680",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "paper": "C++ 工程能力测评 A 卷",
+      "paperSnapshotVersion": "2026-06-24T12:22:44.083Z",
+      "time": "2026-06-26T10:00-2026-06-26T11:30",
+      "startTime": "2026-06-26T10:00",
+      "endTime": "2026-06-26T11:30",
+      "remainingMinutes": 0,
+      "progress": 100,
+      "status": "已提交",
+      "risk": "低",
+      "events": [],
+      "camera": "已提交",
+      "accessToken": "sY8dVKsZojZ6Kr60wICTqQ",
+      "assignedAt": "2026-06-25T15:27:42.481Z",
+      "createdAt": "2026-06-25T15:27:42.481Z",
+      "paperVariant": null,
+      "submittedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    {
+      "id": "sess-mqto5dg5-v60mn5wy",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "phone": "13122222222",
+      "email": "",
+      "remark": "",
+      "paperId": "paper-1782230478624",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "paper": "C++ 工程能力测评 A 卷",
+      "paperSnapshotVersion": "2026-06-25T15:38:53.275Z",
+      "time": "2026-06-25T23:00-2026-06-26T02:30",
+      "startTime": "2026-06-25T23:00",
+      "endTime": "2026-06-26T02:30",
+      "remainingMinutes": 0,
+      "progress": 100,
+      "status": "已提交",
+      "risk": "中",
+      "events": [
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面",
+        "离开考试页面"
+      ],
+      "camera": "已提交",
+      "accessToken": "DAYEj9F_SQ15o7PnJiPYLg",
+      "assignedAt": "2026-06-25T15:40:31.446Z",
+      "createdAt": "2026-06-25T15:40:31.446Z",
+      "lastSeenAt": "2026-06-25T16:48:00.369Z",
+      "paperVariant": null,
+      "device": {
+        "camera": "待接入",
+        "screen": "未共享",
+        "fullscreen": "未知",
+        "visibility": "hidden",
+        "clipboard": "正常",
+        "userAgent": "",
+        "updatedAt": "2026-06-25T16:48:00.369Z"
+      },
+      "submittedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "cand-P000009",
+      "candidate": "张三",
+      "ticket": "P000009",
+      "className": "默认分组",
+      "phone": "13111111111",
+      "email": "1111111@11.com",
+      "description": "阿迪发多发发",
+      "avatar": "data:image/png;base64,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",
+      "passwordHash": "pbkdf2$120000$2152c021137c2252015137ad2e5880fb$819de81d793387ed4007cee6bf38743ea5b0d7ff43c9105af1c2e72afc912464",
+      "passwordUpdatedAt": "2026-06-24T15:56:43.009Z",
+      "passwordMustChange": false,
+      "loginToken": "WKwYdE1JErVj8pRrlzpYziIzQInRNRUK0XYSN0zMo3w",
+      "loginTokenExpiresAt": "2026-06-25T03:58:07.086Z",
+      "lastLoginAt": "2026-06-24T15:58:07.086Z",
+      "disabledAt": null,
+      "tags": [],
+      "createdAt": "2026-06-24T14:22:05.171Z",
+      "updatedAt": "2026-06-24T15:56:43.009Z"
+    },
+    {
+      "id": "cand-P000002",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "phone": "13122222222",
+      "email": "",
+      "description": "",
+      "avatar": "",
+      "passwordHash": "pbkdf2$120000$68bcbc999feb9d103b53b4204f56368c$7759f9cf9df1c7d1236fe81adc5804a0344b043762ba7d9af86f83c62aee80c3",
+      "passwordUpdatedAt": "2026-06-25T12:25:53.619Z",
+      "passwordMustChange": false,
+      "loginToken": "QkU0yiXEKpzmrKEMtgDZpGG9aADtEMvf8ijX_cVWReg",
+      "loginTokenExpiresAt": "2026-06-26T01:00:41.536Z",
+      "lastLoginAt": "2026-06-25T13:00:41.536Z",
+      "disabledAt": null,
+      "tags": [],
+      "createdAt": "2026-06-24T15:07:29.100Z",
+      "updatedAt": "2026-06-25T12:25:53.619Z"
+    },
+    {
+      "id": "cand-P000003",
+      "candidate": "zhaowu",
+      "ticket": "P000003",
+      "className": "默认分组",
+      "phone": "111111",
+      "email": "",
+      "description": "",
+      "avatar": "",
+      "passwordHash": "pbkdf2$120000$921a1228d627eacbfdb7858cc59a76ce$f2fe7886ba7cf12faf736636fba1b0ae5e83ce0b7b2cf64b9760b7c133287eee",
+      "passwordUpdatedAt": "2026-06-25T12:27:11.036Z",
+      "passwordMustChange": false,
+      "loginToken": null,
+      "loginTokenExpiresAt": null,
+      "lastLoginAt": null,
+      "disabledAt": null,
+      "tags": [],
+      "createdAt": "2026-06-25T12:27:11.036Z",
+      "updatedAt": null
+    }
+  ],
+  "groups": [
+    {
+      "id": "group-default",
+      "name": "默认分组",
+      "description": "默认参与者分组",
+      "createdAt": "2026-06-24T13:47:44.265Z",
+      "updatedAt": null
+    },
+    {
+      "id": "group-mqs82i1q-uxrusg",
+      "name": "group1",
+      "description": "hello group1",
+      "createdAt": "2026-06-24T15:22:37.406Z",
+      "updatedAt": null
+    }
+  ],
+  "answers": {
+    "sess-mqs7bigt-fp1ekhvs": {},
+    "sess-mqtjhahx-25zupp82": {},
+    "sess-mqtji5xg-ara9yanh": {},
+    "sess-mqtjijit-xz4eapii": {},
+    "sess-mqtnnz2v-welqy7ty": {},
+    "sess-mqtno7tp-z4f08r2l": {},
+    "sess-mqtnow41-xpeq8j9s": {},
+    "sess-mqto5dg5-v60mn5wy": {}
+  },
+  "paper": {
+    "id": "paper-1782230478624",
+    "name": "C++ 工程能力测评 A 卷",
+    "status": "已发布",
+    "publishedAt": "2026-06-25T15:38:53.275Z",
+    "questionIds": [
+      "q-001",
+      "q-002",
+      "q-003",
+      "q-004",
+      "q-005",
+      "q-006",
+      "q-007",
+      "q-008",
+      "q-009",
+      "q-010",
+      "q-011",
+      "q-012"
+    ],
+    "buildSpec": {
+      "targetScore": 50,
+      "source": "saved-reviewed-questions",
+      "eligibleCount": 12,
+      "savedAt": "2026-06-23T16:01:18.624Z"
+    }
+  },
+  "papers": [
+    {
+      "id": "paper-1782232132680",
+      "name": "C++ 工程能力测评 A 卷",
+      "status": "已发布",
+      "score": 50,
+      "questionCount": 1,
+      "typeGroups": {
+        "单选": 1
+      },
+      "questionIds": [
+        "q-001"
+      ],
+      "questions": [
+        {
+          "id": "q-001",
+          "type": "单选",
+          "stem": "阅读下面 C++17 代码，判断程序的输出结果。\n\n#include <iostream>\n#include <memory>\n#include <vector>\n#include <stdexcept>\nusing namespace std;\n\nclass Base {\npublic:\n    virtual ~Base() { cout << \"B\"; }\n    virtual int value() const { return 1; }\n};\n\nclass Derived : public Base {\n    vector<int> data;\npublic:\n    Derived() : data{1, 2, 3} {}\n    ~Derived() override { cout << \"D\"; }\n    int value() const override { return data.at(1); }\n};\n\nint main() {\n    try {\n        unique_ptr<Base> p = make_unique<Derived>();\n        cout << p->value();\n        vector<int> v{10, 20};\n        cout << v.at(2);\n    } catch (const out_of_range&) {\n        cout << \"E\";\n    }\n    return 0;\n}\n\n以下哪一项是正确输出？",
+          "options": [
+            "2EDB",
+            "2EBD",
+            "2DBE",
+            "程序无法通过编译，因为 unique_ptr<Base> 不能指向 Derived 对象"
+          ],
+          "answer": "A",
+          "score": 50,
+          "difficulty": "中",
+          "knowledge": [
+            "语法基础",
+            "STL",
+            "内存管理",
+            "面向对象",
+            "异常处理"
+          ],
+          "explanation": "p 的静态类型是 unique_ptr<Base>，但实际管理 Derived 对象，Base 析构函数为 virtual，因此可以通过基类指针安全释放派生类对象。p->value() 发生动态绑定，调用 Derived::value()，data.at(1) 返回 2，先输出 2。随后 v.at(2) 越界，抛出 out_of_range，被 catch 捕获并输出 E。try 块结束后，局部对象按作用域退出析构，unique_ptr 释放 Derived 对象；由于析构函数为虚函数，先执行 Derived 析构输出 D，再执行 Base 析构输出 B，因此最终输出为 2EDB。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        }
+      ],
+      "buildSpec": {
+        "targetScore": 50,
+        "source": "saved-reviewed-questions",
+        "eligibleCount": 1,
+        "savedAt": "2026-06-23T16:28:52.680Z"
+      },
+      "publishedAt": "2026-06-24T12:22:44.083Z",
+      "createdAt": "2026-06-23T16:28:52.680Z"
+    },
+    {
+      "id": "paper-1782231385760",
+      "name": "C++ 工程能力测评 B 卷",
+      "status": "已发布",
+      "score": 50,
+      "questionCount": 2,
+      "typeGroups": {
+        "单选": 1,
+        "判断": 1
+      },
+      "questionIds": [
+        "q-001",
+        "q-002"
+      ],
+      "questions": [
+        {
+          "id": "q-001",
+          "type": "单选",
+          "stem": "在 C++17 项目中，函数需要返回一个包含若干整数的结果集合，并要求调用方获得结果后可以继续安全使用。以下哪种实现最符合语法基础、STL 使用和内存管理的工程实践？",
+          "options": [
+            "在函数内定义局部数组 int data[3]，返回 data 的指针",
+            "在函数内使用 new int[3] 创建数组并返回裸指针，由调用方 delete[]",
+            "在函数内构造 std::vector<int> result，并按值返回 result",
+            "在函数内定义 static std::vector<int> result，修改后返回其引用"
+          ],
+          "answer": "C",
+          "score": 25,
+          "difficulty": "中",
+          "knowledge": [
+            "语法基础",
+            "STL",
+            "内存管理",
+            "工程实践"
+          ],
+          "explanation": "std::vector<int> 能自动管理动态内存，按值返回在现代 C++ 中可依赖移动语义或返回值优化，调用方获得独立且安全的结果。A 返回局部数组地址会产生悬空指针；B 将释放责任交给调用方，容易泄漏或重复释放；D 使用 static 共享状态，可能导致状态污染和线程安全问题。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-002",
+          "type": "判断",
+          "stem": "判断正误：如果一个类被设计为通过基类指针删除派生类对象，并且该基类含有虚函数，那么基类析构函数应声明为 virtual，以确保派生类析构函数能被正确调用；析构函数一般不应让异常逃逸。",
+          "options": [
+            "正确",
+            "错误"
+          ],
+          "answer": "正确",
+          "score": 25,
+          "difficulty": "中",
+          "knowledge": [
+            "面向对象",
+            "内存管理",
+            "异常处理"
+          ],
+          "explanation": "通过基类指针删除派生类对象时，基类析构函数若不是 virtual，会导致未定义行为或派生类资源无法正确释放。析构函数在栈展开期间抛出异常可能触发 std::terminate，因此工程实践中析构函数通常应避免异常逃逸。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        }
+      ],
+      "buildSpec": {
+        "targetScore": 50,
+        "source": "saved-reviewed-questions",
+        "eligibleCount": 2,
+        "savedAt": "2026-06-23T16:16:25.761Z"
+      },
+      "publishedAt": "2026-06-24T12:23:15.365Z",
+      "createdAt": "2026-06-23T16:16:25.761Z"
+    },
+    {
+      "id": "paper-1782230478624",
+      "name": "C++ 工程能力测评 A 卷",
+      "status": "已发布",
+      "score": 50,
+      "questionCount": 12,
+      "typeGroups": {
+        "单选": 4,
+        "多选": 2,
+        "判断": 2,
+        "填空": 2,
+        "简答": 2
+      },
+      "questionIds": [
+        "q-001",
+        "q-002",
+        "q-003",
+        "q-004",
+        "q-005",
+        "q-006",
+        "q-007",
+        "q-008",
+        "q-009",
+        "q-010",
+        "q-011",
+        "q-012"
+      ],
+      "questions": [
+        {
+          "id": "q-001",
+          "type": "单选",
+          "stem": "在 C++17 中，以下哪种写法会在编译期阻止从 double 到 int 的窄化转换？",
+          "options": [
+            "int x = 3.14;",
+            "int x(3.14);",
+            "int x{3.14};",
+            "int x = static_cast<int>(3.14);"
+          ],
+          "answer": "C",
+          "score": 5,
+          "difficulty": "中",
+          "knowledge": [
+            "语法基础"
+          ],
+          "explanation": "列表初始化会禁止窄化转换，int x{3.14} 通常会导致编译错误，从而避免隐式丢失精度。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-002",
+          "type": "单选",
+          "stem": "关于 std::vector<int> v; 执行 v.push_back(x) 后，以下说法最准确的是哪一项？",
+          "options": [
+            "一定不会使任何迭代器失效",
+            "只会使 end() 迭代器失效，其他迭代器一定有效",
+            "如果发生扩容，所有迭代器、指针和引用都可能失效",
+            "只要 x 是 int，就不会发生扩容"
+          ],
+          "answer": "C",
+          "score": 5,
+          "difficulty": "中",
+          "knowledge": [
+            "STL",
+            "内存管理"
+          ],
+          "explanation": "vector 的 push_back 可能触发重新分配存储空间；一旦扩容，原有元素被移动或拷贝到新内存，旧迭代器、指针和引用都会失效。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-003",
+          "type": "单选",
+          "stem": "以下哪种释放方式与 int* p = new int[10]; 正确匹配？",
+          "options": [
+            "delete p;",
+            "delete[] p;",
+            "free(p);",
+            "p = nullptr;"
+          ],
+          "answer": "B",
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "内存管理"
+          ],
+          "explanation": "new[] 分配的数组必须使用 delete[] 释放；delete、free 或仅赋空指针都不能正确匹配该分配方式。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-004",
+          "type": "单选",
+          "stem": "当一个基类指针可能指向派生类对象，并通过该基类指针 delete 对象时，基类析构函数通常应如何声明？",
+          "options": [
+            "声明为 static",
+            "声明为 virtual",
+            "声明为 inline 且非 virtual",
+            "声明为 private 且非 virtual"
+          ],
+          "answer": "B",
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "面向对象",
+            "内存管理"
+          ],
+          "explanation": "通过基类指针删除派生类对象时，基类析构函数应为 virtual，否则可能只调用基类析构函数，导致未定义行为或资源泄漏。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-005",
+          "type": "多选",
+          "stem": "关于 C++ 异常处理和资源管理，下列说法正确的有哪几项？",
+          "options": [
+            "RAII 可以利用对象析构函数在作用域退出时自动释放资源",
+            "catch(...) 会捕获所有异常，因此可以安全忽略所有异常",
+            "析构函数在栈展开期间抛出未捕获异常可能导致 std::terminate",
+            "throw; 可在 catch 块中重新抛出当前捕获的异常"
+          ],
+          "answer": [
+            "A",
+            "C",
+            "D"
+          ],
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "异常处理",
+            "内存管理"
+          ],
+          "explanation": "RAII 是 C++ 资源管理核心方式；栈展开期间析构函数若再抛出未处理异常可能终止程序；catch 中的 throw; 可重新抛出当前异常。catch(...) 虽能捕获多类异常，但直接忽略通常不安全。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-006",
+          "type": "多选",
+          "stem": "关于 STL 容器的常见特性，下列说法正确的有哪几项？",
+          "options": [
+            "std::map 默认按键有序存储",
+            "std::unordered_map 默认保证按键升序遍历",
+            "std::list 在已知位置插入元素通常不会使其他元素的迭代器失效",
+            "std::vector 支持按下标进行常数时间随机访问"
+          ],
+          "answer": [
+            "A",
+            "C",
+            "D"
+          ],
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "STL"
+          ],
+          "explanation": "map 是基于键有序的关联容器；unordered_map 不保证遍历顺序；list 节点式存储，插入通常不影响其他元素迭代器；vector 支持常数时间随机访问。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-007",
+          "type": "判断",
+          "stem": "如果一个类包含虚函数，那么它的析构函数一定会被编译器自动声明为 virtual。",
+          "options": [
+            "正确",
+            "错误"
+          ],
+          "answer": "正确",
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "面向对象"
+          ],
+          "explanation": "类中存在虚函数并不会使析构函数自动变为 virtual。若需要通过基类指针安全删除派生类对象，应显式声明虚析构函数。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-008",
+          "type": "判断",
+          "stem": "std::unique_ptr 允许拷贝构造，因此可以直接将一个 unique_ptr 赋值给另一个 unique_ptr。",
+          "options": [
+            "正确",
+            "错误"
+          ],
+          "answer": "正确",
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "内存管理",
+            "语法基础"
+          ],
+          "explanation": "unique_ptr 表示独占所有权，禁止拷贝，只能通过移动语义转移所有权，例如使用 std::move。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-009",
+          "type": "填空",
+          "stem": "写出以下代码的输出结果：\n#include <iostream>\n#include <vector>\nint main() {\n    std::vector<int> v{1, 2, 3};\n    v.push_back(4);\n    int sum = 0;\n    for (int x : v) sum += x;\n    std::cout << sum;\n}",
+          "options": [],
+          "answer": "10",
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "语法基础",
+            "STL"
+          ],
+          "explanation": "vector 中元素为 1、2、3、4，范围 for 依次累加，结果为 10。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-010",
+          "type": "填空",
+          "stem": "补全代码中唯一缺失的标准库函数名，使 p2 获得 p1 的所有权：\n#include <memory>\nstd::unique_ptr<int> p1(new int(5));\nstd::unique_ptr<int> p2 = std::____(p1);",
+          "options": [],
+          "answer": "move",
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "内存管理",
+            "语法基础"
+          ],
+          "explanation": "unique_ptr 不能拷贝，只能移动；std::move(p1) 将 p1 转换为右值引用，从而转移所有权给 p2。",
+          "rubric": [],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-011",
+          "type": "简答",
+          "stem": "简述 RAII 的核心思想，并说明它如何帮助 C++ 程序减少资源泄漏。请结合至少一种资源举例。",
+          "options": [],
+          "answer": "RAII 将资源的获取绑定到对象初始化，将资源释放绑定到对象析构；对象离开作用域时析构函数自动执行，因此即使发生异常也能释放资源。例如使用 std::unique_ptr 管理动态内存，或使用 std::lock_guard 管理互斥锁。",
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "内存管理",
+            "异常处理",
+            "语法基础"
+          ],
+          "explanation": "本题考查对 RAII 的概念、作用域生命周期、异常安全价值以及工程实践示例的理解。",
+          "rubric": [
+            "概念准确",
+            "覆盖关键步骤",
+            "结合实际场景",
+            "表达清晰"
+          ],
+          "quality": 92,
+          "status": "已校验"
+        },
+        {
+          "id": "q-012",
+          "type": "简答",
+          "stem": "在面向对象设计中，为什么通过基类指针管理派生类对象时通常需要虚析构函数？如果没有虚析构函数，可能产生什么问题？",
+          "options": [],
+          "answer": "因为通过基类指针 delete 派生类对象时，需要动态绑定到派生类析构函数，保证先执行派生类析构再执行基类析构。若基类析构函数不是 virtual，删除派生类对象可能导致未定义行为，派生类资源无法正确释放，造成资源泄漏或对象清理不完整。",
+          "score": 4,
+          "difficulty": "中",
+          "knowledge": [
+            "面向对象",
+            "内存管理"
+          ],
+          "explanation": "本题考查多态对象销毁规则、虚析构函数的必要性以及资源释放风险。",
+          "rubric": [
+            "概念准确",
+            "覆盖关键步骤",
+            "结合实际场景",
+            "表达清晰"
+          ],
+          "quality": 92,
+          "status": "已校验"
+        }
+      ],
+      "buildSpec": {
+        "targetScore": 50,
+        "source": "saved-reviewed-questions",
+        "eligibleCount": 12,
+        "savedAt": "2026-06-23T16:01:18.624Z"
+      },
+      "publishedAt": "2026-06-25T15:38:53.275Z",
+      "createdAt": "2026-06-23T16:01:18.624Z"
+    }
+  ],
+  "generationTask": {
+    "title": "2026 春季综合能力测评",
+    "paperName": "C++ 工程能力测评 A 卷",
+    "direction": "C++ 语言基础与工程实践",
+    "count": 1,
+    "difficulty": "中",
+    "totalScore": 50,
+    "typeMix": [
+      {
+        "type": "单选",
+        "count": 1
+      }
+    ],
+    "typeMixText": "单选1",
+    "knowledge": [
+      "语法基础",
+      "STL",
+      "内存管理",
+      "面向对象",
+      "异常处理"
+    ],
+    "requirements": "题干清晰，答案唯一或评分规则明确，适合初中级开发者测评。"
+  },
+  "gradingResults": {
+    "sess-mqs7bigt-fp1ekhvs": {
+      "totalScore": 0,
+      "objectiveScore": 0,
+      "subjectiveScore": 0,
+      "subjectivePending": 0,
+      "reviewStatus": "已完成",
+      "maxScore": 50,
+      "details": [
+        {
+          "questionId": "q-001",
+          "type": "单选",
+          "score": 50,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        }
+      ],
+      "summary": "客观题已自动判分，无需人工复核。",
+      "gradedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    "sess-mqtji5xg-ara9yanh": {
+      "totalScore": 0,
+      "objectiveScore": 0,
+      "subjectiveScore": 0,
+      "subjectivePending": 0,
+      "reviewStatus": "已完成",
+      "maxScore": 50,
+      "details": [
+        {
+          "questionId": "q-001",
+          "type": "单选",
+          "score": 50,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        }
+      ],
+      "summary": "客观题已自动判分，无需人工复核。",
+      "gradedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    "sess-mqtjijit-xz4eapii": {
+      "totalScore": 0,
+      "objectiveScore": 0,
+      "subjectiveScore": 0,
+      "subjectivePending": 0,
+      "reviewStatus": "已完成",
+      "maxScore": 50,
+      "details": [
+        {
+          "questionId": "q-001",
+          "type": "单选",
+          "score": 50,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        }
+      ],
+      "summary": "客观题已自动判分，无需人工复核。",
+      "gradedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    "sess-mqtnnz2v-welqy7ty": {
+      "totalScore": 0,
+      "objectiveScore": 0,
+      "subjectiveScore": 0,
+      "subjectivePending": 0,
+      "reviewStatus": "已完成",
+      "maxScore": 50,
+      "details": [
+        {
+          "questionId": "q-001",
+          "type": "单选",
+          "score": 50,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        }
+      ],
+      "summary": "客观题已自动判分，无需人工复核。",
+      "gradedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    "sess-mqtno7tp-z4f08r2l": {
+      "totalScore": 0,
+      "objectiveScore": 0,
+      "subjectiveScore": 0,
+      "subjectivePending": 0,
+      "reviewStatus": "已完成",
+      "maxScore": 50,
+      "details": [
+        {
+          "questionId": "q-001",
+          "type": "单选",
+          "score": 50,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        }
+      ],
+      "summary": "客观题已自动判分，无需人工复核。",
+      "gradedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    "sess-mqtnow41-xpeq8j9s": {
+      "totalScore": 0,
+      "objectiveScore": 0,
+      "subjectiveScore": 0,
+      "subjectivePending": 0,
+      "reviewStatus": "已完成",
+      "maxScore": 50,
+      "details": [
+        {
+          "questionId": "q-001",
+          "type": "单选",
+          "score": 50,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        }
+      ],
+      "summary": "客观题已自动判分，无需人工复核。",
+      "gradedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout"
+    },
+    "sess-mqto5dg5-v60mn5wy": {
+      "totalScore": 1,
+      "objectiveScore": 0,
+      "subjectiveScore": 1,
+      "subjectivePending": 0,
+      "reviewStatus": "已完成",
+      "maxScore": 50,
+      "details": [
+        {
+          "questionId": "q-001",
+          "type": "单选",
+          "score": 5,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-002",
+          "type": "单选",
+          "score": 5,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-003",
+          "type": "单选",
+          "score": 4,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-004",
+          "type": "单选",
+          "score": 4,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-005",
+          "type": "多选",
+          "score": 4,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-006",
+          "type": "多选",
+          "score": 4,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-007",
+          "type": "判断",
+          "score": 4,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-008",
+          "type": "判断",
+          "score": 4,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-009",
+          "type": "填空",
+          "score": 4,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-010",
+          "type": "填空",
+          "score": 4,
+          "awarded": 0,
+          "correct": false,
+          "answer": "",
+          "reviewRequired": false,
+          "status": "自动判分",
+          "aiComment": ""
+        },
+        {
+          "questionId": "q-011",
+          "type": "简答",
+          "score": 4,
+          "awarded": 1,
+          "correct": null,
+          "answer": "",
+          "reviewRequired": true,
+          "status": "人工复核完成",
+          "aiComment": "未作答，AI 初评为 0 分，需人工确认。",
+          "reviewerComment": "未作答，AI 初评为 0 分，需人工确认。",
+          "reviewedAt": "2026-06-26T10:09:15.533Z"
+        },
+        {
+          "questionId": "q-012",
+          "type": "简答",
+          "score": 4,
+          "awarded": 0,
+          "correct": null,
+          "answer": "",
+          "reviewRequired": true,
+          "status": "人工复核完成",
+          "aiComment": "未作答，AI 初评为 0 分，需人工确认。",
+          "reviewerComment": "未作答，AI 初评为 0 分，需人工确认。",
+          "reviewedAt": "2026-06-26T10:09:15.533Z"
+        }
+      ],
+      "summary": "阅卷复核已完成，成绩可进入分析统计。",
+      "gradedAt": "2026-06-26T10:05:32.846Z",
+      "submissionSource": "auto-timeout",
+      "reviewedAt": "2026-06-26T10:09:15.533Z",
+      "reviewedBy": "admin",
+      "publishStatus": "未发布"
+    }
+  },
+  "adminSessions": {
+    "m94zdDiw6JYWBGqH237RqOydWTlIVZP0MJfZY3UzUAQ": {
+      "id": "admin-mqurmu9g-2hyzit",
+      "username": "admin",
+      "role": "admin",
+      "permissions": [
+        "authoring",
+        "papers",
+        "participants",
+        "assignments",
+        "proctor",
+        "grading",
+        "analysis",
+        "system"
+      ],
+      "createdAt": "2026-06-26T10:05:51.412Z",
+      "expiresAt": "2026-06-26T22:05:51.412Z",
+      "lastSeenAt": "2026-06-26T10:09:15.531Z"
+    }
+  },
+  "loginSecurity": {
+    "attempts": {}
+  },
+  "proctorRules": {
+    "visibilityHidden": "中",
+    "cameraMissing": "高",
+    "screenUnshared": "中",
+    "fullscreenExited": "中",
+    "clipboard": "中",
+    "requireCamera": false,
+    "requireScreen": false,
+    "requireFullscreen": false,
+    "duplicateWindowSeconds": 10
+  },
+  "auditLog": [
+    {
+      "id": "log-init",
+      "type": "system",
+      "message": "MVP 初始数据已加载",
+      "createdAt": "2026-06-23T06:52:16.760Z"
+    },
+    {
+      "id": "question-update-1782197536762-e1c9e4",
+      "type": "question-update",
+      "message": "题目 q-003 更新为 已校验",
+      "createdAt": "2026-06-23T06:52:16.762Z"
+    },
+    {
+      "id": "paper-build-1782197537966-347744",
+      "type": "paper-save",
+      "message": "保存试卷：12 题 / 50 分",
+      "createdAt": "2026-06-23T06:52:17.966Z"
+    },
+    {
+      "id": "proctor-event-1782197539591-51b9c1",
+      "type": "proctor-event",
+      "message": "参与者：测试风险事件",
+      "createdAt": "2026-06-23T06:52:19.591Z"
+    },
+    {
+      "id": "exam-submit-1782197580524-df97fd",
+      "type": "exam-submit",
+      "message": "s-001 提交试卷",
+      "createdAt": "2026-06-23T06:53:00.524Z"
+    },
+    {
+      "id": "grading-1782197580965-cb0d52",
+      "type": "grading",
+      "message": "s-001 完成自动阅卷：22/50",
+      "createdAt": "2026-06-23T06:53:00.965Z"
+    },
+    {
+      "id": "exam-submit-1782197679035-83e740",
+      "type": "exam-submit",
+      "message": "s-001 提交试卷",
+      "createdAt": "2026-06-23T06:54:39.035Z"
+    },
+    {
+      "id": "grading-1782197694570-032a45",
+      "type": "grading",
+      "message": "s-001 完成自动阅卷：22/50",
+      "createdAt": "2026-06-23T06:54:54.570Z"
+    },
+    {
+      "id": "quality-check-1782200135651-5ebd1c",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，1 道待确认",
+      "createdAt": "2026-06-23T07:35:35.651Z"
+    },
+    {
+      "id": "ai-generate-1782201464012-53c276",
+      "type": "ai-generate",
+      "message": "生成题目 12 道，来源 mock",
+      "createdAt": "2026-06-23T07:57:44.012Z"
+    },
+    {
+      "id": "exam-invalidate-1782206089413-6df524",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:14:49.413Z"
+    },
+    {
+      "id": "ai-generate-1782206089413-3e31bf",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 12 道，稳定性 70，规格通过",
+      "createdAt": "2026-06-23T09:14:49.413Z"
+    },
+    {
+      "id": "exam-invalidate-1782206091246-408f4a",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:14:51.246Z"
+    },
+    {
+      "id": "ai-generate-1782206091246-8df3fb",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 12 道，稳定性 70，规格通过",
+      "createdAt": "2026-06-23T09:14:51.246Z"
+    },
+    {
+      "id": "exam-invalidate-1782206101220-e02e36",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:15:01.220Z"
+    },
+    {
+      "id": "ai-generate-1782206101220-c6b337",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 12 道，稳定性 70，规格通过",
+      "createdAt": "2026-06-23T09:15:01.220Z"
+    },
+    {
+      "id": "quality-check-1782206107124-9c3e45",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，12 道待确认",
+      "createdAt": "2026-06-23T09:15:07.124Z"
+    },
+    {
+      "id": "question-update-1782206264805-76a3dc",
+      "type": "question-update",
+      "message": "题目 q-001 更新为 已校验",
+      "createdAt": "2026-06-23T09:17:44.805Z"
+    },
+    {
+      "id": "question-update-1782207097466-d6a81c",
+      "type": "question-update",
+      "message": "题目 q-002 更新为 已校验",
+      "createdAt": "2026-06-23T09:31:37.466Z"
+    },
+    {
+      "id": "exam-invalidate-1782208282480-23af7f",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:51:22.480Z"
+    },
+    {
+      "id": "ai-generate-1782208282480-fe0203",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 6 道，稳定性 85，规格通过",
+      "createdAt": "2026-06-23T09:51:22.480Z"
+    },
+    {
+      "id": "quality-check-1782208282494-cf86fe",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，6 道待确认",
+      "createdAt": "2026-06-23T09:51:22.494Z"
+    },
+    {
+      "id": "exam-invalidate-1782208419965-348290",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:53:39.965Z"
+    },
+    {
+      "id": "ai-generate-1782208419965-b3fff0",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 12 道，稳定性 70，规格通过",
+      "createdAt": "2026-06-23T09:53:39.965Z"
+    },
+    {
+      "id": "quality-check-1782208419982-17cb89",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，12 道待确认",
+      "createdAt": "2026-06-23T09:53:39.982Z"
+    },
+    {
+      "id": "exam-invalidate-1782208425750-821638",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:53:45.750Z"
+    },
+    {
+      "id": "ai-generate-1782208425750-4f746d",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 12 道，稳定性 70，规格通过",
+      "createdAt": "2026-06-23T09:53:45.750Z"
+    },
+    {
+      "id": "quality-check-1782208425759-3b34ad",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，12 道待确认",
+      "createdAt": "2026-06-23T09:53:45.759Z"
+    },
+    {
+      "id": "question-update-1782208486025-28537a",
+      "type": "question-update",
+      "message": "题目 q-001 更新为 已校验",
+      "createdAt": "2026-06-23T09:54:46.025Z"
+    },
+    {
+      "id": "question-update-1782208486931-5c6414",
+      "type": "question-update",
+      "message": "题目 q-001 更新为 待确认",
+      "createdAt": "2026-06-23T09:54:46.931Z"
+    },
+    {
+      "id": "exam-invalidate-1782208529370-24e1d6",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:55:29.370Z"
+    },
+    {
+      "id": "ai-generate-1782208529370-d93651",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 12 道，稳定性 70，规格通过",
+      "createdAt": "2026-06-23T09:55:29.370Z"
+    },
+    {
+      "id": "quality-check-1782208529374-472c11",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，12 道待确认",
+      "createdAt": "2026-06-23T09:55:29.374Z"
+    },
+    {
+      "id": "exam-invalidate-1782208530059-e92b80",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:55:30.059Z"
+    },
+    {
+      "id": "ai-generate-1782208530059-710979",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 12 道，稳定性 70，规格通过",
+      "createdAt": "2026-06-23T09:55:30.059Z"
+    },
+    {
+      "id": "quality-check-1782208530061-6dadbd",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，12 道待确认",
+      "createdAt": "2026-06-23T09:55:30.061Z"
+    },
+    {
+      "id": "exam-invalidate-1782208530715-989e0d",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:55:30.715Z"
+    },
+    {
+      "id": "ai-generate-1782208530715-4fc653",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 12 道，稳定性 70，规格通过",
+      "createdAt": "2026-06-23T09:55:30.715Z"
+    },
+    {
+      "id": "quality-check-1782208530720-511811",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，12 道待确认",
+      "createdAt": "2026-06-23T09:55:30.720Z"
+    },
+    {
+      "id": "exam-invalidate-1782208533395-3db7b2",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T09:55:33.395Z"
+    },
+    {
+      "id": "ai-generate-1782208533395-5a347c",
+      "type": "ai-generate",
+      "message": "按「C++ 语言基础与工程实践」生成题目 12 道，稳定性 70，规格通过",
+      "createdAt": "2026-06-23T09:55:33.395Z"
+    },
+    {
+      "id": "quality-check-1782208533409-d06f5b",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，12 道待确认",
+      "createdAt": "2026-06-23T09:55:33.409Z"
+    },
+    {
+      "id": "exam-invalidate-1782209902120-5c0e46",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T10:18:22.120Z"
+    },
+    {
+      "id": "ai-draft-save-1782209902120-45a4a1",
+      "type": "ai-draft-save",
+      "message": "保存「C++ 工程能力测评 A 卷」题目草稿 12 道，稳定性 70",
+      "createdAt": "2026-06-23T10:18:22.120Z"
+    },
+    {
+      "id": "exam-invalidate-1782209908880-a21987",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T10:18:28.880Z"
+    },
+    {
+      "id": "ai-draft-save-1782209908880-05f681",
+      "type": "ai-draft-save",
+      "message": "保存「C++ 工程能力测评 A 卷」题目草稿 12 道，稳定性 70",
+      "createdAt": "2026-06-23T10:18:28.880Z"
+    },
+    {
+      "id": "exam-invalidate-1782209990818-ce46ac",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T10:19:50.818Z"
+    },
+    {
+      "id": "ai-draft-save-1782209990818-3b37cf",
+      "type": "ai-draft-save",
+      "message": "保存「C++ 工程能力测评 A 卷」题目草稿 12 道，稳定性 70",
+      "createdAt": "2026-06-23T10:19:50.818Z"
+    },
+    {
+      "id": "question-update-1782219116712-2e751f",
+      "type": "question-update",
+      "message": "题目 q-001 更新为 已校验",
+      "createdAt": "2026-06-23T12:51:56.712Z"
+    },
+    {
+      "id": "question-update-1782219117554-704e77",
+      "type": "question-update",
+      "message": "题目 q-002 更新为 已校验",
+      "createdAt": "2026-06-23T12:51:57.554Z"
+    },
+    {
+      "id": "question-update-1782219118161-2f1f9c",
+      "type": "question-update",
+      "message": "题目 q-003 更新为 已校验",
+      "createdAt": "2026-06-23T12:51:58.161Z"
+    },
+    {
+      "id": "question-update-1782219118794-22a790",
+      "type": "question-update",
+      "message": "题目 q-004 更新为 已校验",
+      "createdAt": "2026-06-23T12:51:58.794Z"
+    },
+    {
+      "id": "question-update-1782219119377-4ca504",
+      "type": "question-update",
+      "message": "题目 q-005 更新为 已校验",
+      "createdAt": "2026-06-23T12:51:59.377Z"
+    },
+    {
+      "id": "question-update-1782219119923-cc6c43",
+      "type": "question-update",
+      "message": "题目 q-006 更新为 已校验",
+      "createdAt": "2026-06-23T12:51:59.924Z"
+    },
+    {
+      "id": "question-update-1782219120456-63fbc5",
+      "type": "question-update",
+      "message": "题目 q-007 更新为 已校验",
+      "createdAt": "2026-06-23T12:52:00.456Z"
+    },
+    {
+      "id": "question-update-1782219121040-52d19f",
+      "type": "question-update",
+      "message": "题目 q-008 更新为 已校验",
+      "createdAt": "2026-06-23T12:52:01.040Z"
+    },
+    {
+      "id": "question-update-1782219122721-41a492",
+      "type": "question-update",
+      "message": "题目 q-009 更新为 已校验",
+      "createdAt": "2026-06-23T12:52:02.721Z"
+    },
+    {
+      "id": "question-update-1782219123295-313064",
+      "type": "question-update",
+      "message": "题目 q-010 更新为 已校验",
+      "createdAt": "2026-06-23T12:52:03.295Z"
+    },
+    {
+      "id": "question-update-1782219123828-664bca",
+      "type": "question-update",
+      "message": "题目 q-011 更新为 已校验",
+      "createdAt": "2026-06-23T12:52:03.828Z"
+    },
+    {
+      "id": "question-update-1782219124327-a270eb",
+      "type": "question-update",
+      "message": "题目 q-012 更新为 已校验",
+      "createdAt": "2026-06-23T12:52:04.328Z"
+    },
+    {
+      "id": "exam-invalidate-1782219140876-a5ca48",
+      "type": "exam-invalidate",
+      "message": "试卷重新保存，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T12:52:20.876Z"
+    },
+    {
+      "id": "paper-build-1782219140876-d4abfb",
+      "type": "paper-save",
+      "message": "保存试卷：C++ 工程能力测评 A 卷，12 题 / 50 分",
+      "createdAt": "2026-06-23T12:52:20.876Z"
+    },
+    {
+      "id": "exam-invalidate-1782225344140-9e036d",
+      "type": "exam-invalidate",
+      "message": "删除当前试卷 C++ 工程能力测评 A 卷，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T14:35:44.140Z"
+    },
+    {
+      "id": "paper-delete-1782225344140-6fb191",
+      "type": "paper-delete",
+      "message": "删除试卷：C++ 工程能力测评 A 卷",
+      "createdAt": "2026-06-23T14:35:44.140Z"
+    },
+    {
+      "id": "quality-check-1782230390372-a15f8d",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，0 道待确认",
+      "createdAt": "2026-06-23T15:59:50.372Z"
+    },
+    {
+      "id": "exam-invalidate-1782230396455-5bb12c",
+      "type": "exam-invalidate",
+      "message": "题目质量修复，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T15:59:56.455Z"
+    },
+    {
+      "id": "quality-repair-1782230396455-7aaa4d",
+      "type": "quality-repair",
+      "message": "自动修复完成：剩余 0 个问题",
+      "createdAt": "2026-06-23T15:59:56.455Z"
+    },
+    {
+      "id": "exam-invalidate-1782230404234-14a5ec",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:00:04.234Z"
+    },
+    {
+      "id": "ai-draft-save-1782230404234-ca353d",
+      "type": "ai-draft-save",
+      "message": "保存「C++ 工程能力测评 A 卷」试卷内容 12 道，稳定性 70",
+      "createdAt": "2026-06-23T16:00:04.234Z"
+    },
+    {
+      "id": "quality-check-1782230407853-37d179",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，12 道待确认",
+      "createdAt": "2026-06-23T16:00:07.853Z"
+    },
+    {
+      "id": "exam-invalidate-1782230418456-a4a820",
+      "type": "exam-invalidate",
+      "message": "题目质量修复，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:00:18.456Z"
+    },
+    {
+      "id": "quality-repair-1782230418456-fbda74",
+      "type": "quality-repair",
+      "message": "自动修复完成：剩余 0 个问题",
+      "createdAt": "2026-06-23T16:00:18.456Z"
+    },
+    {
+      "id": "question-update-1782230464691-1b62f2",
+      "type": "question-update",
+      "message": "题目 q-001 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:04.691Z"
+    },
+    {
+      "id": "question-update-1782230465571-1531c5",
+      "type": "question-update",
+      "message": "题目 q-002 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:05.571Z"
+    },
+    {
+      "id": "question-update-1782230466322-c984a1",
+      "type": "question-update",
+      "message": "题目 q-003 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:06.322Z"
+    },
+    {
+      "id": "question-update-1782230466854-5d013f",
+      "type": "question-update",
+      "message": "题目 q-004 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:06.854Z"
+    },
+    {
+      "id": "question-update-1782230467358-421421",
+      "type": "question-update",
+      "message": "题目 q-005 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:07.358Z"
+    },
+    {
+      "id": "question-update-1782230467854-2a9998",
+      "type": "question-update",
+      "message": "题目 q-006 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:07.854Z"
+    },
+    {
+      "id": "question-update-1782230468369-75d2a0",
+      "type": "question-update",
+      "message": "题目 q-007 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:08.369Z"
+    },
+    {
+      "id": "question-update-1782230468847-f493dd",
+      "type": "question-update",
+      "message": "题目 q-008 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:08.848Z"
+    },
+    {
+      "id": "question-update-1782230469339-3dde1d",
+      "type": "question-update",
+      "message": "题目 q-009 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:09.339Z"
+    },
+    {
+      "id": "question-update-1782230469852-a3b86c",
+      "type": "question-update",
+      "message": "题目 q-010 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:09.852Z"
+    },
+    {
+      "id": "question-update-1782230470340-819df6",
+      "type": "question-update",
+      "message": "题目 q-011 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:10.340Z"
+    },
+    {
+      "id": "question-update-1782230471841-d75ec3",
+      "type": "question-update",
+      "message": "题目 q-012 更新为 已校验",
+      "createdAt": "2026-06-23T16:01:11.841Z"
+    },
+    {
+      "id": "exam-invalidate-1782230478624-5eb326",
+      "type": "exam-invalidate",
+      "message": "试卷重新保存，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:01:18.624Z"
+    },
+    {
+      "id": "paper-save-1782230478624-59fab3",
+      "type": "paper-save",
+      "message": "保存试卷：C++ 工程能力测评 A 卷，12 题 / 50 分",
+      "createdAt": "2026-06-23T16:01:18.624Z"
+    },
+    {
+      "id": "exam-invalidate-1782231365843-ca83f8",
+      "type": "exam-invalidate",
+      "message": "题目质量修复，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:16:05.843Z"
+    },
+    {
+      "id": "quality-repair-1782231365843-f32df6",
+      "type": "quality-repair",
+      "message": "自动修复完成：剩余 0 个问题",
+      "createdAt": "2026-06-23T16:16:05.843Z"
+    },
+    {
+      "id": "exam-invalidate-1782231375119-3aee78",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:16:15.119Z"
+    },
+    {
+      "id": "ai-draft-save-1782231375119-54448b",
+      "type": "ai-draft-save",
+      "message": "保存「C++ 工程能力测评 B 卷」试卷内容 2 道，稳定性 95",
+      "createdAt": "2026-06-23T16:16:15.119Z"
+    },
+    {
+      "id": "question-update-1782231379795-bcc881",
+      "type": "question-update",
+      "message": "题目 q-001 更新为 已校验",
+      "createdAt": "2026-06-23T16:16:19.795Z"
+    },
+    {
+      "id": "question-update-1782231380925-40cff7",
+      "type": "question-update",
+      "message": "题目 q-002 更新为 已校验",
+      "createdAt": "2026-06-23T16:16:20.925Z"
+    },
+    {
+      "id": "exam-invalidate-1782231385761-3bcb43",
+      "type": "exam-invalidate",
+      "message": "试卷重新保存，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:16:25.761Z"
+    },
+    {
+      "id": "paper-save-1782231385761-f80037",
+      "type": "paper-save",
+      "message": "保存试卷：C++ 工程能力测评 B 卷，2 题 / 50 分",
+      "createdAt": "2026-06-23T16:16:25.761Z"
+    },
+    {
+      "id": "exam-invalidate-1782231999476-07c7e9",
+      "type": "exam-invalidate",
+      "message": "题库重新生成，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:26:39.476Z"
+    },
+    {
+      "id": "ai-draft-save-1782231999476-863817",
+      "type": "ai-draft-save",
+      "message": "保存「C++ 工程能力测评 A 卷」试卷内容 1 道，稳定性 98",
+      "createdAt": "2026-06-23T16:26:39.476Z"
+    },
+    {
+      "id": "quality-check-1782231999511-83ebd0",
+      "type": "quality-check",
+      "message": "质量复检完成：0 个问题，1 道待确认",
+      "createdAt": "2026-06-23T16:26:39.511Z"
+    },
+    {
+      "id": "question-update-1782232127015-ab123d",
+      "type": "question-update",
+      "message": "题目 q-001 更新为 已校验",
+      "createdAt": "2026-06-23T16:28:47.015Z"
+    },
+    {
+      "id": "exam-invalidate-1782232132681-b07beb",
+      "type": "exam-invalidate",
+      "message": "试卷重新保存，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:28:52.681Z"
+    },
+    {
+      "id": "paper-save-1782232132681-b5cb31",
+      "type": "paper-save",
+      "message": "保存试卷：C++ 工程能力测评 A 卷，1 题 / 50 分",
+      "createdAt": "2026-06-23T16:28:52.681Z"
+    },
+    {
+      "id": "exam-invalidate-1782232139836-3cf620",
+      "type": "exam-invalidate",
+      "message": "切换当前试卷为 C++ 工程能力测评 A 卷，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:28:59.836Z"
+    },
+    {
+      "id": "paper-activate-1782232139836-bba5ac",
+      "type": "paper-activate",
+      "message": "C++ 工程能力测评 A 卷 已设为当前试卷",
+      "createdAt": "2026-06-23T16:28:59.836Z"
+    },
+    {
+      "id": "exam-invalidate-1782232173081-07539f",
+      "type": "exam-invalidate",
+      "message": "切换当前试卷为 C++ 工程能力测评 B 卷，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:29:33.081Z"
+    },
+    {
+      "id": "paper-activate-1782232173081-9c96f0",
+      "type": "paper-activate",
+      "message": "C++ 工程能力测评 B 卷 已设为当前试卷",
+      "createdAt": "2026-06-23T16:29:33.081Z"
+    },
+    {
+      "id": "exam-invalidate-1782232378064-d17462",
+      "type": "exam-invalidate",
+      "message": "切换当前试卷为 C++ 工程能力测评 A 卷，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-23T16:32:58.064Z"
+    },
+    {
+      "id": "paper-activate-1782232378064-3b5220",
+      "type": "paper-activate",
+      "message": "C++ 工程能力测评 A 卷 已设为当前试卷",
+      "createdAt": "2026-06-23T16:32:58.064Z"
+    },
+    {
+      "id": "proctor-event-1782295299146-f860af",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:01:39.146Z"
+    },
+    {
+      "id": "proctor-event-1782295303999-46884a",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:01:43.999Z"
+    },
+    {
+      "id": "proctor-event-1782295361665-de331c",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:02:41.665Z"
+    },
+    {
+      "id": "proctor-event-1782295362184-ee80c0",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:02:42.184Z"
+    },
+    {
+      "id": "proctor-event-1782295362704-ea07f3",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:02:42.704Z"
+    },
+    {
+      "id": "proctor-event-1782295363130-2dd4ea",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:02:43.130Z"
+    },
+    {
+      "id": "proctor-event-1782295363717-84a30a",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:02:43.717Z"
+    },
+    {
+      "id": "proctor-event-1782295366611-08562d",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:02:46.611Z"
+    },
+    {
+      "id": "proctor-event-1782296863216-832729",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:27:43.216Z"
+    },
+    {
+      "id": "proctor-event-1782296863790-75d01b",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:27:43.790Z"
+    },
+    {
+      "id": "proctor-event-1782296864215-840dca",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:27:44.215Z"
+    },
+    {
+      "id": "proctor-event-1782296866829-5e91b9",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:27:46.829Z"
+    },
+    {
+      "id": "proctor-event-1782296869963-80afc2",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:27:49.963Z"
+    },
+    {
+      "id": "proctor-event-1782297602048-c609c4",
+      "type": "proctor-event",
+      "message": "参与者：监考员手动记录风险",
+      "createdAt": "2026-06-24T10:40:02.048Z"
+    },
+    {
+      "id": "exam-invalidate-1782303758125-2cb68d",
+      "type": "exam-invalidate",
+      "message": "切换当前试卷为 C++ 工程能力测评 A 卷，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-24T12:22:38.125Z"
+    },
+    {
+      "id": "paper-activate-1782303758125-c0a566",
+      "type": "paper-activate",
+      "message": "C++ 工程能力测评 A 卷 已设为当前试卷",
+      "createdAt": "2026-06-24T12:22:38.125Z"
+    },
+    {
+      "id": "paper-publish-1782303764084-9feab6",
+      "type": "paper-publish",
+      "message": "C++ 工程能力测评 A 卷 已发布",
+      "createdAt": "2026-06-24T12:22:44.084Z"
+    },
+    {
+      "id": "exam-invalidate-1782303792541-6cfef4",
+      "type": "exam-invalidate",
+      "message": "切换当前试卷为 C++ 工程能力测评 B 卷，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-24T12:23:12.541Z"
+    },
+    {
+      "id": "paper-activate-1782303792541-043ac1",
+      "type": "paper-activate",
+      "message": "C++ 工程能力测评 B 卷 已设为当前试卷",
+      "createdAt": "2026-06-24T12:23:12.541Z"
+    },
+    {
+      "id": "paper-publish-1782303795365-2272d2",
+      "type": "paper-publish",
+      "message": "C++ 工程能力测评 B 卷 已发布",
+      "createdAt": "2026-06-24T12:23:15.365Z"
+    },
+    {
+      "id": "candidate-delete-1782310582860-e351ea",
+      "type": "candidate-delete",
+      "message": "删除参与者：参与者 91",
+      "createdAt": "2026-06-24T14:16:22.860Z"
+    },
+    {
+      "id": "participant-delete-batch-1782310601644-5f6ffd",
+      "type": "participant-delete-batch",
+      "message": "批量删除 7 名参与者",
+      "createdAt": "2026-06-24T14:16:41.644Z"
+    },
+    {
+      "id": "candidate-create-1782310925171-be98d2",
+      "type": "candidate-create",
+      "message": "添加 1 名参与者",
+      "createdAt": "2026-06-24T14:22:05.171Z"
+    },
+    {
+      "id": "assignment-delete-batch-1782312293925-311808",
+      "type": "assignment-delete-batch",
+      "message": "批量撤销 1 条试卷分配",
+      "createdAt": "2026-06-24T14:44:53.925Z"
+    },
+    {
+      "id": "assignment-delete-batch-1782313237696-fa3d3a",
+      "type": "assignment-delete-batch",
+      "message": "批量撤销 7 条试卷分配",
+      "createdAt": "2026-06-24T15:00:37.696Z"
+    },
+    {
+      "id": "assignment-create-1782313298238-3dbd31",
+      "type": "assignment-create",
+      "message": "分配 C++ 工程能力测评 A 卷 给 1 名参与者",
+      "createdAt": "2026-06-24T15:01:38.238Z"
+    },
+    {
+      "id": "candidate-create-1782313649100-6b5295",
+      "type": "candidate-create",
+      "message": "添加 1 名参与者",
+      "createdAt": "2026-06-24T15:07:29.100Z"
+    },
+    {
+      "id": "group-create-1782314557406-3c4927",
+      "type": "group-create",
+      "message": "新建分组：group1",
+      "createdAt": "2026-06-24T15:22:37.406Z"
+    },
+    {
+      "id": "participant-update-1782316603039-538a4b",
+      "type": "participant-update",
+      "message": "更新参与者：张三",
+      "createdAt": "2026-06-24T15:56:43.039Z"
+    },
+    {
+      "id": "candidate-login-1782316687086-ffc019",
+      "type": "candidate-login",
+      "message": "张三 参与者系统",
+      "createdAt": "2026-06-24T15:58:07.086Z"
+    },
+    {
+      "id": "answer-save-1782316746397-c22b88",
+      "type": "answer-save",
+      "message": "sess-mqs7bigt-fp1ekhvs 保存答题",
+      "createdAt": "2026-06-24T15:59:06.397Z"
+    },
+    {
+      "id": "answer-save-1782316753600-3fc792",
+      "type": "answer-save",
+      "message": "sess-mqs7bigt-fp1ekhvs 保存答题",
+      "createdAt": "2026-06-24T15:59:13.601Z"
+    },
+    {
+      "id": "answer-save-1782316754854-3b168f",
+      "type": "answer-save",
+      "message": "sess-mqs7bigt-fp1ekhvs 保存答题",
+      "createdAt": "2026-06-24T15:59:14.854Z"
+    },
+    {
+      "id": "answer-save-1782316822144-b90843",
+      "type": "answer-save",
+      "message": "sess-mqs7bigt-fp1ekhvs 保存答题",
+      "createdAt": "2026-06-24T16:00:22.144Z"
+    },
+    {
+      "id": "assignment-create-1782390324858-c221a9",
+      "type": "assignment-create",
+      "message": "分配 C++ 工程能力测评 B 卷 给 1 名参与者",
+      "createdAt": "2026-06-25T12:25:24.858Z"
+    },
+    {
+      "id": "participant-update-1782390353642-a83a27",
+      "type": "participant-update",
+      "message": "更新参与者：lisi",
+      "createdAt": "2026-06-25T12:25:53.642Z"
+    },
+    {
+      "id": "candidate-login-1782390366679-03c8fe",
+      "type": "candidate-login",
+      "message": "lisi 参与者系统",
+      "createdAt": "2026-06-25T12:26:06.679Z"
+    },
+    {
+      "id": "candidate-create-1782390431057-2855ab",
+      "type": "candidate-create",
+      "message": "添加 1 名参与者",
+      "createdAt": "2026-06-25T12:27:11.057Z"
+    },
+    {
+      "id": "answer-save-1782392043077-fd9762",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T12:54:03.077Z"
+    },
+    {
+      "id": "answer-save-1782392266676-58f2af",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T12:57:46.677Z"
+    },
+    {
+      "id": "answer-save-1782392277598-3b0dda",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T12:57:57.598Z"
+    },
+    {
+      "id": "answer-save-1782392291728-6203f4",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T12:58:11.728Z"
+    },
+    {
+      "id": "answer-save-1782392302941-fa51ed",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T12:58:22.941Z"
+    },
+    {
+      "id": "candidate-logout-1782392422562-4a0163",
+      "type": "candidate-logout",
+      "message": "lisi 参与者系统",
+      "createdAt": "2026-06-25T13:00:22.562Z"
+    },
+    {
+      "id": "candidate-login-1782392441536-e2e361",
+      "type": "candidate-login",
+      "message": "lisi 参与者系统",
+      "createdAt": "2026-06-25T13:00:41.536Z"
+    },
+    {
+      "id": "answer-save-1782392449160-e814a7",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T13:00:49.160Z"
+    },
+    {
+      "id": "answer-save-1782392628638-f505b5",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T13:03:48.638Z"
+    },
+    {
+      "id": "answer-save-1782392640318-73d8e1",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T13:04:00.318Z"
+    },
+    {
+      "id": "answer-save-1782392647257-06aa61",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T13:04:07.257Z"
+    },
+    {
+      "id": "answer-save-1782392679187-3bfa58",
+      "type": "answer-save",
+      "message": "sess-mqth6gl1-ss4ibntt 保存答题",
+      "createdAt": "2026-06-25T13:04:39.187Z"
+    },
+    {
+      "id": "assignment-create-1782394189413-7861ac",
+      "type": "assignment-create",
+      "message": "分配 C++ 工程能力测评 A 卷 给 1 名参与者",
+      "createdAt": "2026-06-25T13:29:49.413Z"
+    },
+    {
+      "id": "assignment-create-1782394230149-9d0503",
+      "type": "assignment-create",
+      "message": "分配 C++ 工程能力测评 A 卷 给 1 名参与者",
+      "createdAt": "2026-06-25T13:30:30.149Z"
+    },
+    {
+      "id": "assignment-create-1782394247766-72f664",
+      "type": "assignment-create",
+      "message": "分配 C++ 工程能力测评 A 卷 给 1 名参与者",
+      "createdAt": "2026-06-25T13:30:47.766Z"
+    },
+    {
+      "id": "assignment-create-1782401219672-141113",
+      "type": "assignment-create",
+      "message": "分配 C++ 工程能力测评 A 卷 给 1 名参与者",
+      "createdAt": "2026-06-25T15:26:59.672Z"
+    },
+    {
+      "id": "assignment-create-1782401231005-c66f24",
+      "type": "assignment-create",
+      "message": "分配 C++ 工程能力测评 A 卷 给 1 名参与者",
+      "createdAt": "2026-06-25T15:27:11.005Z"
+    },
+    {
+      "id": "assignment-create-1782401262481-61f5f0",
+      "type": "assignment-create",
+      "message": "分配 C++ 工程能力测评 A 卷 给 1 名参与者",
+      "createdAt": "2026-06-25T15:27:42.481Z"
+    },
+    {
+      "id": "proctor-event-1782401905246-797553",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:38:25.246Z"
+    },
+    {
+      "id": "proctor-event-1782401911401-1adb60",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:38:31.401Z"
+    },
+    {
+      "id": "proctor-event-1782401926400-891437",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:38:46.400Z"
+    },
+    {
+      "id": "exam-invalidate-1782401929514-f28ecc",
+      "type": "exam-invalidate",
+      "message": "切换当前试卷为 C++ 工程能力测评 A 卷，已清空答卷、阅卷结果并重置考试状态",
+      "createdAt": "2026-06-25T15:38:49.514Z"
+    },
+    {
+      "id": "paper-activate-1782401929515-d19bc1",
+      "type": "paper-activate",
+      "message": "C++ 工程能力测评 A 卷 已设为当前试卷",
+      "createdAt": "2026-06-25T15:38:49.515Z"
+    },
+    {
+      "id": "paper-publish-1782401933275-d429bb",
+      "type": "paper-publish",
+      "message": "C++ 工程能力测评 A 卷 已发布",
+      "createdAt": "2026-06-25T15:38:53.275Z"
+    },
+    {
+      "id": "proctor-event-1782401941397-63c17a",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:39:01.397Z"
+    },
+    {
+      "id": "proctor-event-1782401956399-162423",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:39:16.399Z"
+    },
+    {
+      "id": "proctor-event-1782401971397-7e8f42",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:39:31.397Z"
+    },
+    {
+      "id": "proctor-event-1782401986397-5f7da2",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:39:46.397Z"
+    },
+    {
+      "id": "proctor-event-1782401996192-b80bb7",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:39:56.192Z"
+    },
+    {
+      "id": "proctor-event-1782402001399-b741d2",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:40:01.399Z"
+    },
+    {
+      "id": "assignment-delete-1782402005750-a1f7ed",
+      "type": "assignment-delete",
+      "message": "撤销 lisi 的考试分配",
+      "createdAt": "2026-06-25T15:40:05.750Z"
+    },
+    {
+      "id": "assignment-create-1782402031446-fa235f",
+      "type": "assignment-create",
+      "message": "分配 C++ 工程能力测评 A 卷 给 1 名参与者",
+      "createdAt": "2026-06-25T15:40:31.446Z"
+    },
+    {
+      "id": "assignment-update-1782402069799-986a97",
+      "type": "assignment-update",
+      "message": "lisi 分配信息已更新",
+      "createdAt": "2026-06-25T15:41:09.799Z"
+    },
+    {
+      "id": "proctor-event-1782402164524-764d20",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:42:44.524Z"
+    },
+    {
+      "id": "proctor-event-1782402178400-54a961",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:42:58.400Z"
+    },
+    {
+      "id": "proctor-event-1782402193399-50daca",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:43:13.399Z"
+    },
+    {
+      "id": "proctor-event-1782402208400-1d5be4",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:43:28.400Z"
+    },
+    {
+      "id": "proctor-event-1782402223400-91ece7",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:43:43.400Z"
+    },
+    {
+      "id": "proctor-event-1782402240399-b43846",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:44:00.399Z"
+    },
+    {
+      "id": "proctor-event-1782402300404-017194",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:45:00.404Z"
+    },
+    {
+      "id": "proctor-event-1782402360404-47fd39",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:46:00.404Z"
+    },
+    {
+      "id": "proctor-event-1782402420403-c94ac1",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:47:00.403Z"
+    },
+    {
+      "id": "proctor-event-1782402480402-7532fd",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:48:00.402Z"
+    },
+    {
+      "id": "proctor-event-1782402540434-f8b7c2",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:49:00.434Z"
+    },
+    {
+      "id": "proctor-event-1782402600449-368303",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:50:00.449Z"
+    },
+    {
+      "id": "proctor-event-1782402660451-db5226",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:51:00.451Z"
+    },
+    {
+      "id": "proctor-event-1782402720451-02e6cd",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:52:00.451Z"
+    },
+    {
+      "id": "proctor-event-1782402780450-17420b",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:53:00.450Z"
+    },
+    {
+      "id": "proctor-event-1782402840456-355ccd",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:54:00.456Z"
+    },
+    {
+      "id": "proctor-event-1782402900448-7fc946",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:55:00.448Z"
+    },
+    {
+      "id": "proctor-event-1782402960452-3c40b6",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:56:00.452Z"
+    },
+    {
+      "id": "proctor-event-1782403020453-8f020f",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:57:00.453Z"
+    },
+    {
+      "id": "proctor-event-1782403080453-87a31a",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:58:00.453Z"
+    },
+    {
+      "id": "proctor-event-1782403140452-6c9b76",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T15:59:00.452Z"
+    },
+    {
+      "id": "proctor-event-1782403200452-2c5863",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:00:00.452Z"
+    },
+    {
+      "id": "proctor-event-1782403260453-99eb6f",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:01:00.453Z"
+    },
+    {
+      "id": "proctor-event-1782403292071-5c132b",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:01:32.071Z"
+    },
+    {
+      "id": "proctor-event-1782403303445-ba0346",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:01:43.445Z"
+    },
+    {
+      "id": "proctor-event-1782403318449-793669",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:01:58.449Z"
+    },
+    {
+      "id": "proctor-event-1782403333455-b1fd47",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:02:13.455Z"
+    },
+    {
+      "id": "proctor-event-1782403348447-608b01",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:02:28.447Z"
+    },
+    {
+      "id": "proctor-event-1782403380449-16a987",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:03:00.449Z"
+    },
+    {
+      "id": "proctor-event-1782403440455-1ecbcc",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:04:00.455Z"
+    },
+    {
+      "id": "proctor-event-1782403500451-5ec8b4",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:05:00.451Z"
+    },
+    {
+      "id": "proctor-event-1782403560454-771d9e",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:06:00.454Z"
+    },
+    {
+      "id": "proctor-event-1782403620447-0b482a",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:07:00.447Z"
+    },
+    {
+      "id": "proctor-event-1782403680446-2928d4",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:08:00.447Z"
+    },
+    {
+      "id": "proctor-event-1782403800452-7b1d64",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:10:00.452Z"
+    },
+    {
+      "id": "proctor-event-1782403860451-2d2df0",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:11:00.451Z"
+    },
+    {
+      "id": "proctor-event-1782403920453-927077",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:12:00.453Z"
+    },
+    {
+      "id": "proctor-event-1782403980454-592007",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:13:00.454Z"
+    },
+    {
+      "id": "proctor-event-1782404040452-d3d4bc",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:14:00.452Z"
+    },
+    {
+      "id": "proctor-event-1782404100455-58c6b3",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:15:00.455Z"
+    },
+    {
+      "id": "proctor-event-1782404160455-95527a",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:16:00.455Z"
+    },
+    {
+      "id": "proctor-event-1782404220455-b9a600",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:17:00.455Z"
+    },
+    {
+      "id": "proctor-event-1782404280457-a1cd53",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:18:00.457Z"
+    },
+    {
+      "id": "proctor-event-1782404340456-25fcde",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:19:00.456Z"
+    },
+    {
+      "id": "proctor-event-1782404400457-c449b6",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:20:00.457Z"
+    },
+    {
+      "id": "proctor-event-1782404460431-bbc092",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:21:00.431Z"
+    },
+    {
+      "id": "proctor-event-1782404520426-dd7ecd",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:22:00.426Z"
+    },
+    {
+      "id": "proctor-event-1782404580424-cc6f4f",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:23:00.424Z"
+    },
+    {
+      "id": "proctor-event-1782404640434-684cfc",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:24:00.434Z"
+    },
+    {
+      "id": "proctor-event-1782404700424-e8eec0",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:25:00.424Z"
+    },
+    {
+      "id": "proctor-event-1782404760422-3baef3",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:26:00.422Z"
+    },
+    {
+      "id": "proctor-event-1782404820422-cd95ba",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:27:00.422Z"
+    },
+    {
+      "id": "proctor-event-1782404880424-4bffb3",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:28:00.424Z"
+    },
+    {
+      "id": "proctor-event-1782404940423-0f39c5",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:29:00.423Z"
+    },
+    {
+      "id": "proctor-event-1782405000421-1e8860",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:30:00.421Z"
+    },
+    {
+      "id": "proctor-event-1782405060422-68a144",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:31:00.422Z"
+    },
+    {
+      "id": "proctor-event-1782405120422-0553f8",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "createdAt": "2026-06-25T16:32:00.422Z"
+    },
+    {
+      "id": "proctor-event-1782405180420-13cef6",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "sessionId": "sess-mqto5dg5-v60mn5wy",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "paperId": "paper-1782230478624",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "risk": "中",
+      "event": "离开考试页面",
+      "source": "heartbeat",
+      "status": "待处理",
+      "createdAt": "2026-06-25T16:33:00.420Z"
+    },
+    {
+      "id": "proctor-event-1782405240419-2dc7b2",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "sessionId": "sess-mqto5dg5-v60mn5wy",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "paperId": "paper-1782230478624",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "risk": "中",
+      "event": "离开考试页面",
+      "source": "heartbeat",
+      "status": "待处理",
+      "createdAt": "2026-06-25T16:34:00.419Z"
+    },
+    {
+      "id": "proctor-event-1782405300419-5fc086",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "sessionId": "sess-mqto5dg5-v60mn5wy",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "paperId": "paper-1782230478624",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "risk": "中",
+      "event": "离开考试页面",
+      "source": "heartbeat",
+      "status": "待处理",
+      "createdAt": "2026-06-25T16:35:00.419Z"
+    },
+    {
+      "id": "proctor-event-1782405360420-cad4dd",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "sessionId": "sess-mqto5dg5-v60mn5wy",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "paperId": "paper-1782230478624",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "risk": "中",
+      "event": "离开考试页面",
+      "source": "heartbeat",
+      "status": "待处理",
+      "createdAt": "2026-06-25T16:36:00.420Z"
+    },
+    {
+      "id": "proctor-event-1782405420383-744545",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "sessionId": "sess-mqto5dg5-v60mn5wy",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "paperId": "paper-1782230478624",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "risk": "中",
+      "event": "离开考试页面",
+      "source": "heartbeat",
+      "status": "待处理",
+      "createdAt": "2026-06-25T16:37:00.383Z"
+    },
+    {
+      "id": "proctor-event-1782405480372-c82412",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "sessionId": "sess-mqto5dg5-v60mn5wy",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "paperId": "paper-1782230478624",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "risk": "中",
+      "event": "离开考试页面",
+      "source": "heartbeat",
+      "status": "待处理",
+      "createdAt": "2026-06-25T16:38:00.372Z"
+    },
+    {
+      "id": "proctor-event-1782406080369-0205fb",
+      "type": "proctor-event",
+      "message": "lisi：离开考试页面",
+      "sessionId": "sess-mqto5dg5-v60mn5wy",
+      "candidate": "lisi",
+      "ticket": "P000002",
+      "className": "默认分组",
+      "paperId": "paper-1782230478624",
+      "paperName": "C++ 工程能力测评 A 卷",
+      "risk": "中",
+      "event": "离开考试页面",
+      "source": "heartbeat",
+      "status": "待处理",
+      "createdAt": "2026-06-25T16:48:00.369Z"
+    },
+    {
+      "id": "exam-auto-submit-1782468332847-3bded8",
+      "type": "exam-auto-submit",
+      "message": "到时自动收卷 7 场考试",
+      "sessionIds": [
+        "sess-mqs7bigt-fp1ekhvs",
+        "sess-mqtji5xg-ara9yanh",
+        "sess-mqtjijit-xz4eapii",
+        "sess-mqtnnz2v-welqy7ty",
+        "sess-mqtno7tp-z4f08r2l",
+        "sess-mqtnow41-xpeq8j9s",
+        "sess-mqto5dg5-v60mn5wy"
+      ],
+      "createdAt": "2026-06-26T10:05:32.847Z"
+    },
+    {
+      "id": "admin-login-1782468332855-9f18ce",
+      "type": "admin-login",
+      "message": "admin 登录运营控制台",
+      "createdAt": "2026-06-26T10:05:32.855Z"
+    },
+    {
+      "id": "admin-logout-1782468339505-c09537",
+      "type": "admin-logout",
+      "message": "admin 退出运营控制台",
+      "createdAt": "2026-06-26T10:05:39.505Z"
+    },
+    {
+      "id": "admin-login-failed-1782468347544-db2e0d",
+      "type": "admin-login-failed",
+      "message": "admin 管理员登录失败",
+      "identifier": "admin",
+      "failures": 1,
+      "lockedUntil": null,
+      "createdAt": "2026-06-26T10:05:47.544Z"
+    },
+    {
+      "id": "admin-login-1782468351412-4677a9",
+      "type": "admin-login",
+      "message": "admin 登录运营控制台",
+      "createdAt": "2026-06-26T10:05:51.412Z"
+    },
+    {
+      "id": "grading-review-1782468555533-0d9140",
+      "type": "grading-review",
+      "message": "sess-mqto5dg5-v60mn5wy 人工复核完成：1/50",
+      "createdAt": "2026-06-26T10:09:15.533Z"
+    }
+  ]
+}

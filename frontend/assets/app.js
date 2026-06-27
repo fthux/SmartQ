@@ -1198,7 +1198,7 @@ const app = createApp({
       state.spec.paperName = spec.paperName || state.spec.paperName || "";
       state.spec.direction = spec.direction || state.spec.direction || "";
       state.spec.difficulty = spec.difficulty || state.spec.difficulty || "中";
-      state.spec.knowledge = Array.isArray(spec.knowledge) ? spec.knowledge.join("，") : state.spec.knowledge || "";
+      state.spec.knowledge = spec.knowledgeInputEmpty ? "" : Array.isArray(spec.knowledge) ? spec.knowledge.join("，") : state.spec.knowledge || "";
       state.spec.requirements = spec.requirements || state.spec.requirements || "";
       const counts = spec.typeCounts || {};
       const scores = spec.typeScores || {};
@@ -1370,8 +1370,13 @@ const app = createApp({
           body: JSON.stringify({ status: reviewed ? "已校验" : "待确认" }),
         });
         await refresh();
-        state.activeWorkflowStep = "review";
-        notify(reviewed ? "题目已审核通过" : "已取消审核通过");
+        if (reviewed && authoringQuestions.value.length > 0 && authoringPendingReviewCount.value === 0) {
+          state.activeWorkflowStep = "save";
+          notify("题目已全部审核通过，请保存试卷");
+        } else {
+          state.activeWorkflowStep = "review";
+          notify(reviewed ? "题目已审核通过" : "已取消审核通过");
+        }
       } catch (error) {
         notify(`审核操作失败：${error.message}`);
       }
@@ -3328,6 +3333,7 @@ const app = createApp({
         typeCounts,
         typeScores,
         knowledge: splitList(state.spec.knowledge),
+        knowledgeInputEmpty: !String(state.spec.knowledge || "").trim(),
         requirements: String(state.spec.requirements || "").trim(),
       };
     }

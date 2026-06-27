@@ -404,6 +404,7 @@ function normalizeGenerationSpec(spec = {}) {
     typeScores,
     typeScoreText: typePlan.map((item) => `${item.type}每题${typeScores[item.type]}分`).join("，"),
     knowledge,
+    knowledgeInputEmpty: Boolean(spec.knowledgeInputEmpty),
     requirements: cleanText(spec.requirements, ""),
   };
 }

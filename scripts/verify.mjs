@@ -124,13 +124,16 @@ try {
   assert(appJs.includes('v-if="state.generating"') && appJs.includes('v-else-if="formLocked"') && appJs.includes("重新生成"), "frontend keeps regenerate available after generation while showing generation progress separately");
   assert(appJs.includes("state.authoringNewDraftActive ? questions.value : []") && appJs.includes("已进入草稿试卷编辑模式"), "frontend starts a new paper flow when authoring URL has no paper id");
   assert(appJs.includes("function syncSpecFromActiveDraft()") && appJs.includes("syncSpecFromActiveDraft();"), "frontend restores generated paper specs when returning to the config step");
+  assert(appJs.includes('spec.knowledgeInputEmpty ? ""') && appJs.includes("knowledgeInputEmpty: !String(state.spec.knowledge"), "frontend keeps empty knowledge input blank after backend fallback");
   assert(appJs.includes('body: JSON.stringify({ status: reviewed ? "已校验" : "待确认" })'), "frontend review action preserves question quality score");
+  assert(appJs.includes('state.activeWorkflowStep = "save"') && appJs.includes("题目已全部审核通过，请保存试卷"), "frontend advances to save step after all questions are reviewed");
   assert(/const defaultSpec = \{\s+paperName: "",\s+direction: "",\s+difficulty: "中",\s+singleCount: 0,\s+singleScore: 2,\s+multipleCount: 0,\s+multipleScore: 4,\s+judgeCount: 0,\s+judgeScore: 2,\s+blankCount: 0,\s+blankScore: 2,\s+shortCount: 0,\s+shortScore: 5,\s+essayCount: 0,\s+essayScore: 10,\s+knowledge: "",\s+requirements: "",\s+\};/m.test(appJs), "frontend leaves authoring text fields empty, defaults counts to zero, and defaults per-type scores");
   assert(appJs.includes('go("papers")') && appJs.includes('state.authoringPaperId = ""'), "frontend returns to papers page after publishing a paper");
   assert(appJs.includes('placeholder="请输入考卷名称"') && appJs.includes('placeholder="请输入出题方向"') && appJs.includes('placeholder="请输入知识点范围，用逗号分隔"') && appJs.includes('placeholder="请输入补充要求"'), "frontend shows authoring form placeholders");
   assert(appJs.includes("saveGeneratedContent(state.generatedDraft, { silent: true })") && appJs.includes("请先生成并保存试卷内容"), "frontend saves generated preview before running quality check");
   assert(appJs.includes("质量复检通过，稍后进入人工审核") && appJs.includes("await pause(1200)") && appJs.includes("质量复检通过，系统将进入人工审核。"), "frontend pauses on quality step before moving to manual review");
   assert(aiJs.includes("rubric,quality") && aiJs.includes("quality 必须是 70-100 的整数") && aiJs.includes("quality 硬约束"), "AI prompt requires question quality scores with scoring rules");
+  assert(aiJs.includes("knowledgeInputEmpty: Boolean(spec.knowledgeInputEmpty)"), "backend preserves whether the knowledge input was originally empty");
   const config = await getJson("/api/config");
   assert(config.aiReady === true, "config reports AI layer ready");
   assert(config.mode === "mock", "verification explicitly enables mock mode");

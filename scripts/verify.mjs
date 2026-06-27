@@ -387,7 +387,7 @@ try {
     knowledge: ["语法基础", "STL", "内存管理", "面向对象", "异常处理"],
     requirements: "题干清晰，答案唯一或评分规则明确。",
   };
-  const generated = await postJson("/api/ai/generate-questions", generationSpec);
+  const generated = await generateQuestionsAsync(generationSpec);
   assert(generated.questions.length === 12, "AI generation returns 12 questions");
   assert(generated.saved === false, "AI generation returns an unsaved preview");
   assert(generated.spec.direction === generationSpec.direction, "AI generation preserves direction");
@@ -1026,7 +1026,7 @@ try {
     direction: "C++ 并发与性能优化",
     knowledge: ["并发控制", "性能分析", "内存模型", "线程安全", "调试诊断"],
   };
-  const secondGenerated = await postJson("/api/ai/generate-questions", secondSpec);
+  const secondGenerated = await generateQuestionsAsync(secondSpec);
   await postJson("/api/ai/save-question-draft", {
     questions: secondGenerated.questions,
     spec: secondGenerated.spec,
@@ -1057,7 +1057,7 @@ try {
   assert(secondAssignedCandidate.paper.id === secondPaper.id, "new assignment receives second paper");
   assert(secondAssignedCandidate.questions.some((item) => item.knowledge.includes(secondSpec.direction)), "second assignment sees second paper questions");
 
-  const resetPreview = await postJson("/api/ai/generate-questions", { ...generationSpec, direction: "C++ 语言进阶能力复测" });
+  const resetPreview = await generateQuestionsAsync({ ...generationSpec, direction: "C++ 语言进阶能力复测" });
   const beforeSaveResetDashboard = await getJson("/api/dashboard");
   assert(beforeSaveResetDashboard.paper.status === "已发布", "unsaved regenerated preview does not reset published paper");
   await postJson("/api/ai/save-question-draft", {
@@ -1137,6 +1137,18 @@ async function postJson(path, body, options = {}) {
     }),
     options,
   );
+}
+
+async function generateQuestionsAsync(spec) {
+  const generationJob = await postJson("/api/ai/generate-questions", spec, { expectedStatus: 202 });
+  assert(generationJob.id && generationJob.status === "running", "AI generation starts an async job");
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const job = await getJson(`/api/ai/generation-jobs/${encodeURIComponent(generationJob.id)}`);
+    if (job.status === "done") return job.result;
+    if (job.status === "error") throw new Error(job.error || "AI generation job failed");
+    await delay(250);
+  }
+  throw new Error("AI generation job timed out");
 }
 
 async function patchJson(path, body, options = {}) {

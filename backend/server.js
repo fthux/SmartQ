@@ -40,6 +40,8 @@ const presenceStatus = resolvePresenceStatus();
 const redisPresence = presenceStatus.requestedAdapter === "redis" ? createRedisPresenceAdapter(process.env.SMARTQ_REDIS_URL, onlineTtlMs) : null;
 const proctorStreams = new Set();
 const presenceStore = new Map();
+const generationJobs = new Map();
+const generationJobTtlMs = 30 * 60 * 1000;
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -664,16 +666,20 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/ai/generate-questions") {
     const body = await readJson(req);
-    try {
-      const result = await generateQuestions(body);
-      sendJson(res, 200, {
-        ...result,
-        saved: false,
-        message: "试卷已生成，保存后才会进入草稿试卷列表。",
-      });
-    } catch (error) {
-      sendJson(res, error.statusCode || 500, { error: error.message || "AI 出题失败" });
+    const job = startGenerationJob(body);
+    sendJson(res, 202, publicGenerationJob(job));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname.startsWith("/api/ai/generation-jobs/")) {
+    cleanupGenerationJobs();
+    const id = decodeURIComponent(url.pathname.split("/").pop() || "");
+    const job = generationJobs.get(id);
+    if (!job) {
+      sendJson(res, 404, { error: "出题任务不存在或已过期" });
+      return;
     }
+    sendJson(res, 200, publicGenerationJob(job));
     return;
   }
 
@@ -2410,6 +2416,73 @@ function requireAdminPermission(session = {}, permission) {
     statusCode: 403,
     permission,
   };
+}
+
+function startGenerationJob(spec = {}) {
+  cleanupGenerationJobs();
+  const now = new Date().toISOString();
+  const job = {
+    id: `gen-${Date.now()}-${randomBytes(4).toString("hex")}`,
+    status: "running",
+    progress: 8,
+    stage: "AI 出题任务已创建",
+    createdAt: now,
+    updatedAt: now,
+    result: null,
+    error: null,
+  };
+  generationJobs.set(job.id, job);
+  runGenerationJob(job, spec);
+  return job;
+}
+
+async function runGenerationJob(job, spec) {
+  updateGenerationJob(job, { progress: 36, stage: "连接 AI 出题服务" });
+  try {
+    const result = await generateQuestions(spec);
+    updateGenerationJob(job, {
+      status: "done",
+      progress: 100,
+      stage: "试卷已生成，等待确认",
+      result: {
+        ...result,
+        saved: false,
+        message: "试卷已生成，保存后才会进入草稿试卷列表。",
+      },
+    });
+  } catch (error) {
+    updateGenerationJob(job, {
+      status: "error",
+      progress: 100,
+      stage: "生成失败",
+      error: error.message || "AI 出题失败",
+    });
+  }
+}
+
+function updateGenerationJob(job, patch = {}) {
+  Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+}
+
+function publicGenerationJob(job = {}) {
+  return {
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+    stage: job.stage,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    result: job.status === "done" ? job.result : undefined,
+    error: job.status === "error" ? job.error : undefined,
+  };
+}
+
+function cleanupGenerationJobs() {
+  const cutoff = Date.now() - generationJobTtlMs;
+  for (const [id, job] of generationJobs.entries()) {
+    const updatedAt = Date.parse(job.updatedAt || job.createdAt || "");
+    if (Number.isFinite(updatedAt) && updatedAt < cutoff) generationJobs.delete(id);
+  }
 }
 
 function loadAdminAccounts() {

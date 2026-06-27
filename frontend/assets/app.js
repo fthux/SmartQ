@@ -1242,10 +1242,12 @@ const app = createApp({
       state.generationError = "";
       startGenerationProgress();
       try {
-        const generated = await request("/api/ai/generate-questions", {
+        const job = await request("/api/ai/generate-questions", {
           method: "POST",
           body: JSON.stringify(readSpec()),
         });
+        setGenerationProgress(Math.max(state.generationProgress, job.progress || 12), job.stage || "AI 出题任务已创建");
+        const generated = await waitForGenerationJob(job.id);
         stopGenerationProgress();
         setGenerationProgress(Math.max(state.generationProgress, 92), "校验试卷结构");
         state.generatedDraft = generated;
@@ -1271,6 +1273,20 @@ const app = createApp({
         state.generating = false;
         mountIcons();
       }
+    }
+
+    async function waitForGenerationJob(jobId) {
+      if (!jobId) throw new Error("AI 出题任务创建失败");
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 10 * 60 * 1000) {
+        await pause(2000);
+        const job = await request(`/api/ai/generation-jobs/${encodeURIComponent(jobId)}`);
+        if (job.progress) setGenerationProgress(Math.max(state.generationProgress, job.progress), job.stage || state.generationStage);
+        else if (job.stage) setGenerationProgress(state.generationProgress, job.stage);
+        if (job.status === "done") return job.result;
+        if (job.status === "error") throw new Error(job.error || "AI 出题失败");
+      }
+      throw new Error("AI 出题任务等待超时，请稍后刷新后重试");
     }
 
     async function saveGeneratedContent(generated, options = {}) {

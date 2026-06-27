@@ -4,9 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SmartQ 控制台</title>
-    <link rel="icon" href="/favicon.ico" sizes="any" />
-    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
-    <link rel="apple-touch-icon" href="/assets/favicon.png" />
+    <script>
+      if (location.pathname !== "/" && !location.pathname.endsWith("/")) {
+        location.replace(`${location.pathname}/${location.search}${location.hash}`);
+      }
+    </script>
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+    <link rel="apple-touch-icon" href="assets/favicon.png" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -64,6 +69,6 @@
   </head>
   <body class="min-h-screen bg-mist text-ink antialiased">
     <div id="app" v-cloak></div>
-    <script type="module" src="/assets/app.js"></script>
+    <script type="module" src="assets/app.js"></script>
   </body>
 </html>

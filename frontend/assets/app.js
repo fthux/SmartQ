@@ -24,6 +24,34 @@ const defaultSpec = {
   requirements: "",
 };
 
+const publicBasePath = detectPublicBasePath();
+
+function normalizeBasePath(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed || trimmed === "/") return "";
+  return `/${trimmed.replace(/^\/+|\/+$/g, "")}`;
+}
+
+function detectPublicBasePath() {
+  if (typeof window.__SMARTQ_PUBLIC_BASE_PATH__ === "string") {
+    return normalizeBasePath(window.__SMARTQ_PUBLIC_BASE_PATH__);
+  }
+  const pathname = window.location.pathname.replace(/\/+$/, "");
+  if (!pathname || pathname === "/" || pathname.includes(".")) return "";
+  return normalizeBasePath(pathname);
+}
+
+function publicUrl(path = "/") {
+  if (/^(https?:)?\/\//i.test(path) || path.startsWith("data:") || path.startsWith("blob:")) return path;
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  if (!publicBasePath) return normalized;
+  return `${publicBasePath}${normalized}`;
+}
+
+function apiUrl(path) {
+  return publicUrl(path);
+}
+
 async function request(path, options = {}) {
   const adminToken = localStorage.getItem("smartqAdminToken") || "";
   const useAdminToken = adminToken && path.startsWith("/api/") && !path.startsWith("/api/candidate/") && !path.startsWith("/api/admin/login") && !["/api/health", "/api/config"].includes(path);
@@ -35,7 +63,7 @@ async function request(path, options = {}) {
   if (options.skipAuth) delete headers.authorization;
   const fetchOptions = { ...options };
   delete fetchOptions.skipAuth;
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     ...fetchOptions,
     headers,
   });
@@ -734,7 +762,7 @@ const app = createApp({
 
     function startProctorStream() {
       if (state.proctorStream || !state.admin.token || typeof EventSource === "undefined") return;
-      const source = new EventSource(`/api/proctor/stream?token=${encodeURIComponent(state.admin.token)}`);
+      const source = new EventSource(apiUrl(`/api/proctor/stream?token=${encodeURIComponent(state.admin.token)}`));
       state.proctorStream = source;
       state.proctorStreamStatus = "连接中";
       source.addEventListener("ready", () => {
@@ -2563,7 +2591,7 @@ const app = createApp({
         return;
       }
       try {
-        const response = await fetch(attachment.downloadUrl, { headers: adminAuthHeaders() });
+        const response = await fetch(apiUrl(attachment.downloadUrl), { headers: adminAuthHeaders() });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         const blob = await response.blob();
         const ext = {
@@ -2660,7 +2688,7 @@ const app = createApp({
 
     function candidateSessionUrl(sessionId) {
       const query = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
-      return `${window.location.origin}/#/candidate${query}`;
+      return `${window.location.origin}${publicUrl("/")}#/candidate${query}`;
     }
 
     async function loginCandidate() {
@@ -3559,6 +3587,7 @@ const app = createApp({
       formatDateOnly,
       formatBytes,
       escapeHtml,
+      publicUrl,
     };
   },
   template: `
@@ -3566,7 +3595,7 @@ const app = createApp({
       <header v-if="state.candidate.authToken" class="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/95 backdrop-blur">
         <div class="flex min-w-0 items-center gap-3">
           <span class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-1 shadow-[0_8px_18px_rgba(22,167,115,0.18)] ring-1 ring-emerald-100">
-            <img src="/assets/favicon.svg" alt="SmartQ" class="h-full w-full object-contain" />
+            <img :src="publicUrl('/assets/favicon.svg')" alt="SmartQ" class="h-full w-full object-contain" />
           </span>
           <div class="min-w-0">
             <div class="flex min-w-0 items-center gap-2">
@@ -3598,7 +3627,7 @@ const app = createApp({
             <div class="relative">
               <div class="absolute -left-8 -top-8 h-28 w-28 rounded-full bg-leaf/10"></div>
               <div class="absolute -right-8 bottom-6 h-24 w-24 rounded-full bg-ocean/10"></div>
-              <img src="/assets/candidate-login-illustration.png" alt="" class="relative z-10 w-full max-w-[520px] object-contain drop-shadow-[0_24px_34px_rgba(18,32,31,0.12)]" />
+              <img :src="publicUrl('/assets/candidate-login-illustration.png')" alt="" class="relative z-10 w-full max-w-[520px] object-contain drop-shadow-[0_24px_34px_rgba(18,32,31,0.12)]" />
             </div>
           </div>
 
@@ -3606,7 +3635,7 @@ const app = createApp({
             <form novalidate class="w-full max-w-sm" @submit.prevent="loginCandidate">
               <div class="flex items-center gap-3">
                 <span class="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg bg-white p-1.5 shadow-[0_12px_24px_rgba(22,167,115,0.25)] ring-1 ring-emerald-100">
-                  <img src="/assets/favicon.svg" alt="SmartQ" class="h-full w-full object-contain" />
+                  <img :src="publicUrl('/assets/favicon.svg')" alt="SmartQ" class="h-full w-full object-contain" />
                 </span>
                 <span>
                   <span class="block text-xl font-black text-ink">SmartQ</span>
@@ -3880,7 +3909,7 @@ const app = createApp({
       <header v-if="state.admin.token" class="flex h-16 items-center justify-between rounded-lg border border-slate-200/80 bg-white/90 px-5 shadow-soft backdrop-blur">
         <button class="flex items-center gap-4 text-left" @click="go('home')">
           <span class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-white p-1.5 ring-1 ring-slate-200">
-            <img src="/assets/favicon.svg" alt="SmartQ" class="h-full w-full object-contain" />
+            <img :src="publicUrl('/assets/favicon.svg')" alt="SmartQ" class="h-full w-full object-contain" />
           </span>
           <span>
             <span class="block text-lg font-black">SmartQ</span>
@@ -3916,7 +3945,7 @@ const app = createApp({
             <div class="mb-9 flex flex-col items-center text-center">
               <div class="relative flex h-20 w-48 flex-col items-center justify-center">
                 <div class="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg bg-white p-2 shadow-lg ring-1 ring-emerald-100">
-                  <img src="/assets/favicon.svg" alt="SmartQ" class="h-full w-full object-contain" />
+                  <img :src="publicUrl('/assets/favicon.svg')" alt="SmartQ" class="h-full w-full object-contain" />
                 </div>
                 <div class="mt-2 text-[11px] font-black uppercase text-slate-400">SmartQ Console</div>
               </div>

@@ -87,7 +87,11 @@ try {
   assert(healthResponse.headers.get("x-frame-options") === "DENY", "API responses include frame safety header");
   const appShell = await getText("/");
   assert(appShell.includes('<div id="app"'), "root serves Vue SPA shell");
-  assert(appShell.includes("/assets/app.js"), "root SPA loads app.js");
+  assert(appShell.includes("assets/app.js") && !appShell.includes("/assets/app.js"), "root SPA loads app.js through a relative URL");
+  const nestedAppShell = await getText("/smartq/");
+  assert(nestedAppShell.includes('<div id="app"') && nestedAppShell.includes("assets/app.js"), "subdirectory path serves Vue SPA shell");
+  const nestedAppJs = await getText("/smartq/assets/app.js");
+  assert(nestedAppJs.includes("publicBasePath") && nestedAppJs.includes("apiUrl"), "subdirectory asset path serves app.js with base path helpers");
   const appJs = await getText("/assets/app.js");
   assert(appJs.includes("visibleNavItems") && appJs.includes("hasAdminPermission('system')"), "frontend filters navigation and system maintenance by admin permissions");
   assert(appJs.includes('v-if="state.admin.token"') && appJs.includes("v-for=\"item in visibleNavItems\""), "frontend hides top console navigation before admin login");

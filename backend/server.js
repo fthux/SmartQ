@@ -669,7 +669,7 @@ async function handleApi(req, res, url) {
       sendJson(res, 200, {
         ...result,
         saved: false,
-        message: "试卷已生成，保存后才会进入未发布试卷列表。",
+        message: "试卷已生成，保存后才会进入草稿试卷列表。",
       });
     } catch (error) {
       sendJson(res, error.statusCode || 500, { error: error.message || "AI 出题失败" });
@@ -727,7 +727,7 @@ async function handleApi(req, res, url) {
         ...current.paper,
         id: saved.id,
         name: saved.name,
-        status: "未发布",
+        status: "草稿",
         questionIds: saved.questionIds,
         buildSpec: saved.buildSpec,
         publishedAt: null,
@@ -747,7 +747,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/papers/publish") {
     const paper = await updateState((current) => {
-      if (!current.paper.id || !["未发布", "已保存", "已组卷", "已发布"].includes(current.paper.status)) {
+      if (!current.paper.id || !["草稿", "未发布", "已保存", "已组卷", "已发布"].includes(current.paper.status)) {
         return { error: "请先保存试卷", paperStatus: current.paper.status };
       }
       const ids = new Set(current.paper.questionIds || []);
@@ -791,7 +791,7 @@ async function handleApi(req, res, url) {
       if (questionContentChanged(before, target)) {
         const inPaper = (current.paper.questionIds || []).includes(id);
         if (inPaper) {
-          current.paper.status = "未发布";
+          current.paper.status = "草稿";
           current.paper.publishedAt = null;
           invalidateExamProgress(current, `试卷内题目 ${id} 内容变更`);
           upsertPaperSnapshot(current, buildPaper(current.questions, current.paper));
@@ -902,7 +902,7 @@ async function handleApi(req, res, url) {
       const repaired = repairQuestions(current.questions);
       current.questions = repaired.questions;
       if (current.paper.id) {
-        current.paper.status = "未发布";
+        current.paper.status = "草稿";
         current.paper.publishedAt = null;
       }
       invalidateExamProgress(current, "题目质量修复");

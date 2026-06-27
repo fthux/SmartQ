@@ -9,17 +9,31 @@ const typeClass = {
   填空: "bg-indigo-50 text-iris",
 };
 
+const paperTypeConfig = [
+  { type: "单选", countKey: "singleCount", scoreKey: "singleScore", apiKey: "single", defaultScore: 2 },
+  { type: "多选", countKey: "multipleCount", scoreKey: "multipleScore", apiKey: "multiple", defaultScore: 4 },
+  { type: "判断", countKey: "judgeCount", scoreKey: "judgeScore", apiKey: "judge", defaultScore: 2 },
+  { type: "填空", countKey: "blankCount", scoreKey: "blankScore", apiKey: "blank", defaultScore: 2 },
+  { type: "简答", countKey: "shortCount", scoreKey: "shortScore", apiKey: "short", defaultScore: 5 },
+  { type: "论述", countKey: "essayCount", scoreKey: "essayScore", apiKey: "essay", defaultScore: 10 },
+];
+
 const defaultSpec = {
   paperName: "",
   direction: "",
   difficulty: "中",
-  totalScore: 0,
   singleCount: 0,
+  singleScore: 2,
   multipleCount: 0,
+  multipleScore: 4,
   judgeCount: 0,
+  judgeScore: 2,
   blankCount: 0,
+  blankScore: 2,
   shortCount: 0,
+  shortScore: 5,
   essayCount: 0,
+  essayScore: 10,
   knowledge: "",
   requirements: "",
 };
@@ -111,6 +125,7 @@ const app = createApp({
         rememberUsername: Boolean(localStorage.getItem("smartqAdminUsername")),
         loading: false,
         error: "",
+        menuOpen: false,
       },
       generatedDraft: null,
       regeneratingDraft: false,
@@ -125,12 +140,17 @@ const app = createApp({
       selectedPaperId: null,
       selectedPaperDetail: null,
       paperDetailLoading: false,
+      paperSearch: "",
+      paperStatusFilter: "all",
+      paperPage: 1,
+      paperPageSize: 6,
       confirmDeletePaper: null,
       editingQuestion: null,
       questionEditForm: null,
       questionEditErrors: {},
       editingPaperId: null,
       authoringPaperId: currentAuthoringPaperId(),
+      authoringNewDraftActive: false,
       assignmentForm: {
         id: "",
         paperId: "",
@@ -286,6 +306,10 @@ const app = createApp({
     ];
 
     const adminPermissions = computed(() => state.admin.user?.permissions || []);
+    const adminDisplayName = computed(() => state.admin.user?.username || state.admin.username || "admin");
+    const adminAccountMenuItems = computed(() => [
+      { key: "logout", label: "退出登录", icon: "log-out", tone: "danger", action: logoutAdmin },
+    ]);
     const visibleNavItems = computed(() => navItems.filter((item) => !item.permission || hasAdminPermission(item.permission)));
     const questions = computed(() => state.dashboard?.questions || []);
     const paper = computed(() => state.dashboard?.paper || {});
@@ -350,24 +374,23 @@ const app = createApp({
     const authoringQuestions = computed(() => {
       if (state.route !== "authoring") return questions.value;
       if (isEditingPaper.value) return authoringPaperReady.value ? questions.value : [];
-      return paper.value.id ? [] : questions.value;
+      return state.authoringNewDraftActive ? questions.value : [];
     });
     const reviewedCount = computed(() => questions.value.filter((item) => item.status === "已校验").length);
     const pendingReviewCount = computed(() => Math.max(0, questions.value.length - reviewedCount.value));
     const authoringReviewedCount = computed(() => authoringQuestions.value.filter((item) => item.status === "已校验").length);
     const authoringPendingReviewCount = computed(() => Math.max(0, authoringQuestions.value.length - authoringReviewedCount.value));
     const authoringQuality = computed(() => (authoringQuestions.value.length ? quality.value : {}));
-    const hasCurrentPaper = computed(() => ["未发布", "已保存", "已组卷", "已发布"].includes(paper.value.status));
+    const hasCurrentPaper = computed(() => ["草稿", "未发布", "已保存", "已组卷", "已发布"].includes(paper.value.status));
     const draftReady = computed(() => Boolean(state.generatedDraft?.questions?.length || authoringQuestions.value.length));
-    const formLocked = computed(() => draftReady.value && !state.regeneratingDraft);
-    const totalQuestionCount = computed(
-      () =>
-        numberValue(state.spec.singleCount) +
-        numberValue(state.spec.multipleCount) +
-        numberValue(state.spec.judgeCount) +
-        numberValue(state.spec.blankCount) +
-        numberValue(state.spec.shortCount) +
-        numberValue(state.spec.essayCount),
+    const formLocked = computed(() => state.generating || (draftReady.value && !state.regeneratingDraft));
+    const totalQuestionCount = computed(() => paperTypeConfig.reduce((sum, item) => sum + numberValue(state.spec[item.countKey]), 0));
+    const computedSpecTotalScore = computed(() =>
+      paperTypeConfig.reduce((sum, item) => {
+        const count = clampNumber(state.spec[item.countKey], 0, 50, 0);
+        const score = clampNumber(state.spec[item.scoreKey], 1, 200, item.defaultScore);
+        return sum + count * score;
+      }, 0),
     );
     const workflowSteps = computed(() => {
       const hasUnsavedDraft = Boolean(state.generatedDraft?.questions?.length);
@@ -458,11 +481,25 @@ const app = createApp({
       if (publishedPapers.value.length && candidates.value.length) return { label: "添加试卷分配", action: "assignment", icon: "user-plus" };
       return { label: "新建出题任务", route: "authoring", icon: "sparkles" };
     });
-    const quickActions = computed(() => [
-      { label: "继续出题", desc: pendingReviewCount.value ? `${pendingReviewCount.value} 道题待审核` : "配置并生成新试卷", route: "authoring", icon: "sparkles", primary: true },
-      { label: "分配试卷", desc: publishedPapers.value.length ? `${publishedPapers.value.length} 份可分配` : "需先发布试卷", route: "assignments", icon: "list-checks", disabled: !publishedPapers.value.length || !candidates.value.length },
-      { label: "处理风险", desc: proctorSummary.value.highRisk ? `${proctorSummary.value.highRisk} 个高风险` : `${proctorSummary.value.mediumRisk} 个中风险`, route: "proctor", icon: "shield-alert", disabled: !state.dashboard?.stats?.risk },
-      { label: "复核答卷", desc: gradingQueue.value.subjectivePending ? `${gradingQueue.value.subjectivePending} 份待处理` : "暂无待复核", route: "analysis", icon: "check-check", disabled: !gradingQueue.value.subjectivePending },
+    const priorityActions = computed(() => [
+      {
+        label: "风险处理",
+        desc: proctorSummary.value.highRisk ? `${proctorSummary.value.highRisk} 个高风险` : `${proctorSummary.value.mediumRisk} 个中风险`,
+        route: "proctor",
+        icon: "shield-alert",
+        value: state.dashboard?.stats?.risk || 0,
+        tone: "text-coral",
+        disabled: !state.dashboard?.stats?.risk,
+      },
+      {
+        label: "复核答卷",
+        desc: gradingQueue.value.subjectivePending ? `${gradingQueue.value.subjectivePending} 份待处理` : "暂无待复核",
+        route: "analysis",
+        icon: "check-check",
+        value: gradingQueue.value.subjectivePending || 0,
+        tone: "text-iris",
+        disabled: !gradingQueue.value.subjectivePending,
+      },
     ]);
     const todos = computed(() =>
       [
@@ -474,8 +511,8 @@ const app = createApp({
           show: pendingReviewCount.value > 0,
         },
         {
-          title: hasCurrentPaper.value ? "有未发布试卷待处理" : "有试卷内容待保存",
-          desc: hasCurrentPaper.value ? "发布后可进入参与者分配流程" : "完成题目审核后保存为未发布试卷",
+          title: hasCurrentPaper.value ? "有草稿试卷待处理" : "有试卷内容待保存",
+          desc: hasCurrentPaper.value ? "发布后可进入参与者分配流程" : "完成题目审核后保存为草稿试卷",
           action: hasCurrentPaper.value ? "去发布" : "去处理",
           route: "authoring",
           params: paper.value.id ? { paperid: paper.value.id } : {},
@@ -515,6 +552,23 @@ const app = createApp({
       return papers.value
         .slice()
         .sort((a, b) => new Date(b.publishedAt || b.createdAt || 0) - new Date(a.publishedAt || a.createdAt || 0));
+    });
+    const filteredPaperRows = computed(() => {
+      const keyword = String(state.paperSearch || "").trim().toLowerCase();
+      const status = state.paperStatusFilter;
+      return paperRows.value.filter((item) => {
+        const text = [item.name, item.status, item.id].join(" ").toLowerCase();
+        if (keyword && !text.includes(keyword)) return false;
+        if (status === "published") return item.status === "已发布";
+        if (status === "unpublished") return ["草稿", "未发布", "已保存", "已组卷"].includes(item.status);
+        return true;
+      });
+    });
+    const paperTotalPages = computed(() => Math.max(1, Math.ceil(filteredPaperRows.value.length / state.paperPageSize)));
+    const currentPaperPage = computed(() => Math.min(state.paperPage, paperTotalPages.value));
+    const pagedPaperRows = computed(() => {
+      const start = (currentPaperPage.value - 1) * state.paperPageSize;
+      return filteredPaperRows.value.slice(start, start + state.paperPageSize);
     });
     const proctorSummary = computed(() => {
       const riskRows = sessions.value.filter((item) => item.risk !== "低");
@@ -682,6 +736,7 @@ const app = createApp({
         state.assignmentPage = Math.min(state.assignmentPage, Math.max(1, Math.ceil(sessionIds.size / state.assignmentPageSize) || 1));
         const eventIds = new Set((dashboard.proctorEvents || []).map((item) => item.id));
         state.selectedProctorEventIds = state.selectedProctorEventIds.filter((id) => eventIds.has(id));
+        state.paperPage = Math.min(state.paperPage, Math.max(1, Math.ceil((dashboard.papers || []).length / state.paperPageSize) || 1));
         if (dashboard.proctorRules) state.proctorRulesForm = { ...state.proctorRulesForm, ...dashboard.proctorRules };
         if (state.route === "proctor") state.proctorLastRefreshedAt = new Date().toISOString();
       } catch (error) {
@@ -719,7 +774,13 @@ const app = createApp({
       if (route === "authoring") {
         state.authoringPaperId = params.paperid || params.paperId || params.papeid || "";
         state.editingPaperId = state.authoringPaperId || null;
-        if (!state.authoringPaperId) state.activeWorkflowStep = "config";
+        state.authoringNewDraftActive = false;
+        if (!state.authoringPaperId) {
+          state.generatedDraft = null;
+          state.regeneratingDraft = false;
+          state.spec = { ...defaultSpec };
+          state.activeWorkflowStep = "config";
+        }
       }
       if (route === "papers") {
         clearSelectedPaper();
@@ -802,13 +863,28 @@ const app = createApp({
       go(action.route || "home", action.params || {});
     }
 
-    function runQuickAction(action) {
+    function runPriorityAction(action) {
       if (!action) return;
       if (action.disabled) {
         notify(action.desc || "当前条件不足");
         return;
       }
       runHomeAction(action);
+    }
+
+    function toggleAdminMenu() {
+      state.admin.menuOpen = !state.admin.menuOpen;
+      mountIcons();
+    }
+
+    function closeAdminMenu() {
+      state.admin.menuOpen = false;
+    }
+
+    function runAdminAccountMenuItem(item) {
+      if (!item || item.disabled) return;
+      closeAdminMenu();
+      if (typeof item.action === "function") item.action();
     }
 
     function candidateAuthHeaders() {
@@ -824,6 +900,7 @@ const app = createApp({
       if (message.includes("运营登录") || message.includes("请先登录运营控制台")) {
         state.admin.token = "";
         state.admin.user = null;
+        state.admin.menuOpen = false;
         localStorage.removeItem("smartqAdminToken");
         state.dashboard = null;
       }
@@ -900,6 +977,7 @@ const app = createApp({
       }
       state.admin.token = "";
       state.admin.user = null;
+      state.admin.menuOpen = false;
       state.dashboard = null;
       state.dashboardError = "";
       localStorage.removeItem("smartqAdminToken");
@@ -952,6 +1030,7 @@ const app = createApp({
         if (session.current) {
           state.admin.token = "";
           state.admin.user = null;
+          state.admin.menuOpen = false;
           state.dashboard = null;
           localStorage.removeItem("smartqAdminToken");
           return;
@@ -1069,6 +1148,7 @@ const app = createApp({
         });
         state.admin.token = "";
         state.admin.user = null;
+        state.admin.menuOpen = false;
         state.dashboard = null;
         state.storageInfo = null;
         state.backupRestoreText = "";
@@ -1106,9 +1186,27 @@ const app = createApp({
     function setWorkflowStep(step) {
       const target = workflowSteps.value.find((item) => item.key === step);
       if (target && !target.clickable) return;
+      if (step === "config") syncSpecFromActiveDraft();
       state.activeWorkflowStep = step;
       if (step === "save") state.activeWorkflowStep = "save";
       mountIcons();
+    }
+
+    function syncSpecFromActiveDraft() {
+      const spec = state.generatedDraft?.spec || state.dashboard?.generationTask;
+      if (!spec || typeof spec !== "object") return;
+      state.spec.paperName = spec.paperName || state.spec.paperName || "";
+      state.spec.direction = spec.direction || state.spec.direction || "";
+      state.spec.difficulty = spec.difficulty || state.spec.difficulty || "中";
+      state.spec.knowledge = Array.isArray(spec.knowledge) ? spec.knowledge.join("，") : state.spec.knowledge || "";
+      state.spec.requirements = spec.requirements || state.spec.requirements || "";
+      const counts = spec.typeCounts || {};
+      const scores = spec.typeScores || {};
+      paperTypeConfig.forEach((item) => {
+        const planItem = Array.isArray(spec.typeMix) ? spec.typeMix.find((entry) => entry.type === item.type) : null;
+        state.spec[item.countKey] = clampNumber(counts[item.apiKey] ?? planItem?.count, 0, 50, state.spec[item.countKey] || 0);
+        state.spec[item.scoreKey] = clampNumber(scores[item.apiKey] ?? scores[item.type], 1, 200, state.spec[item.scoreKey] || item.defaultScore);
+      });
     }
 
     async function generateDraft() {
@@ -1174,6 +1272,8 @@ const app = createApp({
         state.generatedDraft = null;
         state.regeneratingDraft = false;
         await refresh();
+        state.authoringNewDraftActive = !state.authoringPaperId;
+        syncSpecFromActiveDraft();
         state.activeWorkflowStep = "quality";
         if (!options.silent) notify("试卷内容已进入质量复检");
         return result;
@@ -1220,10 +1320,14 @@ const app = createApp({
       state.generationStage = stage;
     }
 
+    function pause(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
     function formatGenerationError(message) {
       const text = String(message || "");
       if (text.includes("UND_ERR_CONNECT_TIMEOUT") || text.includes("Connect Timeout")) {
-        return "AI 服务连接超时，请检查服务器网络是否能访问 edge.ai.minigameland.com:443，或确认 baseUrl 服务当前可用。";
+        return "AI 服务连接超时，请检查服务器网络是否能访问配置的 AI 服务地址，或确认 OPENAI_BASE_URL 服务当前可用。";
       }
       return text;
     }
@@ -1237,11 +1341,7 @@ const app = createApp({
         await saveGeneratedContent(state.generatedDraft);
         const qualityResult = await qualityCheck({ auto: true });
         const qualityFailures = qualityResult?.failures?.length || 0;
-        if (qualityFailures > 0) {
-          notify(`试卷内容已进入质量复检，发现 ${qualityFailures} 个问题，请先自动修复`);
-        } else {
-          notify("质量复检通过，进入人工审核");
-        }
+        if (qualityFailures > 0) notify(`试卷内容已进入质量复检，发现 ${qualityFailures} 个问题，请先自动修复`);
       } catch (error) {
         notify(`保存失败：${error.message}`);
       }
@@ -1267,7 +1367,7 @@ const app = createApp({
       try {
         await request(`/api/questions/${question.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ status: reviewed ? "已校验" : "待确认", quality: reviewed ? Math.max(92, Number(question.quality || 90)) : 88 }),
+          body: JSON.stringify({ status: reviewed ? "已校验" : "待确认" }),
         });
         await refresh();
         state.activeWorkflowStep = "review";
@@ -1279,11 +1379,28 @@ const app = createApp({
 
     async function qualityCheck(options = {}) {
       try {
+        if (state.generatedDraft?.questions?.length) {
+          const saved = await saveGeneratedContent(state.generatedDraft, { silent: true });
+          if (!saved) return null;
+        }
+        if (!authoringQuestions.value.length) {
+          notify("请先生成并保存试卷内容");
+          state.activeWorkflowStep = "config";
+          return null;
+        }
         const result = await request("/api/quality/check", { method: "POST", body: JSON.stringify({}) });
         await refresh();
+        state.authoringNewDraftActive = state.authoringNewDraftActive || (!state.authoringPaperId && questions.value.length > 0);
         const failureCount = result.failures?.length || 0;
-        state.activeWorkflowStep = failureCount > 0 ? "quality" : "review";
-        if (!options.auto) notify(failureCount > 0 ? `质量复检发现 ${failureCount} 个问题，请先自动修复` : "质量复检通过，进入人工审核");
+        if (failureCount > 0) {
+          state.activeWorkflowStep = "quality";
+          if (!options.auto) notify(`质量复检发现 ${failureCount} 个问题，请先自动修复`);
+          return result;
+        }
+        state.activeWorkflowStep = "quality";
+        notify("质量复检通过，稍后进入人工审核");
+        await pause(1200);
+        state.activeWorkflowStep = "review";
         return result;
       } catch (error) {
         notify(`质量复检失败：${error.message}`);
@@ -1329,8 +1446,11 @@ const app = createApp({
       try {
         await request("/api/papers/publish", { method: "POST", body: JSON.stringify({}) });
         await refresh();
-        state.activeWorkflowStep = "publish";
+        state.activeWorkflowStep = "config";
+        state.authoringPaperId = "";
+        state.editingPaperId = null;
         notify("试卷已发布");
+        go("papers");
       } catch (error) {
         notify(`发布失败：${error.message}`);
       }
@@ -1366,6 +1486,14 @@ const app = createApp({
       state.paperDetailLoading = false;
     }
 
+    function changePaperPage(delta) {
+      state.paperPage = Math.max(1, Math.min(paperTotalPages.value, currentPaperPage.value + delta));
+    }
+
+    function resetPaperPage() {
+      state.paperPage = 1;
+    }
+
     function askDeletePaper(item) {
       state.confirmDeletePaper = item;
     }
@@ -1394,7 +1522,7 @@ const app = createApp({
       }
       state.activeWorkflowStep = "review";
       go("authoring", { paperid: item.id });
-      notify("已进入未发布试卷编辑模式");
+      notify("已进入草稿试卷编辑模式");
     }
 
     function openQuestionEditor(question) {
@@ -1778,10 +1906,12 @@ const app = createApp({
       const errors = {};
       if (!String(state.spec.paperName || "").trim()) errors.paperName = "请输入考卷名称";
       if (!String(state.spec.direction || "").trim()) errors.direction = "请输入出题方向";
-      const totalScore = Number(state.spec.totalScore);
-      if (!Number.isFinite(totalScore) || totalScore < 1 || totalScore > 200) errors.totalScore = "总分需为 1 到 200";
-      const count = ["singleCount", "multipleCount", "judgeCount", "blankCount", "shortCount", "essayCount"].reduce((sum, key) => sum + clampNumber(state.spec[key], 0, 50, 0), 0);
+      const count = paperTypeConfig.reduce((sum, item) => sum + clampNumber(state.spec[item.countKey], 0, 50, 0), 0);
       if (count <= 0) errors.questionCount = "请至少设置一种题型数量";
+      paperTypeConfig.forEach((item) => {
+        const score = Number(state.spec[item.scoreKey]);
+        if (!Number.isFinite(score) || score < 1 || score > 200) errors[item.scoreKey] = `${item.type}每题分值需为 1 到 200`;
+      });
       return errors;
     }
 
@@ -2812,7 +2942,8 @@ const app = createApp({
       loadCandidateExams().catch((error) => notify(`考试列表加载失败：${error.message}`));
     }
 
-    async function loadCandidateSession(sessionId = state.candidate.sessionId || "s-001") {
+    async function loadCandidateSession(sessionId = state.candidate.sessionId || "") {
+      if (!sessionId) return;
       state.candidate.loading = true;
       try {
         const data = await request(`/api/candidate/session/${encodeURIComponent(sessionId)}`, { headers: candidateAuthHeaders() });
@@ -3185,22 +3316,17 @@ const app = createApp({
     }
 
     function readSpec() {
-      const typeCounts = {
-        single: clampNumber(state.spec.singleCount, 0, 50, 0),
-        multiple: clampNumber(state.spec.multipleCount, 0, 50, 0),
-        judge: clampNumber(state.spec.judgeCount, 0, 50, 0),
-        blank: clampNumber(state.spec.blankCount, 0, 50, 0),
-        short: clampNumber(state.spec.shortCount, 0, 50, 0),
-        essay: clampNumber(state.spec.essayCount, 0, 50, 0),
-      };
+      const typeCounts = Object.fromEntries(paperTypeConfig.map((item) => [item.apiKey, clampNumber(state.spec[item.countKey], 0, 50, 0)]));
+      const typeScores = Object.fromEntries(paperTypeConfig.map((item) => [item.apiKey, clampNumber(state.spec[item.scoreKey], 1, 200, item.defaultScore)]));
       return {
         title: state.dashboard?.exam?.title || "综合能力测评",
         paperName: String(state.spec.paperName || "A 卷").trim(),
         direction: String(state.spec.direction || "").trim(),
         difficulty: state.spec.difficulty,
-        totalScore: clampNumber(state.spec.totalScore, 1, 200, 50),
+        totalScore: computedSpecTotalScore.value,
         count: Object.values(typeCounts).reduce((sum, value) => sum + value, 0),
         typeCounts,
+        typeScores,
         knowledge: splitList(state.spec.knowledge),
         requirements: String(state.spec.requirements || "").trim(),
       };
@@ -3327,6 +3453,9 @@ const app = createApp({
           sendCandidateHeartbeat("hidden").catch(() => { });
         }
       });
+      document.addEventListener("click", (event) => {
+        if (!event.target?.closest?.("[data-admin-account-menu]")) closeAdminMenu();
+      });
       document.addEventListener("fullscreenchange", () => {
         if (state.route === "candidate" && state.candidate.session) {
           state.candidate.device.fullscreen = document.fullscreenElement ? "active" : "exited";
@@ -3370,6 +3499,8 @@ const app = createApp({
       navItems,
       visibleNavItems,
       adminPermissions,
+      adminDisplayName,
+      adminAccountMenuItems,
       questions,
       authoringQuestions,
       authoringQuality,
@@ -3384,6 +3515,10 @@ const app = createApp({
       papers,
       publishedPapers,
       paperRows,
+      filteredPaperRows,
+      pagedPaperRows,
+      paperTotalPages,
+      currentPaperPage,
       gradingQueue,
       gradingReviewQueue,
       filteredGradingReviewQueue,
@@ -3397,7 +3532,7 @@ const app = createApp({
       visibleWorkflowStep,
       dashboardCards,
       homePrimaryAction,
-      quickActions,
+      priorityActions,
       todos,
       recentPapers,
       proctorSummary,
@@ -3432,14 +3567,19 @@ const app = createApp({
       candidateMarkedCount,
       candidateReadOnly,
       candidateRemainingText,
+      paperTypeConfig,
+      computedSpecTotalScore,
       refresh,
       go,
       hasAdminPermission,
       canAccessRoute,
       loginAdmin,
       logoutAdmin,
+      toggleAdminMenu,
+      closeAdminMenu,
+      runAdminAccountMenuItem,
       runHomeAction,
-      runQuickAction,
+      runPriorityAction,
       setWorkflowStep,
       generateDraft,
       saveDraft,
@@ -3452,6 +3592,8 @@ const app = createApp({
       publishPaper,
       activatePaper,
       selectPaper,
+      changePaperPage,
+      resetPaperPage,
       askDeletePaper,
       deletePaper,
       editPaper,
@@ -3916,10 +4058,8 @@ const app = createApp({
             <span class="block text-xs font-medium text-slate-500">通用考试 / 测评平台</span>
           </span>
         </button>
-        <div class="flex flex-wrap items-center justify-end gap-5">
-          <div v-if="state.admin.token" class="text-xs font-bold text-slate-500">
-            {{ state.admin.user?.username || state.admin.username }}
-          </div>
+        <div class="flex min-w-0 items-center justify-end gap-5">
+          <nav v-if="state.admin.token" class="flex min-w-0 flex-wrap items-center justify-end gap-5">
           <button
             v-if="state.admin.token"
             v-for="item in visibleNavItems"
@@ -3930,7 +4070,41 @@ const app = createApp({
           >
             {{ item.label }}
           </button>
-          <button v-if="state.admin.token" class="py-1 text-sm font-bold text-slate-500 transition hover:text-coral" @click="logoutAdmin">退出</button>
+          </nav>
+          <div v-if="state.admin.token" data-admin-account-menu class="relative shrink-0">
+            <button
+              type="button"
+              class="flex h-10 items-center gap-1.5 px-1 text-sm font-bold text-slate-600 transition hover:text-ink"
+              :aria-expanded="state.admin.menuOpen ? 'true' : 'false'"
+              aria-haspopup="menu"
+              @click.stop="toggleAdminMenu"
+            >
+              <span class="max-w-[140px] truncate">{{ adminDisplayName }}</span>
+              <i data-lucide="chevron-down" class="h-3.5 w-3.5 text-slate-400 transition" :class="state.admin.menuOpen ? 'rotate-180' : ''"></i>
+            </button>
+            <div
+              v-if="state.admin.menuOpen"
+              class="absolute right-0 top-12 z-40 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white py-2 shadow-[0_18px_45px_rgba(15,23,42,0.14)]"
+              role="menu"
+            >
+              <div class="border-b border-slate-100 px-3 pb-2 pt-1">
+                <div class="text-[11px] font-bold text-slate-400">当前账号</div>
+                <div class="mt-1 truncate text-sm font-black text-ink">{{ adminDisplayName }}</div>
+              </div>
+              <button
+                v-for="item in adminAccountMenuItems"
+                :key="item.key"
+                type="button"
+                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold transition"
+                :class="item.tone === 'danger' ? 'text-coral hover:bg-rose-50' : 'text-slate-700 hover:bg-slate-50'"
+                role="menuitem"
+                @click="runAdminAccountMenuItem(item)"
+              >
+                <i :data-lucide="item.icon" class="h-4 w-4"></i>
+                <span>{{ item.label }}</span>
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -3960,6 +4134,16 @@ const app = createApp({
                 登录密码
                 <input v-model="state.admin.password" type="password" autocomplete="current-password" class="mt-2 h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-leaf focus:ring-2 focus:ring-emerald-100" placeholder="请输入密码" />
               </label>
+              <div class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+                <div class="flex items-center gap-2 text-leaf">
+                  <i data-lucide="info" class="h-4 w-4"></i>
+                  测试账号
+                </div>
+                <div class="mt-2 grid grid-cols-2 gap-2 text-slate-600">
+                  <span>账号：admin</span>
+                  <span>密码：123456</span>
+                </div>
+              </div>
               <div v-if="state.admin.error" class="mt-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-coral">{{ state.admin.error }}</div>
               <button class="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded bg-leaf text-sm font-black text-white shadow-[0_8px_18px_rgba(22,167,115,0.24)] transition hover:bg-[#128a61] disabled:cursor-not-allowed disabled:opacity-50" :disabled="state.admin.loading">
                 <i data-lucide="log-in" class="h-4 w-4"></i>
@@ -4078,6 +4262,29 @@ const app = createApp({
                     <button class="shrink-0 rounded-lg bg-ink px-3 py-2 text-sm font-bold text-white" @click="go(todo.route, todo.params || {})">{{ todo.action }}</button>
                   </div>
                 </div>
+                <div class="mt-5 border-t border-slate-100 pt-4">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="text-sm font-black text-ink">重点处理</div>
+                    <div class="text-xs font-bold text-slate-400">监考与阅卷队列</div>
+                  </div>
+                  <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <button
+                      v-for="action in priorityActions"
+                      :key="action.label"
+                      type="button"
+                      class="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-slate-300 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+                      :disabled="action.disabled"
+                      @click="runPriorityAction(action)"
+                    >
+                      <i :data-lucide="action.icon" class="h-4 w-4 shrink-0" :class="action.disabled ? 'text-slate-300' : action.tone"></i>
+                      <span class="min-w-0">
+                        <span class="block text-sm font-black text-ink">{{ action.label }}</span>
+                        <span class="mt-1 block truncate text-xs font-semibold text-slate-500">{{ action.desc }}</span>
+                      </span>
+                      <span class="rounded bg-slate-100 px-2 py-1 text-xs font-black" :class="action.disabled ? 'text-slate-400' : action.tone">{{ action.value }}</span>
+                    </button>
+                  </div>
+                </div>
               </section>
 
               <section v-if="hasAdminPermission('system')" class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
@@ -4107,18 +4314,6 @@ const app = createApp({
                     <div class="mt-2 text-xs font-semibold text-slate-500">已分配 {{ item.assigned }} · 答题中 {{ item.active }} · 已提交 {{ item.submitted }}</div>
                   </div>
                   <div v-if="!assignmentPaperCounts.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500 sm:col-span-2">暂无试卷分配</div>
-                </div>
-              </section>
-              <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-                <h2 class="text-lg font-black">快捷操作</h2>
-                <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                  <button v-for="action in quickActions" :key="action.label" class="flex items-center gap-3 rounded-lg border px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-60" :class="action.primary ? 'border-ink bg-ink text-white' : 'border-slate-200 bg-white text-slate-700'" :disabled="action.disabled" @click="runQuickAction(action)">
-                    <i :data-lucide="action.icon" class="h-4 w-4 shrink-0"></i>
-                    <span class="min-w-0">
-                      <span class="block text-sm font-black">{{ action.label }}</span>
-                      <span class="mt-1 block truncate text-xs font-semibold" :class="action.primary ? 'text-white/75' : 'text-slate-500'">{{ action.desc }}</span>
-                    </span>
-                  </button>
                 </div>
               </section>
               <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
@@ -4415,8 +4610,9 @@ const app = createApp({
                 <div class="mt-1 text-xs font-semibold text-slate-500">{{ formLocked ? '试卷已生成，命题参数已锁定；如需修改，请点击重新生成' : state.regeneratingDraft ? '正在重新生成模式，可调整参数并生成新的试卷' : '出题者填写命题参数后生成试卷' }}</div>
               </div>
               <div class="flex items-center gap-2">
-                <button v-if="formLocked" type="button" class="rounded-lg border border-ocean/30 bg-white px-4 py-2 text-sm font-bold text-ocean" @click="regenerate">重新生成</button>
-                <button v-else type="submit" class="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white" :disabled="state.generating">{{ state.generating ? '生成中' : '生成试卷' }}</button>
+                <button v-if="state.generating" type="button" class="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white opacity-70" disabled>生成中</button>
+                <button v-else-if="formLocked" type="button" class="rounded-lg border border-ocean/30 bg-white px-4 py-2 text-sm font-bold text-ocean" @click="regenerate">重新生成</button>
+                <button v-else type="submit" class="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white">生成试卷</button>
               </div>
             </div>
             <div v-if="state.generating || state.generationStage" class="mt-4 rounded-lg border border-ocean/20 bg-white p-4">
@@ -4447,26 +4643,38 @@ const app = createApp({
               </div>
             </div>
             <fieldset :disabled="formLocked" class="mt-4">
-              <div class="grid grid-cols-[1fr_1.1fr_120px_120px] gap-3">
-                <label class="text-xs font-bold text-slate-600">考卷名称<input v-model="state.spec.paperName" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100 disabled:text-slate-500" :class="state.specFormErrors.paperName ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" placeholder="请输入考卷名称" /><div :class="fieldErrorClass(state.specFormErrors.paperName)">{{ state.specFormErrors.paperName || '' }}</div></label>
-                <label class="text-xs font-bold text-slate-600">出题方向<input v-model="state.spec.direction" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100 disabled:text-slate-500" :class="state.specFormErrors.direction ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" placeholder="请输入出题方向" /><div :class="fieldErrorClass(state.specFormErrors.direction)">{{ state.specFormErrors.direction || '' }}</div></label>
-                <label class="text-xs font-bold text-slate-600">难度<select v-model="state.spec.difficulty" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100"><option>中</option><option>易</option><option>难</option><option>混合</option></select></label>
-                <label class="text-xs font-bold text-slate-600">总分<input v-model.number="state.spec.totalScore" type="number" min="1" max="200" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100" :class="state.specFormErrors.totalScore ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" /><div :class="fieldErrorClass(state.specFormErrors.totalScore)">{{ state.specFormErrors.totalScore || '' }}</div></label>
+              <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <div class="text-sm font-black text-ink">出题条件</div>
+                <div class="mt-3 grid grid-cols-[1fr_1.1fr_120px] gap-3">
+                  <label class="text-xs font-bold text-slate-600">考卷名称<input v-model="state.spec.paperName" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100 disabled:text-slate-500" :class="state.specFormErrors.paperName ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" placeholder="请输入考卷名称" /><div :class="fieldErrorClass(state.specFormErrors.paperName)">{{ state.specFormErrors.paperName || '' }}</div></label>
+                  <label class="text-xs font-bold text-slate-600">出题方向<input v-model="state.spec.direction" class="mt-2 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100 disabled:text-slate-500" :class="state.specFormErrors.direction ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" placeholder="请输入出题方向" /><div :class="fieldErrorClass(state.specFormErrors.direction)">{{ state.specFormErrors.direction || '' }}</div></label>
+                  <label class="text-xs font-bold text-slate-600">难度<select v-model="state.spec.difficulty" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink disabled:bg-slate-100"><option>中</option><option>易</option><option>难</option><option>混合</option></select></label>
+                </div>
+                <div class="mt-3 grid grid-cols-[1fr_1fr] gap-3">
+                  <label class="text-xs font-bold text-slate-600">知识点范围<textarea v-model="state.spec.knowledge" class="mt-2 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-6 disabled:bg-slate-100" placeholder="请输入知识点范围，用逗号分隔"></textarea></label>
+                  <label class="text-xs font-bold text-slate-600">补充要求<textarea v-model="state.spec.requirements" class="mt-2 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-6 disabled:bg-slate-100" placeholder="请输入补充要求"></textarea></label>
+                </div>
               </div>
-              <div class="mt-3 grid grid-cols-6 gap-2">
-                <label class="text-xs font-bold text-slate-600">单选题<input v-model.number="state.spec.singleCount" type="number" min="0" max="50" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold disabled:bg-slate-100" /></label>
-                <label class="text-xs font-bold text-slate-600">多选题<input v-model.number="state.spec.multipleCount" type="number" min="0" max="50" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold disabled:bg-slate-100" /></label>
-                <label class="text-xs font-bold text-slate-600">判断题<input v-model.number="state.spec.judgeCount" type="number" min="0" max="50" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold disabled:bg-slate-100" /></label>
-                <label class="text-xs font-bold text-slate-600">填空题<input v-model.number="state.spec.blankCount" type="number" min="0" max="50" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold disabled:bg-slate-100" /></label>
-                <label class="text-xs font-bold text-slate-600">简答题<input v-model.number="state.spec.shortCount" type="number" min="0" max="50" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold disabled:bg-slate-100" /></label>
-                <label class="text-xs font-bold text-slate-600">论述题<input v-model.number="state.spec.essayCount" type="number" min="0" max="50" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold disabled:bg-slate-100" /></label>
+              <div class="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-black text-ink">题量与分值</div>
+                    <div :class="fieldErrorClass(state.specFormErrors.questionCount)">{{ state.specFormErrors.questionCount || '' }}</div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2 text-right">
+                    <div class="rounded-lg bg-slate-50 px-3 py-2"><div class="text-[11px] font-bold text-slate-500">题目数量</div><div class="mt-1 text-lg font-black text-ink">{{ totalQuestionCount }} 题</div></div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2"><div class="text-[11px] font-bold text-slate-500">试卷总分</div><div class="mt-1 text-lg font-black text-ink">{{ computedSpecTotalScore }} 分</div></div>
+                  </div>
+                </div>
+                <div class="mt-3 grid grid-cols-6 gap-2">
+                  <div v-for="item in paperTypeConfig" :key="item.type" class="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                    <div class="text-xs font-black text-slate-600">{{ item.type }}题</div>
+                    <label class="mt-2 block text-[11px] font-bold text-slate-500">数量<input v-model.number="state.spec[item.countKey]" type="number" min="0" max="50" class="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold disabled:bg-slate-100" /></label>
+                    <label class="mt-2 block text-[11px] font-bold text-slate-500">每题分<input v-model.number="state.spec[item.scoreKey]" type="number" min="1" max="200" class="mt-1 w-full rounded border bg-white px-2 py-1.5 text-sm font-semibold disabled:bg-slate-100" :class="state.specFormErrors[item.scoreKey] ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'" /></label>
+                    <div :class="fieldErrorClass(state.specFormErrors[item.scoreKey])">{{ state.specFormErrors[item.scoreKey] || '' }}</div>
+                  </div>
+                </div>
               </div>
-              <div :class="fieldErrorClass(state.specFormErrors.questionCount)">{{ state.specFormErrors.questionCount || '' }}</div>
-              <div class="mt-3 grid grid-cols-[150px_1fr] gap-3">
-                <div class="rounded-lg border border-slate-200 bg-white px-3 py-2"><div class="text-xs font-bold text-slate-500">自动计算题量</div><div class="mt-1 text-lg font-black text-ink">{{ totalQuestionCount }} 题</div></div>
-                <label class="text-xs font-bold text-slate-600">知识点范围<input v-model="state.spec.knowledge" class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold disabled:bg-slate-100" placeholder="请输入知识点范围，用逗号分隔" /></label>
-              </div>
-              <label class="mt-3 block text-xs font-bold text-slate-600">补充要求<textarea v-model="state.spec.requirements" class="mt-2 min-h-16 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-6 disabled:bg-slate-100" placeholder="请输入补充要求"></textarea></label>
             </fieldset>
             <div v-if="state.generatedDraft?.questions?.length" class="mt-4 rounded-lg border border-ocean/20 bg-white p-4">
               <div class="flex items-center justify-between">
@@ -4495,6 +4703,7 @@ const app = createApp({
               <div><h2 class="text-lg font-black">AI 质量控制</h2><div class="mt-1 text-xs font-semibold text-slate-500">结构校验、答案一致性、重复题和人工确认</div></div>
               <div class="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700">稳定性 {{ authoringQuality.stabilityScore || 0 }}</div>
             </div>
+            <div v-if="authoringQuestions.length && !(authoringQuality.failures || []).length" class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">质量复检通过，系统将进入人工审核。</div>
             <div class="mt-5 grid grid-cols-4 gap-3">
               <div class="rounded-lg border border-slate-200 bg-slate-50 p-4"><div class="text-sm font-bold">Schema 通过率</div><div class="mt-2 text-2xl font-black text-ocean">{{ authoringQuality.schemaPassRate || 0 }}%</div></div>
               <div class="rounded-lg border border-slate-200 bg-slate-50 p-4"><div class="text-sm font-bold">答案一致性</div><div class="mt-2 text-2xl font-black text-leaf">{{ authoringQuality.answerConsistency || 0 }}%</div></div>
@@ -4550,20 +4759,31 @@ const app = createApp({
         <section v-if="state.route === 'papers'" class="mt-6 grid grid-cols-[0.72fr_1.28fr] gap-5">
           <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <h1 class="text-3xl font-black">已出卷子管理</h1>
-            <div class="mt-1 text-sm font-semibold text-slate-500">集中管理未发布、已发布和历史试卷</div>
+            <div class="mt-1 text-sm font-semibold text-slate-500">集中管理草稿、已发布和历史试卷</div>
             <div class="mt-5 grid grid-cols-2 gap-3">
               <div class="rounded-lg bg-slate-50 p-4"><div class="text-2xl font-black">{{ paperRows.length }}</div><div class="text-xs font-bold text-slate-500">历史试卷</div></div>
               <div class="rounded-lg bg-slate-50 p-4"><div class="text-2xl font-black text-leaf">{{ papers.filter((item) => item.status === '已发布').length }}</div><div class="text-xs font-bold text-slate-500">已发布</div></div>
-              <div class="rounded-lg bg-slate-50 p-4"><div class="text-2xl font-black text-iris">{{ papers.filter((item) => ['未发布','已保存','已组卷'].includes(item.status)).length }}</div><div class="text-xs font-bold text-slate-500">未发布</div></div>
+              <div class="rounded-lg bg-slate-50 p-4"><div class="text-2xl font-black text-iris">{{ papers.filter((item) => ['草稿','未发布','已保存','已组卷'].includes(item.status)).length }}</div><div class="text-xs font-bold text-slate-500">草稿</div></div>
               <div class="rounded-lg bg-slate-50 p-4"><div class="text-2xl font-black text-ocean">{{ paperRows.reduce((sum, item) => sum + Number(item.questionCount || 0), 0) }}</div><div class="text-xs font-bold text-slate-500">列表题数</div></div>
             </div>
             <div class="mt-5 flex items-center justify-between"><h2 class="text-lg font-black">试卷列表</h2><span class="text-xs font-bold text-slate-500">最新优先</span></div>
+            <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_128px]">
+              <label class="relative block">
+                <i data-lucide="search" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                <input v-model="state.paperSearch" class="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm font-semibold outline-none focus:border-ocean" placeholder="搜索试卷名称" @input="resetPaperPage" />
+              </label>
+              <select v-model="state.paperStatusFilter" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:border-ocean" @change="resetPaperPage">
+                <option value="all">全部状态</option>
+                <option value="published">已发布</option>
+                <option value="unpublished">草稿</option>
+              </select>
+            </div>
             <div class="mt-4 max-h-[560px] space-y-3 overflow-y-auto pr-1">
               <div
-                v-for="item in paperRows"
+                v-for="item in pagedPaperRows"
                 :key="item.id"
                 class="cursor-pointer rounded-lg border p-4"
-	                :class="state.selectedPaperId === item.id ? 'border-ocean bg-cyan-50' : 'border-slate-200 bg-white'"
+		                :class="state.selectedPaperId === item.id ? 'border-ocean bg-cyan-50' : 'border-slate-200 bg-white'"
                 @click="selectPaper(item.id)"
               >
                 <div class="flex items-start justify-between gap-3">
@@ -4575,8 +4795,24 @@ const app = createApp({
 	                  <div class="flex shrink-0 items-center gap-1">
 	                    <span class="rounded bg-white px-2 py-1 text-xs font-black text-slate-600">{{ displayPaperStatus(item.status) }}</span>
 		                    <button class="rounded border border-rose-200 bg-white px-2 py-1.5 text-xs font-black text-coral" @click.stop="askDeletePaper(item)">删除</button>
-	                  </div>
+                  </div>
                 </div>
+              </div>
+              <div v-if="!paperRows.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
+                <div class="text-sm font-black text-slate-600">暂无已出卷子</div>
+                <div class="mt-1 text-xs font-semibold text-slate-500">完成出题制卷并保存后，试卷会显示在这里。</div>
+              </div>
+              <div v-else-if="!filteredPaperRows.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
+                <div class="text-sm font-black text-slate-600">暂无匹配试卷</div>
+                <div class="mt-1 text-xs font-semibold text-slate-500">请调整关键词或状态筛选。</div>
+              </div>
+            </div>
+            <div v-if="paperRows.length" class="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-500">
+              <div>共 {{ filteredPaperRows.length }} / {{ paperRows.length }} 份试卷</div>
+              <div class="flex items-center gap-2">
+                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="currentPaperPage <= 1" @click="changePaperPage(-1)">上一页</button>
+                <span class="min-w-20 text-center text-sm font-black text-ink">{{ currentPaperPage }} / {{ paperTotalPages }}</span>
+                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="currentPaperPage >= paperTotalPages" @click="changePaperPage(1)">下一页</button>
               </div>
             </div>
           </div>
@@ -4961,7 +5197,7 @@ const app = createApp({
                 </div>
                 <div class="mt-1 text-xs font-semibold text-slate-500">答题中 {{ item.active }} · 已提交 {{ item.submitted }}</div>
               </div>
-              <div v-if="!assignmentPaperCounts.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">暂无试卷分配</div>
+              <div v-if="!assignmentPaperCounts.length" class="col-span-full rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">暂无试卷分配</div>
             </div>
           </div>
         </section>
@@ -5817,7 +6053,7 @@ function workflowStatusText(status) {
 }
 
 function displayPaperStatus(status) {
-  return ["已组卷", "已保存"].includes(status) ? "未发布" : status || "未保存";
+  return ["已组卷", "已保存", "未发布"].includes(status) ? "草稿" : status || "未保存";
 }
 
 function displayQuestionOptions(question = {}) {

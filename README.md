@@ -18,7 +18,7 @@ SmartQ 是一个通用考试 / 测评平台 MVP。当前版本按正式考试流
 ## 项目结构
 
 - `frontend/`：Vue 单页应用和前端交互脚本
-- `backend/`：Node API 服务、AI 封装、运行时存储和初始数据
+- `backend/`：Node API 服务、AI 封装、运行时存储和默认配置
 - `scripts/`：端到端验证脚本
 - `Dockerfile` / `docker-compose.yml`：Docker 一键部署配置
 
@@ -33,7 +33,7 @@ npm start
 打开：
 
 - 运营控制台：http://localhost:3000
-- 考生端：http://localhost:3000/#/candidate?session=s-001
+- 考生端：http://localhost:3000/#/candidate
 - 健康检查：http://localhost:3000/api/health
 
 默认运营管理员：
@@ -55,7 +55,7 @@ npm run verify
 项目默认使用真实 AI 出题。部署前先在环境变量或 `.env` 中配置服务端密钥：
 
 ```env
-OPENAI_BASE_URL=https://edge.ai.minigameland.com/v1
+OPENAI_BASE_URL=你的 AI 服务地址
 OPENAI_API_KEY=你的服务端密钥
 SKYISLAND_API_KEY=你的服务端密钥
 OPENAI_MODEL=gpt-5.5
@@ -153,7 +153,7 @@ SMARTQ_MAX_EVIDENCE_BYTES=524288
 SMARTQ_LOGIN_MAX_FAILURES=5
 SMARTQ_LOGIN_WINDOW_SECONDS=900
 SMARTQ_LOGIN_LOCK_SECONDS=600
-OPENAI_BASE_URL=https://edge.ai.minigameland.com/v1
+OPENAI_BASE_URL=
 OPENAI_API_KEY=
 SKYISLAND_API_KEY=
 OPENAI_MODEL=gpt-5.5
@@ -173,6 +173,7 @@ cp .env.example .env
 ```env
 OPENAI_API_KEY=你的服务端密钥
 SKYISLAND_API_KEY=你的服务端密钥
+OPENAI_BASE_URL=你的 AI 服务地址
 AI_MOCK_MODE=false
 ```
 

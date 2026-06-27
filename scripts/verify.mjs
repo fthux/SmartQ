@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import http from "node:http";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ const runtimeDir = await mkdtemp(join(tmpdir(), "smartq-verify-"));
 const runtimeFile = join(runtimeDir, "runtime.json");
 const backupDir = join(runtimeDir, "backups");
 const evidenceDir = join(runtimeDir, "evidence");
+const aiJs = await readFile("backend/lib/ai.js", "utf8");
 const fakePostgres = await startFakePostgres();
 const fakeRedis = await startFakeRedis();
 const fakeS3 = await startFakeS3();
@@ -116,9 +117,20 @@ try {
   assert(appJs.includes("SHA-256"), "frontend exposes proctor evidence attachment digest");
   assert(appJs.includes("提交需全屏") && appJs.includes("提交前需完成"), "frontend exposes active proctor compliance requirements");
   assert(appJs.includes("/api/proctor/stream") && appJs.includes("实时通道"), "frontend connects proctor realtime stream");
-  assert(/const defaultSpec = \{\s+paperName: "",\s+direction: "",\s+difficulty: "中",\s+totalScore: 0,\s+singleCount: 0,\s+multipleCount: 0,\s+judgeCount: 0,\s+blankCount: 0,\s+shortCount: 0,\s+essayCount: 0,\s+knowledge: "",\s+requirements: "",\s+\};/m.test(appJs), "frontend leaves authoring text fields empty, numeric fields zero, and difficulty selected by default");
+  assert(appJs.includes("paperTypeConfig") && appJs.includes("computedSpecTotalScore") && appJs.includes("return sum + count * score;"), "frontend computes paper total score from question counts and per-type scores");
+  assert(appJs.includes("出题条件") && appJs.includes("题量与分值"), "frontend separates authoring conditions from question count and score settings");
+  assert(appJs.includes("知识点范围<textarea") && appJs.includes("state.spec.knowledge") && appJs.includes("state.spec.requirements"), "frontend uses matching textareas for knowledge scope and extra requirements");
+  assert(appJs.includes("state.generating || (draftReady.value && !state.regeneratingDraft)"), "frontend locks authoring form while the generation API is running");
+  assert(appJs.includes('v-if="state.generating"') && appJs.includes('v-else-if="formLocked"') && appJs.includes("重新生成"), "frontend keeps regenerate available after generation while showing generation progress separately");
+  assert(appJs.includes("state.authoringNewDraftActive ? questions.value : []") && appJs.includes("已进入草稿试卷编辑模式"), "frontend starts a new paper flow when authoring URL has no paper id");
+  assert(appJs.includes("function syncSpecFromActiveDraft()") && appJs.includes("syncSpecFromActiveDraft();"), "frontend restores generated paper specs when returning to the config step");
+  assert(appJs.includes('body: JSON.stringify({ status: reviewed ? "已校验" : "待确认" })'), "frontend review action preserves question quality score");
+  assert(/const defaultSpec = \{\s+paperName: "",\s+direction: "",\s+difficulty: "中",\s+singleCount: 0,\s+singleScore: 2,\s+multipleCount: 0,\s+multipleScore: 4,\s+judgeCount: 0,\s+judgeScore: 2,\s+blankCount: 0,\s+blankScore: 2,\s+shortCount: 0,\s+shortScore: 5,\s+essayCount: 0,\s+essayScore: 10,\s+knowledge: "",\s+requirements: "",\s+\};/m.test(appJs), "frontend leaves authoring text fields empty, defaults counts to zero, and defaults per-type scores");
+  assert(appJs.includes('go("papers")') && appJs.includes('state.authoringPaperId = ""'), "frontend returns to papers page after publishing a paper");
   assert(appJs.includes('placeholder="请输入考卷名称"') && appJs.includes('placeholder="请输入出题方向"') && appJs.includes('placeholder="请输入知识点范围，用逗号分隔"') && appJs.includes('placeholder="请输入补充要求"'), "frontend shows authoring form placeholders");
-  assert(!appJs.includes("await saveGeneratedContent(generated, { silent: true })") && appJs.includes("进入质量复检") && appJs.includes("saveDraft"), "frontend keeps generated authoring preview unsaved until explicit confirmation");
+  assert(appJs.includes("saveGeneratedContent(state.generatedDraft, { silent: true })") && appJs.includes("请先生成并保存试卷内容"), "frontend saves generated preview before running quality check");
+  assert(appJs.includes("质量复检通过，稍后进入人工审核") && appJs.includes("await pause(1200)") && appJs.includes("质量复检通过，系统将进入人工审核。"), "frontend pauses on quality step before moving to manual review");
+  assert(aiJs.includes("rubric,quality") && aiJs.includes("quality 必须是 70-100 的整数") && aiJs.includes("quality 硬约束"), "AI prompt requires question quality scores with scoring rules");
   const config = await getJson("/api/config");
   assert(config.aiReady === true, "config reports AI layer ready");
   assert(config.mode === "mock", "verification explicitly enables mock mode");
@@ -163,7 +175,7 @@ try {
   assert(proctorLogin.admin.role === "proctor" && proctorLogin.admin.permissions.includes("proctor"), "proctor role can login with proctor permission");
   const proctorHeaders = authHeaders(proctorLogin.token);
   const proctorDashboard = await getJson("/api/dashboard", { headers: proctorHeaders });
-  assert(proctorDashboard.sessions.length >= 1, "proctor role can view dashboard overview");
+  assert(Array.isArray(proctorDashboard.sessions), "proctor role can view dashboard overview");
   const proctorAuthoringBlocked = await postJson("/api/ai/generate-questions", {
     direction: "权限验证",
     totalScore: 10,
@@ -205,7 +217,11 @@ try {
   assert(initialBackup.version === 1 && initialBackup.state, "admin backup endpoint returns versioned state snapshot");
   assert(initialBackup.state.adminSessions && Object.keys(initialBackup.state.adminSessions).length === 0, "backup snapshot strips admin sessions");
   assert(initialBackup.state.loginSecurity && Object.keys(initialBackup.state.loginSecurity.attempts || {}).length === 0, "backup snapshot strips login rate-limit state");
-  assert(Array.isArray(initialBackup.state.questions) && initialBackup.state.questions.length === 12, "backup snapshot includes question bank");
+  assert(Array.isArray(initialBackup.state.questions) && initialBackup.state.questions.length === 0, "fresh backup starts without default question bank");
+  assert(Array.isArray(initialBackup.state.sessions) && initialBackup.state.sessions.length === 0, "fresh backup starts without default sessions");
+  assert(Array.isArray(initialBackup.state.candidates) && initialBackup.state.candidates.length === 0, "fresh backup starts without default participants");
+  assert(Array.isArray(initialBackup.state.groups) && initialBackup.state.groups.length === 0, "fresh backup starts without default groups");
+  assert(initialBackup.state.answers && Object.keys(initialBackup.state.answers).length === 0, "fresh backup starts without default answers");
   const backupTempGroup = await postJson("/api/groups", {
     name: "备份恢复临时组",
     description: "用于验证恢复后回滚",
@@ -222,7 +238,7 @@ try {
   assert(throttledBackupHistory.backups.length === backupHistory.backups.length, "local backup history is throttled during rapid writes");
   const restoreResult = await postJson("/api/admin/restore", initialBackup, { headers: adminHeaders });
   assert(restoreResult.restored === true, "admin restore endpoint restores backup snapshot");
-  assert(restoreResult.stats.groups >= 1, "restore response includes restored state stats");
+  assert(restoreResult.stats.groups === 0, "restore response includes restored state stats");
   const staleAdminAfterRestore = await getJson("/api/admin/me", { headers: adminHeaders, expectedStatus: 401 });
   assert(staleAdminAfterRestore.error.includes("运营登录") || staleAdminAfterRestore.error.includes("请先登录"), "restore invalidates existing admin token");
   const reloginAfterRestore = await postJson("/api/admin/login", {
@@ -238,15 +254,15 @@ try {
   assert(backupAfterRestore.state.auditLog.some((item) => item.type === "backup-restore"), "restore writes audit log entry");
 
   const dashboard = await getJson("/api/dashboard", { headers: adminHeaders });
-  assert(dashboard.exam.totalScore === 50, "exam total score is 50");
-  assert(dashboard.paper.score === 50, "paper score is 50");
-  assert(dashboard.questions.length === 12, "dashboard has 12 questions");
-  assert(Array.isArray(dashboard.participants) && dashboard.participants.length >= 1, "dashboard exposes participant information list");
-  assert(Array.isArray(dashboard.groups) && dashboard.groups.length >= 1, "dashboard exposes group list");
+  assert(dashboard.exam.totalScore === 0, "fresh dashboard starts without an exam total score");
+  assert(dashboard.paper.score === 0, "fresh dashboard starts without a paper score");
+  assert(dashboard.questions.length === 0, "fresh dashboard starts without default questions");
+  assert(Array.isArray(dashboard.participants) && dashboard.participants.length === 0, "fresh dashboard starts without default participants");
+  assert(Array.isArray(dashboard.groups) && dashboard.groups.length === 0, "fresh dashboard starts without default groups");
   assert(dashboard.stats.registered === dashboard.participants.length, "dashboard registered count is derived from participants");
   assert(dashboard.stats.sessions === dashboard.sessions.length, "dashboard session count is derived from sessions");
   assert(dashboard.stats.submitted === dashboard.sessions.filter((item) => item.status === "已提交").length, "dashboard submitted count is derived from sessions");
-  assert(dashboard.stats.progress === Math.round(dashboard.sessions.reduce((sum, item) => sum + Number(item.progress || 0), 0) / dashboard.sessions.length), "dashboard progress is derived from sessions");
+  assert(dashboard.stats.progress === (dashboard.sessions.length ? Math.round(dashboard.sessions.reduce((sum, item) => sum + Number(item.progress || 0), 0) / dashboard.sessions.length) : 0), "dashboard progress is derived from sessions");
   assert(appJs.includes("待开考") && appJs.includes("平均进度") && appJs.includes("试卷分配概览"), "dashboard home exposes operational overview sections");
 
   const createdGroup = await postJson("/api/groups", {
@@ -353,8 +369,6 @@ try {
   });
   assert(batchDeletedCandidate.deleted === true && batchDeletedCandidate.participants.length === 1, "participant batch delete works");
 
-  const unauthenticatedLegacySession = await getJson("/api/candidate/session/s-001", { expectedStatus: 401 });
-  assert(unauthenticatedLegacySession.error.includes("登录"), "candidate session requires login token");
   const missingSession = await getJson("/api/candidate/session/s-999", { expectedStatus: 404 });
   assert(missingSession.error === "Session Not Found", "candidate endpoint rejects unknown session");
 
@@ -363,8 +377,8 @@ try {
     paperName: "C++ 工程能力测评 A 卷",
     direction: "C++ 语言基础与工程实践",
     difficulty: "混合",
-    totalScore: 50,
     typeCounts: { single: 4, multiple: 2, judge: 2, blank: 2, short: 2, essay: 0 },
+    typeScores: { single: 2, multiple: 4, judge: 2, blank: 2, short: 5, essay: 10 },
     knowledge: ["语法基础", "STL", "内存管理", "面向对象", "异常处理"],
     requirements: "题干清晰，答案唯一或评分规则明确。",
   };
@@ -375,7 +389,9 @@ try {
   assert(generated.spec.paperName === generationSpec.paperName, "AI generation preserves paper name");
   assert(generated.checks.specPass === true, "AI generation passes spec checks after normalization");
   assert(generated.checks.specFailures.length === 0, "AI generation reports no spec failures after normalization");
-  assert(generated.questions.reduce((sum, item) => sum + Number(item.score || 0), 0) === 50, "AI generation respects total score");
+  assert(generated.spec.totalScore === 34, "AI generation computes total score from type counts and scores");
+  assert(generated.questions.reduce((sum, item) => sum + Number(item.score || 0), 0) === 34, "AI generation respects computed total score");
+  assert(generated.questions.every((item) => item.score === ({ 单选: 2, 多选: 4, 判断: 2, 填空: 2, 简答: 5, 论述: 10 }[item.type])), "AI generation applies per-type scores");
   assert(generated.questions.every((item) => !item.stem.startsWith("【")), "AI generation does not prefix stems with direction text");
   assert(generated.questions.some((item) => item.knowledge.includes(generationSpec.direction)), "AI generation keeps requested direction in metadata");
   assert(generated.questions.filter((item) => item.type === "单选").length === 4, "AI generation respects single-choice count");
@@ -413,6 +429,9 @@ try {
   assert(badStorageQuestion.answer === "正确", "invalid known-fact judgement can be saved as draft for quality correction");
   const knownFactQuality = await postJson("/api/quality/check", {});
   assert(knownFactQuality.failures.some((item) => item.field === "answer" && item.message.includes("localStorage")), "quality check catches localStorage auto-send answer mismatch");
+  const originalJudgementQuality = Number(badStorageQuestion.quality || 0);
+  const reviewedJudgement = await patchJson(`/api/questions/${judgementQuestion.id}`, { status: "已校验" }, { expectedStatus: 409 });
+  assert(reviewedJudgement.error.includes("题目结构未通过校验"), "invalid question cannot be reviewed before repair");
 
   const blockedPaperBuild = await postJson("/api/papers/build", {}, { expectedStatus: 409 });
   assert(blockedPaperBuild.eligibleCount === 0, "paper save requires reviewed questions");
@@ -421,6 +440,10 @@ try {
   assert(repair.questions.length === 12, "quality repair returns questions");
   assert(Number.isFinite(repair.checks.stabilityScore), "quality repair returns stability score");
   assert(repair.questions.every((item) => item.status === "待确认"), "quality repair still requires manual review");
+  const repairedJudgement = repair.questions.find((item) => item.id === judgementQuestion.id);
+  const reviewedRepairedJudgement = await patchJson(`/api/questions/${judgementQuestion.id}`, { status: "已校验" });
+  assert(reviewedRepairedJudgement.quality === repairedJudgement.quality, "manual review preserves repaired question quality score");
+  assert(reviewedRepairedJudgement.quality !== originalJudgementQuality || repairedJudgement.quality === originalJudgementQuality, "quality only changes during quality repair, not manual review");
   const repairedStorageQuestion = repair.questions.find((item) => item.id === judgementQuestion.id);
   assert(repairedStorageQuestion.answer === "错误" && repairedStorageQuestion.explanation.includes("不会把它们随每次 HTTP 请求自动发送"), "quality repair fixes known localStorage judgement answer");
 
@@ -445,24 +468,24 @@ try {
   assert(editedQuestion.stem.includes("正式 MVP"), "question edit works");
   const editedDashboard = await getJson("/api/dashboard");
   assert(editedDashboard.questions.find((item) => item.id === "q-011").status === "待确认", "edited question appears in dashboard");
-  await patchJson("/api/questions/q-011", { status: "已校验", quality: 92 });
+  await patchJson("/api/questions/q-011", { status: "已校验" });
   await Promise.all(
     editedDashboard.questions
-      .filter((item) => item.id !== "q-011")
-      .map((item) => patchJson(`/api/questions/${item.id}`, { status: "已校验", quality: Math.max(92, Number(item.quality || 90)) })),
+      .filter((item) => item.id !== "q-011" && item.id !== judgementQuestion.id)
+      .map((item) => patchJson(`/api/questions/${item.id}`, { status: "已校验" })),
   );
 
   const paper = await postJson("/api/papers/build", {});
-  assert(paper.status === "未发布", "paper save changes status");
+  assert(paper.status === "草稿", "paper save changes status to draft");
   assert(paper.name === generationSpec.paperName, "paper save uses configured paper name");
-  assert(paper.score === 50, "saved paper keeps all reviewed question scores");
+  assert(paper.score === 34, "saved paper keeps all reviewed question scores");
   assert(paper.questionIds.length === paper.questionCount, "saved paper stores selected question ids");
   assert(paper.questionCount === generated.questions.length, "saved paper includes the reviewed draft questions");
   assert(paper.buildSpec.source === "saved-reviewed-questions", "saved paper records save source");
 
   const savedPaperDashboard = await getJson("/api/dashboard");
   const savedSnapshot = savedPaperDashboard.papers.find((item) => item.id === paper.id);
-  assert(savedSnapshot && savedSnapshot.status === "未发布", "saved paper appears in completed paper list as unpublished");
+  assert(savedSnapshot && savedSnapshot.status === "草稿", "saved paper appears in completed paper list as draft");
   const savedPaperDetail = await getJson(`/api/papers/${paper.id}`);
   assert(savedPaperDetail.questions.length === paper.questionCount, "paper detail returns saved paper questions");
 
@@ -489,6 +512,8 @@ try {
   assert(assignedSession.paperId === paper.id, "session assignment binds published paper id");
   assert(assignedSession.paperName === generationSpec.paperName, "session assignment stores paper name");
   assert(assignedSession.remainingMinutes === 90, "session assignment computes remaining minutes");
+  const unauthenticatedAssignedSession = await getJson(`/api/candidate/session/${assignedSession.id}`, { expectedStatus: 401 });
+  assert(unauthenticatedAssignedSession.error.includes("登录"), "candidate session requires login token");
   const duplicateAssignmentSlot = await postJson("/api/proctor/sessions", {
     candidate: "重复时段参与者",
     ticket: "202606239999",
@@ -690,7 +715,7 @@ try {
   assert(emptyAnalysis.passRate === 0, "analysis has no default demo pass rate before grading");
   assert(emptyAnalysis.gradedCount === 0, "analysis only counts reviewed grading results");
 
-  const event = await postJson("/api/proctor/sessions/s-003/events", {
+  const event = await postJson(`/api/proctor/sessions/${assignedSession.id}/events`, {
     risk: "高",
     event: "自动验证风险事件",
   });
@@ -823,7 +848,7 @@ try {
   assert(candidateMessageView.session.messages.some((item) => item.message.includes("全屏")), "candidate receives proctor message");
   const answers = answerAllQuestions(activeAssignedCandidate.questions);
   const partialAnswers = Object.fromEntries(Object.entries(answers).slice(0, 2));
-  const draft = await postJson("/api/candidate/session/s-001", {
+  const draft = await postJson(`/api/candidate/session/${assignedSession.id}`, {
     submit: false,
     answers: partialAnswers,
   }, { expectedStatus: 401 });

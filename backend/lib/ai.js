@@ -1,7 +1,15 @@
 import { questions } from "../data/store.js";
 
-const defaultBaseUrl = "https://edge.ai.minigameland.com/v1";
+const defaultBaseUrl = "";
 const questionTypes = ["单选", "多选", "判断", "填空", "简答", "论述"];
+const defaultTypeScores = {
+  单选: 2,
+  多选: 4,
+  判断: 2,
+  填空: 2,
+  简答: 5,
+  论述: 10,
+};
 const typeCountKeys = {
   单选: ["single", "singleChoice", "单选", "单选题"],
   多选: ["multiple", "multipleChoice", "多选", "多选题"],
@@ -9,6 +17,14 @@ const typeCountKeys = {
   填空: ["blank", "fillBlank", "填空", "填空题"],
   简答: ["short", "shortAnswer", "简答", "简答题"],
   论述: ["essay", "discussion", "论述", "论述题"],
+};
+const typeScoreKeys = {
+  单选: ["single", "singleScore", "singleChoice", "单选", "单选题"],
+  多选: ["multiple", "multipleScore", "multipleChoice", "多选", "多选题"],
+  判断: ["judge", "judgeScore", "judgement", "trueFalse", "判断", "判断题"],
+  填空: ["blank", "blankScore", "fillBlank", "填空", "填空题"],
+  简答: ["short", "shortScore", "shortAnswer", "简答", "简答题"],
+  论述: ["essay", "essayScore", "discussion", "论述", "论述题"],
 };
 
 export function aiConfig() {
@@ -37,20 +53,27 @@ export async function generateQuestions(spec = {}) {
   if (!config.apiKey) {
     throw new Error("OPENAI_API_KEY 或 SKYISLAND_API_KEY 未配置，无法使用真实 AI 出题");
   }
+  if (!config.baseUrl) {
+    throw new Error("OPENAI_BASE_URL 未配置，无法使用真实 AI 出题");
+  }
 
   const prompt = [
     "你是严谨的考试命题专家。只允许输出 JSON，不允许输出 Markdown 或解释文本。",
     "JSON 根对象必须是 {\"questions\":[...]}，questions 必须是题目数组。",
-    "每道题字段必须包含 id,type,stem,options,answer,score,difficulty,knowledge,explanation,rubric。",
+    "每道题字段必须包含 id,type,stem,options,answer,score,difficulty,knowledge,explanation,rubric,quality。",
     `考试目标：${normalizedSpec.title}`,
     `出题方向：${normalizedSpec.direction}`,
     `题目数量：${normalizedSpec.count}`,
     `目标难度：${normalizedSpec.difficulty}`,
     `总分：${normalizedSpec.totalScore}`,
     `题型分布：${normalizedSpec.typeMixText}`,
+    `题型分值：${normalizedSpec.typeScoreText}`,
     `知识点范围：${normalizedSpec.knowledge.join("、")}`,
     `补充要求：${normalizedSpec.requirements || "无"}`,
-    "要求：严格按题型分布和总分生成；选择题答案用 A/B/C/D，多选答案为数组；判断题答案只用“正确”或“错误”；主观题必须给 rubric；答案唯一或评分规则明确；不输出多余文本。",
+    "要求：严格按题型分布和每类题型分值生成；选择题答案用 A/B/C/D，多选答案为数组；判断题答案只用“正确”或“错误”；主观题必须给 rubric；答案唯一或评分规则明确；不输出多余文本。",
+    "quality 必须是 70-100 的整数，表示题目可直接使用程度，不是考生得分或题目难度。",
+    "quality 评分标准：95-100 表示题干明确、答案唯一或评分规则完整、解析充分、选项无歧义、完全符合题型和知识点；90-94 表示整体可直接使用，仅有轻微表达优化空间；85-89 表示基本可用，但题干、选项、解析或 rubric 有轻微不完整；80-84 表示需要修订后使用，存在一定歧义、解析偏弱、选项干扰性不足或 rubric 不够细；70-79 表示不建议直接使用，存在明显歧义、答案支撑不足、题型不规范、知识点偏离或评分规则不清。",
+    "quality 硬约束：客观题答案不能唯一确定时 quality 不得高于 84；多选题答案必须是数组且至少两个正确选项，否则 quality 不得高于 84；判断题答案只能是“正确”或“错误”，否则 quality 不得高于 84；填空题必须有明确参考答案，否则 quality 不得高于 84；简答和论述题必须包含可执行 rubric，rubric 为空或笼统时 quality 不得高于 84；题干与指定知识点或出题方向关联弱时 quality 不得高于 86；解析只是重复答案且没有解释依据时 quality 不得高于 88。",
     "自检要求：输出前逐题核对题干事实、选项、答案和解析是否一致；如果无法确认客观题答案，必须改写成可确定答案的题目。",
     "事实边界示例：localStorage/sessionStorage 不会随 HTTP 请求自动发送到服务器；Cookie 才会在满足 domain/path/SameSite/Secure 等条件时由浏览器随请求携带。",
   ].join("\n");
@@ -74,7 +97,7 @@ export async function generateQuestions(spec = {}) {
     ].filter(Boolean).join(" · ");
     const timeout = detail.includes("UND_ERR_CONNECT_TIMEOUT") || detail.includes("Connect Timeout");
     const hint = timeout
-      ? "AI 服务连接超时，请检查服务器网络是否能访问 edge.ai.minigameland.com:443，或确认 OPENAI_BASE_URL 服务可用"
+      ? "AI 服务连接超时，请检查服务器网络是否能访问配置的 AI 服务地址，或确认 OPENAI_BASE_URL 服务可用"
       : "请检查 OPENAI_BASE_URL、网络、DNS、代理或服务端证书配置";
     const wrapped = new Error(`AI 出题服务连接失败：${hint}${detail ? `（${detail}）` : ""}`);
     wrapped.statusCode = 502;
@@ -322,7 +345,7 @@ export function saveFormalPaper(sourceQuestions = questions, meta = {}) {
     ...meta,
     id: meta.id || "paper-a",
     name: meta.name || "A 卷",
-    status: "未发布",
+    status: "草稿",
     questionIds: eligible.map((item) => item.id),
     buildSpec,
   });
@@ -365,7 +388,9 @@ function typeRank(type) {
 function normalizeGenerationSpec(spec = {}) {
   const typePlan = normalizeTypePlan(spec.typeCounts || spec.typeMix, spec.count);
   const count = typePlan.reduce((sum, item) => sum + item.count, 0);
-  const totalScore = clampNumber(spec.totalScore, Math.max(1, count), 200, 50);
+  const typeScores = normalizeTypeScores(spec.typeScores || spec.scores);
+  const calculatedTotal = typePlan.reduce((sum, item) => sum + item.count * typeScores[item.type], 0);
+  const totalScore = calculatedTotal || clampNumber(spec.totalScore, Math.max(1, count), 200, 50);
   const knowledge = normalizeList(spec.knowledge).length ? normalizeList(spec.knowledge) : ["综合能力"];
   return {
     title: cleanText(spec.title, "综合能力测评"),
@@ -376,13 +401,14 @@ function normalizeGenerationSpec(spec = {}) {
     totalScore,
     typeMix: typePlan,
     typeMixText: typePlan.map((item) => `${item.type}${item.count}`).join("，"),
+    typeScores,
+    typeScoreText: typePlan.map((item) => `${item.type}每题${typeScores[item.type]}分`).join("，"),
     knowledge,
     requirements: cleanText(spec.requirements, ""),
   };
 }
 
 function generateMockQuestions(spec) {
-  const scores = distributeScores(spec.totalScore, spec.count);
   const types = spec.typeMix.flatMap((item) => Array.from({ length: item.count }, () => item.type)).slice(0, spec.count);
   return types.map((type, index) => {
     const knowledge = spec.knowledge[index % spec.knowledge.length];
@@ -390,7 +416,7 @@ function generateMockQuestions(spec) {
       id: `q-${String(index + 1).padStart(3, "0")}`,
       index,
       type,
-      score: scores[index],
+      score: scoreForType(type, spec),
       knowledge,
       spec,
     });
@@ -568,7 +594,7 @@ function normalizeGeneratedQuestion(item = {}, index, spec) {
     stem: cleanText(stem, buildStem(type, spec.direction, knowledge[0], index)),
     options: normalizeOptions(item.options ?? item.choices),
     answer,
-    score: Number(item.score || 1),
+    score: scoreForType(type, spec),
     difficulty: normalizeDifficulty(item.difficulty || spec.difficulty),
     knowledge,
     explanation: cleanText(item.explanation, `围绕${spec.direction}命题，并按结构化规则校验。`),
@@ -615,7 +641,7 @@ function ensureSpecCompliance(items, spec) {
           id: `q-${String(index + 1).padStart(3, "0")}`,
           index,
           type: targetType,
-          score: 1,
+          score: scoreForType(targetType, spec),
           knowledge: spec.knowledge[index % spec.knowledge.length],
           spec,
         })
@@ -624,10 +650,9 @@ function ensureSpecCompliance(items, spec) {
     output.push(normalizeGeneratedQuestion(question, index, spec));
   }
 
-  const scores = distributeScores(spec.totalScore, spec.count);
-  return output.map((item, index) => ({
+  return output.map((item) => ({
     ...item,
-    score: scores[index],
+    score: scoreForType(item.type, spec),
   }));
 }
 
@@ -644,6 +669,12 @@ function validateGenerationSpec(items, spec) {
   spec.typeMix.forEach((item) => {
     if ((actualTypes[item.type] || 0) !== item.count) {
       failures.push({ field: "typeMix", message: `${item.type} 应为 ${item.count} 道，实际 ${actualTypes[item.type] || 0} 道` });
+    }
+  });
+  items.forEach((item, index) => {
+    const expectedScore = scoreForType(item.type, spec);
+    if (Number(item.score || 0) !== expectedScore) {
+      failures.push({ field: "typeScores", message: `第 ${index + 1} 题${item.type}应为 ${expectedScore} 分，实际 ${item.score || 0} 分` });
     }
   });
   return { failures };
@@ -873,6 +904,19 @@ function normalizeTypePlan(input, requestedCount) {
   return rebalanceTypePlan(plan.filter((item) => item.count > 0), count);
 }
 
+function normalizeTypeScores(input) {
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  return Object.fromEntries(questionTypes.map((type) => {
+    const keys = typeScoreKeys[type] || [type];
+    const raw = keys.map((key) => source[key]).find((value) => value !== undefined && value !== "");
+    return [type, clampNumber(raw, 1, 200, defaultTypeScores[type])];
+  }));
+}
+
+function scoreForType(type, spec = {}) {
+  return clampNumber(spec.typeScores?.[type], 1, 200, defaultTypeScores[type] || 1);
+}
+
 function rebalanceTypePlan(plan, count) {
   const normalized = plan.map((item) => ({ ...item }));
   let total = normalized.reduce((sum, item) => sum + item.count, 0);
@@ -890,19 +934,6 @@ function rebalanceTypePlan(plan, count) {
   }
 
   return normalized;
-}
-
-function distributeScores(totalScore, count) {
-  const base = Math.max(1, Math.floor(totalScore / count));
-  const scores = Array.from({ length: count }, () => base);
-  let remaining = totalScore - base * count;
-  let index = 0;
-  while (remaining > 0) {
-    scores[index % scores.length] += 1;
-    remaining -= 1;
-    index += 1;
-  }
-  return scores;
 }
 
 function normalizeDifficulty(value) {

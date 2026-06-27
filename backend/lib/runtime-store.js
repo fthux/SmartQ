@@ -4,7 +4,7 @@ import net from "node:net";
 import tls from "node:tls";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { answers, exam, questions, sessions } from "../data/store.js";
+import { exam } from "../data/store.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dataFile = process.env.SMARTQ_DATA_FILE || join(root, "data", "runtime.json");
@@ -17,10 +17,14 @@ const legacyPersonPattern = /(?:\u540c\u5b66|\u5b66\u751f|\u8003\u751f)/;
 const legacyPersonNamePattern = /[\u4e00-\u9fff]+(?:\u540c\u5b66|\u5b66\u751f|\u8003\u751f)/g;
 const legacyClassToken = "\u73ed";
 const legacyClassNameToken = "\u73ed\u7ea7";
+const legacySeedAuditPattern = /MVP|初始数据|题库初始化内容/;
+const legacySeedSessionIdPattern = /^s-\d{3}$/;
+const legacySeedQuestionIdPattern = /^q-\d{3}$/;
 
 let state = null;
 let writeQueue = Promise.resolve();
 let lastBackupAt = 0;
+let normalizedStateNeedsSave = false;
 
 export async function loadState() {
   if (state) return state;
@@ -29,6 +33,9 @@ export async function loadState() {
     const loaded = await postgresStore.load().catch(() => null);
     if (loaded) {
       state = normalizeState(loaded);
+      if (consumeNormalizedStateNeedsSave()) {
+        await saveState({ forceBackup: true, reason: "strip-demo-data" });
+      }
       return state;
     }
   }
@@ -36,6 +43,9 @@ export async function loadState() {
   try {
     const raw = await readFile(dataFile, "utf8");
     state = normalizeState(JSON.parse(raw));
+    if (consumeNormalizedStateNeedsSave()) {
+      await saveState({ forceBackup: true, reason: "strip-demo-data" });
+    }
   } catch {
     state = normalizeState(defaultState());
     await saveState();
@@ -472,20 +482,13 @@ function cstring(value = "") {
 }
 
 function defaultState() {
-  const defaultGroups = groupsFromRows(sessions);
   return {
     exam,
-    questions,
-    sessions,
-    candidates: sessions.map((session) => ({
-      id: `cand-${session.ticket}`,
-      candidate: session.candidate,
-      ticket: session.ticket,
-      className: session.className || "",
-      createdAt: new Date().toISOString(),
-    })),
-    groups: defaultGroups.length ? defaultGroups : [defaultGroup()],
-    answers: Object.fromEntries(answers.entries()),
+    questions: [],
+    sessions: [],
+    candidates: [],
+    groups: [],
+    answers: {},
     paper: {
       id: null,
       name: "",
@@ -504,7 +507,7 @@ function defaultState() {
       {
         id: "log-init",
         type: "system",
-        message: "MVP 初始数据已加载",
+        message: "系统运行时数据已初始化",
         createdAt: new Date().toISOString(),
       },
     ],
@@ -512,12 +515,11 @@ function defaultState() {
 }
 
 function normalizeState(input) {
-  const normalizedSessions = (Array.isArray(input.sessions) ? input.sessions : sessions).map(normalizeSession);
+  const normalizedSessions = (Array.isArray(input.sessions) ? input.sessions : []).map(normalizeSession);
   const normalizedCandidates = Array.isArray(input.candidates)
     ? input.candidates.map(normalizeCandidate).filter(Boolean)
     : normalizedSessions.map(candidateFromSession).filter(Boolean);
   const normalizedGroups = Array.isArray(input.groups) ? input.groups.map(normalizeGroup).filter(Boolean) : groupsFromRows([...normalizedSessions, ...normalizedCandidates]);
-  const groups = normalizedGroups.length ? normalizedGroups : [defaultGroup()];
   const normalizedPaper = {
     id: input.paper?.id || null,
     name: input.paper?.name || "",
@@ -527,13 +529,13 @@ function normalizeState(input) {
     buildSpec: input.paper?.buildSpec || null,
   };
   const hasDiscardableAuthoringDraft = Boolean(input.generationTask && !normalizedPaper.id && !normalizedPaper.status);
-  return {
+  const normalized = {
     exam: input.exam || exam,
-    questions: hasDiscardableAuthoringDraft ? [] : (Array.isArray(input.questions) ? input.questions : questions),
+    questions: hasDiscardableAuthoringDraft ? [] : (Array.isArray(input.questions) ? input.questions : []),
     sessions: normalizedSessions,
     candidates: normalizedCandidates,
-    groups,
-    answers: input.answers && typeof input.answers === "object" ? input.answers : Object.fromEntries(answers.entries()),
+    groups: normalizedGroups,
+    answers: input.answers && typeof input.answers === "object" ? input.answers : {},
     paper: hasDiscardableAuthoringDraft ? { ...normalizedPaper, questionIds: [], buildSpec: null } : normalizedPaper,
     papers: Array.isArray(input.papers) ? input.papers.map(normalizePaperSnapshot).filter(Boolean) : [],
     generationTask: hasDiscardableAuthoringDraft ? null : (input.generationTask || null),
@@ -543,6 +545,7 @@ function normalizeState(input) {
     proctorRules: normalizeProctorRules(input.proctorRules),
     auditLog: Array.isArray(input.auditLog) ? input.auditLog.map(normalizeAuditItem) : [],
   };
+  return stripLegacyDemoRuntimeData(normalized);
 }
 
 function defaultLoginSecurity() {
@@ -590,14 +593,88 @@ function normalizeProctorRules(input = {}) {
   };
 }
 
-function defaultGroup() {
-  return {
-    id: "group-default",
-    name: "默认分组",
-    description: "默认参与者分组",
-    createdAt: new Date().toISOString(),
-    updatedAt: null,
-  };
+function stripLegacyDemoRuntimeData(normalized) {
+  const stripRuntime = isLegacyDemoOnlyRuntimeState(normalized);
+  const stripQuestions = isOnlyLegacySeedQuestionBank(normalized) && !hasConfiguredPaper(normalized);
+  if (!stripRuntime && !stripQuestions) return normalized;
+  const auditMessages = [];
+  const next = { ...normalized };
+  if (stripRuntime) {
+    next.sessions = [];
+    next.candidates = [];
+    next.groups = [];
+    next.answers = {};
+    auditMessages.push("默认参与者、会话、分组和答案");
+  }
+  if (stripQuestions) {
+    next.questions = [];
+    next.generationTask = null;
+    auditMessages.push("题库初始化内容");
+  }
+  next.auditLog = [
+    ...normalized.auditLog,
+    {
+      id: `log-strip-demo-${Date.now()}`,
+      type: "system",
+      message: `已移除${auditMessages.join("、")}历史初始化数据`,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+  normalizedStateNeedsSave = true;
+  return next;
+}
+
+function consumeNormalizedStateNeedsSave() {
+  const needsSave = normalizedStateNeedsSave;
+  normalizedStateNeedsSave = false;
+  return needsSave;
+}
+
+function isLegacyDemoOnlyRuntimeState(state = {}) {
+  const sessionsOnlyDemo = isOnlyLegacyDemoSessions(state.sessions);
+  const candidatesOnlyDemo = isOnlyLegacyDemoCandidates(state.candidates);
+  const answersOnlyDemo = isOnlyLegacyDemoAnswers(state.answers);
+  const groupsOnlyFromDemo = isOnlyLegacyDemoGroups(state.groups, state.sessions, state.candidates);
+  const hasRuntimeDemoData = Boolean(
+    (state.sessions || []).length ||
+    (state.candidates || []).length ||
+    Object.keys(state.answers || {}).length,
+  );
+  return hasRuntimeDemoData && hasLegacySeedAudit(state) && sessionsOnlyDemo && candidatesOnlyDemo && answersOnlyDemo && groupsOnlyFromDemo;
+}
+
+function isOnlyLegacyDemoSessions(sessions = []) {
+  return sessions.every((session) => legacySeedSessionIdPattern.test(String(session.id || "")) && /^20\d{10}$/.test(String(session.ticket || "")));
+}
+
+function isOnlyLegacyDemoCandidates(candidates = []) {
+  return candidates.every((candidate) => /^20\d{10}$/.test(String(candidate.ticket || "")));
+}
+
+function isOnlyLegacyDemoAnswers(answers = {}) {
+  return Object.keys(answers || {}).every((id) => legacySeedSessionIdPattern.test(id));
+}
+
+function isOnlyLegacySeedQuestionBank(state = {}) {
+  return hasLegacySeedAudit(state) && (state.questions || []).length > 0 && state.questions.every((question) => legacySeedQuestionIdPattern.test(String(question.id || "")));
+}
+
+function hasLegacySeedAudit(state = {}) {
+  return (state.auditLog || []).some((item) => legacySeedAuditPattern.test(String(item?.message || "")));
+}
+
+function hasConfiguredPaper(state = {}) {
+  return Boolean(
+    state.paper?.id ||
+    state.paper?.status ||
+    (Array.isArray(state.paper?.questionIds) && state.paper.questionIds.length) ||
+    (Array.isArray(state.papers) && state.papers.length),
+  );
+}
+
+function isOnlyLegacyDemoGroups(groups = [], sessions = [], candidates = []) {
+  const demoGroupNames = new Set(groupsFromRows([...sessions, ...candidates]).map((group) => group.name));
+  return groups.every((group) => demoGroupNames.has(group.name));
 }
 
 function groupsFromRows(rows = []) {

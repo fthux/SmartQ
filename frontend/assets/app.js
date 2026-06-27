@@ -39,6 +39,7 @@ const defaultSpec = {
 };
 
 const publicBasePath = detectPublicBasePath();
+cleanupLegacyServiceWorkers();
 
 function normalizeBasePath(value) {
   const trimmed = String(value || "").trim();
@@ -66,6 +67,18 @@ function apiUrl(path) {
   return publicUrl(path);
 }
 
+function cleanupLegacyServiceWorkers() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.getRegistrations?.()
+    .then((registrations) => {
+      const expectedPrefix = `${location.origin}${publicUrl("/")}`;
+      registrations
+        .filter((registration) => registration.scope.startsWith(expectedPrefix))
+        .forEach((registration) => registration.unregister().catch(() => {}));
+    })
+    .catch(() => {});
+}
+
 async function request(path, options = {}) {
   const adminToken = localStorage.getItem("smartqAdminToken") || "";
   const useAdminToken = adminToken && path.startsWith("/api/") && !path.startsWith("/api/candidate/") && !path.startsWith("/api/admin/login") && !["/api/health", "/api/config"].includes(path);
@@ -77,10 +90,15 @@ async function request(path, options = {}) {
   if (options.skipAuth) delete headers.authorization;
   const fetchOptions = { ...options };
   delete fetchOptions.skipAuth;
-  const response = await fetch(apiUrl(path), {
-    ...fetchOptions,
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(apiUrl(path), {
+      ...fetchOptions,
+      headers,
+    });
+  } catch (error) {
+    throw new Error(`网络请求失败：${error.message || "请检查服务是否可用"}`);
+  }
   if (!response.ok) {
     let message = `${path} ${response.status}`;
     try {

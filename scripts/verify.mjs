@@ -117,6 +117,8 @@ try {
   assert(appJs.includes("SHA-256"), "frontend exposes proctor evidence attachment digest");
   assert(appJs.includes("提交需全屏") && appJs.includes("提交前需完成"), "frontend exposes active proctor compliance requirements");
   assert(appJs.includes("/api/proctor/stream") && appJs.includes("实时通道"), "frontend connects proctor realtime stream");
+  assert(appJs.includes("cleanupLegacyServiceWorkers") && appJs.includes("registration.unregister()"), "frontend removes legacy service workers that can intercept app requests");
+  assert(appJs.includes("网络请求失败：") && appJs.includes("请检查服务是否可用"), "frontend wraps fetch failures with a readable network error");
   assert(appJs.includes("paperTypeConfig") && appJs.includes("computedSpecTotalScore") && appJs.includes("return sum + count * score;"), "frontend computes paper total score from question counts and per-type scores");
   assert(appJs.includes("出题条件") && appJs.includes("题量与分值"), "frontend separates authoring conditions from question count and score settings");
   assert(appJs.includes("知识点范围<textarea") && appJs.includes("state.spec.knowledge") && appJs.includes("state.spec.requirements"), "frontend uses matching textareas for knowledge scope and extra requirements");

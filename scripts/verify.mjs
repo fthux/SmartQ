@@ -60,6 +60,8 @@ try {
   assert(!/#\/candidate|\/api\/candidate\/|\/api\/participants|\/api\/assignments|\/api\/proctor|\/api\/grading|\/api\/analysis/.test(appJs), "frontend removes retired routes and API calls");
   assert(appJs.includes("cleanupLegacyServiceWorkers") && appJs.includes("registration.unregister()"), "frontend still clears legacy service workers");
   assert(appJs.includes("paperTypeConfig") && appJs.includes("computedSpecTotalScore"), "frontend keeps paper score calculation");
+  assert(appJs.includes('paperPageSize: 20') && appJs.includes('aria-label="试卷状态筛选"'), "paper management uses the dense list controls");
+  assert(appJs.includes('aria-label="试卷详情抽屉"') && appJs.includes("paperDetailMode"), "paper details open in the responsive drawer");
 
   const blockedDashboard = await getJson("/api/dashboard", { expectedStatus: 401 });
   assert(blockedDashboard.error.includes("运营控制台"), "dashboard requires admin login");

@@ -141,10 +141,13 @@ const app = createApp({
       selectedPaperId: null,
       selectedPaperDetail: null,
       paperDetailLoading: false,
+      paperDetailMode: "compact",
       paperSearch: "",
       paperStatusFilter: "all",
+      paperSort: "latest",
       paperPage: 1,
-      paperPageSize: 6,
+      paperPageSize: 20,
+      paperActionMenuId: null,
       confirmDeletePaper: null,
       editingQuestion: null,
       questionEditForm: null,
@@ -253,8 +256,8 @@ const app = createApp({
     const visibleWorkflowStep = computed(() => state.activeWorkflowStep);
     const documentTitle = computed(() => {
       const routeTitle = navItems.find((item) => item.key === state.route)?.label || "已出卷子";
-      if (state.route === "papers" && state.selectedPaperDetail?.paper?.name) {
-        return `${state.selectedPaperDetail.paper.name} - 已出卷子 - SmartQ`;
+      if (state.route === "papers" && state.selectedPaperDetail?.name) {
+        return `${state.selectedPaperDetail.name} - 已出卷子 - SmartQ`;
       }
       if (state.route === "authoring") {
         const title = state.authoringPaperId ? paper.value.name || state.dashboard?.generationTask?.paperName || "编辑试卷" : "出题制卷";
@@ -263,9 +266,14 @@ const app = createApp({
       return `${routeTitle} - SmartQ`;
     });
     const paperRows = computed(() => {
-      return papers.value
-        .slice()
-        .sort((a, b) => new Date(b.publishedAt || b.createdAt || 0) - new Date(a.publishedAt || a.createdAt || 0));
+      const rows = papers.value.slice();
+      if (state.paperSort === "oldest") {
+        return rows.sort((a, b) => new Date(a.publishedAt || a.createdAt || 0) - new Date(b.publishedAt || b.createdAt || 0));
+      }
+      if (state.paperSort === "name") {
+        return rows.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
+      }
+      return rows.sort((a, b) => new Date(b.publishedAt || b.createdAt || 0) - new Date(a.publishedAt || a.createdAt || 0));
     });
     const filteredPaperRows = computed(() => {
       const keyword = String(state.paperSearch || "").trim().toLowerCase();
@@ -284,6 +292,8 @@ const app = createApp({
       const start = (currentPaperPage.value - 1) * state.paperPageSize;
       return filteredPaperRows.value.slice(start, start + state.paperPageSize);
     });
+    const paperPageStart = computed(() => (filteredPaperRows.value.length ? (currentPaperPage.value - 1) * state.paperPageSize + 1 : 0));
+    const paperPageEnd = computed(() => Math.min(currentPaperPage.value * state.paperPageSize, filteredPaperRows.value.length));
     async function refresh() {
       if (!state.admin.token) {
         state.loading = false;
@@ -739,7 +749,9 @@ const app = createApp({
 
     async function selectPaper(id) {
       state.selectedPaperId = id;
+      state.selectedPaperDetail = null;
       state.paperDetailLoading = true;
+      state.paperActionMenuId = null;
       try {
         state.selectedPaperDetail = await request(`/api/papers/${id}`);
       } catch (error) {
@@ -755,6 +767,8 @@ const app = createApp({
       state.selectedPaperId = null;
       state.selectedPaperDetail = null;
       state.paperDetailLoading = false;
+      state.paperDetailMode = "compact";
+      state.paperActionMenuId = null;
     }
 
     function changePaperPage(delta) {
@@ -763,9 +777,15 @@ const app = createApp({
 
     function resetPaperPage() {
       state.paperPage = 1;
+      state.paperActionMenuId = null;
+    }
+
+    function togglePaperActionMenu(id) {
+      state.paperActionMenuId = state.paperActionMenuId === id ? null : id;
     }
 
     function askDeletePaper(item) {
+      state.paperActionMenuId = null;
       state.confirmDeletePaper = item;
     }
 
@@ -968,6 +988,10 @@ const app = createApp({
       });
       document.addEventListener("click", (event) => {
         if (!event.target?.closest?.("[data-admin-account-menu]")) closeAdminMenu();
+        if (!event.target?.closest?.("[data-paper-action-menu]")) state.paperActionMenuId = null;
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && state.selectedPaperId) clearSelectedPaper();
       });
       await loadAdminSession();
       await refresh();
@@ -998,6 +1022,8 @@ const app = createApp({
       pagedPaperRows,
       paperTotalPages,
       currentPaperPage,
+      paperPageStart,
+      paperPageEnd,
       reviewedCount,
       pendingReviewCount,
       draftReady,
@@ -1028,8 +1054,10 @@ const app = createApp({
       publishPaper,
       activatePaper,
       selectPaper,
+      clearSelectedPaper,
       changePaperPage,
       resetPaperPage,
+      togglePaperActionMenu,
       askDeletePaper,
       deletePaper,
       editPaper,
@@ -1042,6 +1070,7 @@ const app = createApp({
       typeClass,
       displayQuestionOptions,
       displayPaperStatus,
+      paperStatusClass,
       workflowStatusText,
       formatDateTime,
       formatDateTimeWithYear,
@@ -1426,109 +1455,159 @@ const app = createApp({
           </section>
         </section>
 
-        <section v-if="state.route === 'papers'" class="mt-6 grid grid-cols-[0.72fr_1.28fr] gap-5">
-          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-            <h1 class="text-3xl font-black">已出卷子管理</h1>
-            <div class="mt-1 text-sm font-semibold text-slate-500">集中管理草稿、已发布和历史试卷</div>
-            <div class="mt-5 grid grid-cols-2 gap-3">
-              <div class="rounded-lg bg-slate-50 p-4"><div class="text-2xl font-black">{{ paperRows.length }}</div><div class="text-xs font-bold text-slate-500">历史试卷</div></div>
-              <div class="rounded-lg bg-slate-50 p-4"><div class="text-2xl font-black text-leaf">{{ papers.filter((item) => item.status === '已发布').length }}</div><div class="text-xs font-bold text-slate-500">已发布</div></div>
-              <div class="rounded-lg bg-slate-50 p-4"><div class="text-2xl font-black text-iris">{{ papers.filter((item) => ['草稿','未发布','已保存','已组卷'].includes(item.status)).length }}</div><div class="text-xs font-bold text-slate-500">草稿</div></div>
-              <div class="rounded-lg bg-slate-50 p-4"><div class="text-2xl font-black text-ocean">{{ paperRows.reduce((sum, item) => sum + Number(item.questionCount || 0), 0) }}</div><div class="text-xs font-bold text-slate-500">列表题数</div></div>
+        <section v-if="state.route === 'papers'" class="mt-6 space-y-5">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 class="text-3xl font-black">已出卷子管理</h1>
+              <div class="mt-1 text-sm font-semibold text-slate-500">集中管理草稿、已发布和历史试卷</div>
             </div>
-            <div class="mt-5 flex items-center justify-between"><h2 class="text-lg font-black">试卷列表</h2><span class="text-xs font-bold text-slate-500">最新优先</span></div>
-            <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_128px]">
-              <label class="relative block">
+            <button type="button" class="flex h-10 items-center justify-center gap-2 rounded bg-ink px-4 text-sm font-black text-white shadow-sm" @click="go('authoring')">
+              <i data-lucide="plus" class="h-4 w-4"></i>
+              新建试卷
+            </button>
+          </div>
+
+          <div class="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm sm:grid-cols-4 sm:divide-y-0">
+            <div class="px-4 py-3 sm:px-5"><div class="text-xl font-black">{{ paperRows.length }}</div><div class="mt-0.5 text-xs font-bold text-slate-500">历史试卷</div></div>
+            <div class="px-4 py-3 sm:px-5"><div class="text-xl font-black text-leaf">{{ papers.filter((item) => item.status === '已发布').length }}</div><div class="mt-0.5 text-xs font-bold text-slate-500">已发布</div></div>
+            <div class="px-4 py-3 sm:px-5"><div class="text-xl font-black text-iris">{{ papers.filter((item) => ['草稿','未发布','已保存','已组卷'].includes(item.status)).length }}</div><div class="mt-0.5 text-xs font-bold text-slate-500">草稿</div></div>
+            <div class="px-4 py-3 sm:px-5"><div class="text-xl font-black text-ocean">{{ paperRows.reduce((sum, item) => sum + Number(item.questionCount || 0), 0) }}</div><div class="mt-0.5 text-xs font-bold text-slate-500">累计题数</div></div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white shadow-soft">
+            <div class="flex flex-col gap-3 border-b border-slate-200 p-4 xl:flex-row xl:items-center xl:justify-between">
+              <label class="relative block w-full xl:max-w-md">
                 <i data-lucide="search" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
-                <input v-model="state.paperSearch" class="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm font-semibold outline-none focus:border-ocean" placeholder="搜索试卷名称" @input="resetPaperPage" />
+                <input v-model="state.paperSearch" class="h-10 w-full rounded border border-slate-200 bg-white pl-9 pr-3 text-sm font-semibold outline-none focus:border-ocean focus:ring-2 focus:ring-cyan-50" placeholder="搜索试卷名称或编号" @input="resetPaperPage" />
               </label>
-              <select v-model="state.paperStatusFilter" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:border-ocean" @change="resetPaperPage">
-                <option value="all">全部状态</option>
-                <option value="published">已发布</option>
-                <option value="unpublished">草稿</option>
-              </select>
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div class="grid grid-cols-3 rounded border border-slate-200 bg-slate-50 p-1" aria-label="试卷状态筛选">
+                  <button v-for="option in [{ value: 'all', label: '全部' }, { value: 'unpublished', label: '草稿' }, { value: 'published', label: '已发布' }]" :key="option.value" type="button" class="h-8 px-3 text-xs font-black transition" :class="state.paperStatusFilter === option.value ? 'rounded bg-white text-ink shadow-sm' : 'text-slate-500 hover:text-ink'" @click="state.paperStatusFilter = option.value; resetPaperPage()">{{ option.label }}</button>
+                </div>
+                <label class="flex items-center gap-2 text-xs font-bold text-slate-500">
+                  <span class="shrink-0">排序</span>
+                  <select v-model="state.paperSort" class="h-10 rounded border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-ocean" @change="resetPaperPage">
+                    <option value="latest">最近更新</option>
+                    <option value="oldest">最早创建</option>
+                    <option value="name">按名称</option>
+                  </select>
+                </label>
+              </div>
             </div>
-            <div class="mt-4 max-h-[560px] space-y-3 overflow-y-auto pr-1">
-              <div
-                v-for="item in pagedPaperRows"
-                :key="item.id"
-                class="cursor-pointer rounded-lg border p-4"
-		                :class="state.selectedPaperId === item.id ? 'border-ocean bg-cyan-50' : 'border-slate-200 bg-white'"
-                @click="selectPaper(item.id)"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <div class="truncate text-base font-black">{{ item.name }}</div>
-                    <div class="mt-1 text-sm font-semibold text-slate-500">{{ item.score || 0 }} 分 · {{ item.questionCount || 0 }} 题</div>
-                    <div class="mt-2 text-xs font-semibold text-slate-400">{{ formatDateTime(item.publishedAt || item.createdAt) }}</div>
-                  </div>
-	                  <div class="flex shrink-0 items-center gap-1">
-	                    <span class="rounded bg-white px-2 py-1 text-xs font-black text-slate-600">{{ displayPaperStatus(item.status) }}</span>
-		                    <button class="rounded border border-rose-200 bg-white px-2 py-1.5 text-xs font-black text-coral" @click.stop="askDeletePaper(item)">删除</button>
+
+            <div v-if="pagedPaperRows.length" class="hidden overflow-x-auto md:block">
+              <div class="min-w-[880px]">
+                <div class="grid grid-cols-[minmax(260px,1.8fr)_120px_92px_92px_164px_112px] items-center border-b border-slate-200 bg-slate-50 px-5 py-2.5 text-xs font-black text-slate-500">
+                  <div>试卷名称</div><div>状态</div><div>题数</div><div>总分</div><div>更新时间</div><div class="text-right">操作</div>
+                </div>
+                <div v-for="item in pagedPaperRows" :key="item.id" class="grid min-h-16 cursor-pointer grid-cols-[minmax(260px,1.8fr)_120px_92px_92px_164px_112px] items-center border-b border-slate-100 px-5 text-sm transition last:border-b-0 hover:bg-slate-50" @click="selectPaper(item.id)">
+                  <div class="min-w-0 pr-5"><div class="truncate font-black text-ink">{{ item.name }}</div><div class="mt-1 truncate text-xs font-semibold text-slate-400">{{ item.id }}</div></div>
+                  <div><span class="inline-flex rounded px-2 py-1 text-xs font-black" :class="paperStatusClass(item.status)">{{ displayPaperStatus(item.status) }}</span></div>
+                  <div class="font-bold text-slate-600">{{ item.questionCount || 0 }} 题</div>
+                  <div class="font-bold text-slate-600">{{ item.score || 0 }} 分</div>
+                  <div class="text-xs font-semibold text-slate-500">{{ formatDateTime(item.publishedAt || item.createdAt) }}</div>
+                  <div class="relative flex justify-end gap-1" data-paper-action-menu>
+                    <button type="button" :title="item.status === '已发布' ? '查看详情' : '编辑试卷'" :aria-label="item.status === '已发布' ? '查看详情' : '编辑试卷'" class="flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-white text-slate-600 hover:border-ocean hover:text-ocean" @click.stop="item.status === '已发布' ? selectPaper(item.id) : editPaper(item)">
+                      <i :data-lucide="item.status === '已发布' ? 'eye' : 'pencil'" class="h-4 w-4"></i>
+                    </button>
+                    <button type="button" title="更多操作" aria-label="更多操作" class="flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-white text-slate-600 hover:text-ink" @click.stop="togglePaperActionMenu(item.id)"><i data-lucide="ellipsis" class="h-4 w-4"></i></button>
+                    <div v-if="state.paperActionMenuId === item.id" class="absolute right-0 top-10 z-30 w-36 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-[0_14px_36px_rgba(15,23,42,0.16)]" @click.stop>
+                      <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50" @click="selectPaper(item.id)"><i data-lucide="eye" class="h-4 w-4"></i>查看详情</button>
+                      <button v-if="item.status !== '已发布'" type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50" @click="editPaper(item)"><i data-lucide="pencil" class="h-4 w-4"></i>编辑试卷</button>
+                      <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-bold text-coral hover:bg-rose-50" @click="askDeletePaper(item)"><i data-lucide="trash-2" class="h-4 w-4"></i>删除试卷</button>
+                    </div>
                   </div>
                 </div>
               </div>
-              <div v-if="!paperRows.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
-                <div class="text-sm font-black text-slate-600">暂无已出卷子</div>
-                <div class="mt-1 text-xs font-semibold text-slate-500">完成出题制卷并保存后，试卷会显示在这里。</div>
-              </div>
-              <div v-else-if="!filteredPaperRows.length" class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
-                <div class="text-sm font-black text-slate-600">暂无匹配试卷</div>
-                <div class="mt-1 text-xs font-semibold text-slate-500">请调整关键词或状态筛选。</div>
+            </div>
+
+            <div v-if="pagedPaperRows.length" class="divide-y divide-slate-100 md:hidden">
+              <div v-for="item in pagedPaperRows" :key="item.id" class="p-4" @click="selectPaper(item.id)">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0"><div class="truncate text-sm font-black">{{ item.name }}</div><div class="mt-1 truncate text-xs font-semibold text-slate-400">{{ item.id }}</div></div>
+                  <span class="shrink-0 rounded px-2 py-1 text-xs font-black" :class="paperStatusClass(item.status)">{{ displayPaperStatus(item.status) }}</span>
+                </div>
+                <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-bold text-slate-500">
+                  <span>{{ item.questionCount || 0 }} 题</span><span>{{ item.score || 0 }} 分</span><span>{{ formatDateTime(item.publishedAt || item.createdAt) }}</span>
+                </div>
+                <div class="mt-3 flex justify-end gap-2">
+                  <button type="button" class="flex h-9 items-center gap-2 rounded border border-slate-200 bg-white px-3 text-xs font-black text-slate-700" @click.stop="selectPaper(item.id)"><i data-lucide="eye" class="h-4 w-4"></i>查看</button>
+                  <button v-if="item.status !== '已发布'" type="button" class="flex h-9 items-center gap-2 rounded border border-slate-200 bg-white px-3 text-xs font-black text-slate-700" @click.stop="editPaper(item)"><i data-lucide="pencil" class="h-4 w-4"></i>编辑</button>
+                  <button type="button" title="删除试卷" aria-label="删除试卷" class="flex h-9 w-9 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:border-rose-200 hover:text-coral" @click.stop="askDeletePaper(item)"><i data-lucide="trash-2" class="h-4 w-4"></i></button>
+                </div>
               </div>
             </div>
-            <div v-if="paperRows.length" class="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-500">
-              <div>共 {{ filteredPaperRows.length }} / {{ paperRows.length }} 份试卷</div>
-              <div class="flex items-center gap-2">
-                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="currentPaperPage <= 1" @click="changePaperPage(-1)">上一页</button>
-                <span class="min-w-20 text-center text-sm font-black text-ink">{{ currentPaperPage }} / {{ paperTotalPages }}</span>
-                <button class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="currentPaperPage >= paperTotalPages" @click="changePaperPage(1)">下一页</button>
-              </div>
+
+            <div v-if="!paperRows.length" class="px-4 py-16 text-center">
+              <i data-lucide="files" class="mx-auto h-8 w-8 text-slate-300"></i><div class="mt-3 text-sm font-black text-slate-600">暂无已出卷子</div><div class="mt-1 text-xs font-semibold text-slate-500">完成出题制卷并保存后，试卷会显示在这里。</div>
             </div>
-          </div>
-          <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-            <div class="flex items-start justify-between">
-              <div>
-                <h2 class="text-lg font-black">试卷详情</h2>
-                <div class="mt-1 text-xs font-semibold text-slate-500">点击左侧试卷查看完整题目</div>
-              </div>
-              <button
-                v-if="state.selectedPaperDetail && state.selectedPaperDetail.status !== '已发布'"
-                class="rounded-lg bg-ink px-3 py-2 text-sm font-bold text-white"
-                @click="editPaper(state.selectedPaperDetail)"
-              >
-                编辑
-              </button>
+            <div v-else-if="!filteredPaperRows.length" class="px-4 py-16 text-center">
+              <i data-lucide="search-x" class="mx-auto h-8 w-8 text-slate-300"></i><div class="mt-3 text-sm font-black text-slate-600">暂无匹配试卷</div><div class="mt-1 text-xs font-semibold text-slate-500">请调整关键词或状态筛选。</div>
             </div>
-            <div v-if="state.paperDetailLoading" class="mt-5 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm font-bold text-slate-500">试卷加载中...</div>
-            <div v-else-if="!state.selectedPaperDetail" class="mt-5 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm font-bold text-slate-500">请选择一份试卷</div>
-            <div v-else class="mt-5">
-              <div class="grid grid-cols-[1fr_100px_100px_110px] items-center rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                <div class="truncate font-black">{{ state.selectedPaperDetail.name }}</div>
-                <div class="font-bold text-slate-600">{{ state.selectedPaperDetail.questionCount || 0 }} 题</div>
-                <div class="font-bold text-slate-600">{{ state.selectedPaperDetail.score || 0 }} 分</div>
-                <div class="text-right text-xs font-black text-ocean">{{ displayPaperStatus(state.selectedPaperDetail.status) }}</div>
-              </div>
-              <div class="mt-4 max-h-[620px] divide-y divide-slate-100 overflow-y-auto pr-1">
-                <div v-for="(question, index) in state.selectedPaperDetail.questions || []" :key="question.id" class="grid grid-cols-[48px_72px_1fr_64px_72px] items-start gap-3 py-3 text-sm">
-                  <div class="font-black text-slate-500">{{ String(index + 1).padStart(2, '0') }}</div>
-                  <div><span class="rounded px-2 py-1 text-xs font-bold" :class="typeClass[question.type] || 'bg-slate-50 text-slate-600'">{{ question.type }}</span></div>
-	                  <div>
-	                    <div class="font-semibold leading-5">{{ question.stem }}</div>
-	                    <div v-if="['单选','多选','判断'].includes(question.type)" class="mt-2 grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600">
-	                      <div v-for="(option, optionIndex) in displayQuestionOptions(question)" :key="optionIndex" class="rounded border border-slate-100 bg-slate-50 px-2 py-1">
-	                        {{ String.fromCharCode(65 + optionIndex) }}. {{ option }}
-	                      </div>
-	                    </div>
-	                    <div class="mt-2 whitespace-pre-line text-xs font-semibold leading-5 text-slate-500">答案：{{ Array.isArray(question.answer) ? question.answer.join('、') : question.answer }}</div>
-	                  </div>
-                  <div class="font-bold text-slate-600">{{ question.score }} 分</div>
-                  <div class="text-right text-xs font-black" :class="state.selectedPaperDetail.status === '已发布' ? 'text-slate-400' : 'text-ocean'">{{ state.selectedPaperDetail.status === '已发布' ? '只读' : '可编辑' }}</div>
+
+            <div v-if="paperRows.length" class="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 text-xs font-bold text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+              <div>显示 {{ paperPageStart }}–{{ paperPageEnd }} 条，共 {{ filteredPaperRows.length }} 份试卷</div>
+              <div class="flex flex-wrap items-center justify-between gap-3 sm:justify-end">
+                <label class="flex items-center gap-2"><span>每页</span><select v-model.number="state.paperPageSize" class="h-8 rounded border border-slate-200 bg-white px-2 text-xs font-black text-slate-700" @change="resetPaperPage"><option :value="10">10</option><option :value="20">20</option><option :value="50">50</option></select></label>
+                <span class="min-w-16 text-center text-sm font-black text-ink">{{ currentPaperPage }} / {{ paperTotalPages }}</span>
+                <div class="flex gap-1">
+                  <button type="button" title="上一页" aria-label="上一页" class="flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-white text-slate-700 disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPaperPage <= 1" @click="changePaperPage(-1)"><i data-lucide="chevron-left" class="h-4 w-4"></i></button>
+                  <button type="button" title="下一页" aria-label="下一页" class="flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-white text-slate-700 disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPaperPage >= paperTotalPages" @click="changePaperPage(1)"><i data-lucide="chevron-right" class="h-4 w-4"></i></button>
                 </div>
               </div>
             </div>
           </div>
         </section>
+
+        <div v-if="state.selectedPaperId" class="fixed inset-0 z-50 bg-ink/35" role="dialog" aria-modal="true" aria-label="试卷详情抽屉" @click.self="clearSelectedPaper">
+          <aside class="absolute inset-y-0 right-0 flex w-full flex-col bg-white shadow-[0_24px_70px_rgba(15,23,42,0.28)] sm:max-w-[760px] xl:max-w-[860px]">
+            <div class="flex min-h-16 items-center justify-between gap-3 border-b border-slate-200 px-4 sm:px-6">
+              <div class="min-w-0"><div class="text-base font-black">试卷详情</div><div class="mt-0.5 truncate text-xs font-semibold text-slate-500">{{ state.selectedPaperDetail?.name || '正在加载试卷内容' }}</div></div>
+              <div class="flex shrink-0 items-center gap-2">
+                <button v-if="state.selectedPaperDetail && state.selectedPaperDetail.status !== '已发布'" type="button" title="编辑试卷" class="flex h-9 items-center gap-2 rounded bg-ink px-3 text-xs font-black text-white" @click="editPaper(state.selectedPaperDetail)"><i data-lucide="pencil" class="h-4 w-4"></i><span class="hidden sm:inline">编辑</span></button>
+                <button type="button" title="关闭详情" aria-label="关闭详情" class="flex h-9 w-9 items-center justify-center rounded border border-slate-200 bg-white text-slate-600" @click="clearSelectedPaper"><i data-lucide="x" class="h-4 w-4"></i></button>
+              </div>
+            </div>
+
+            <div v-if="state.paperDetailLoading" class="flex flex-1 items-center justify-center px-6 text-sm font-bold text-slate-500"><i data-lucide="loader-circle" class="mr-2 h-4 w-4 animate-spin"></i>试卷加载中...</div>
+            <div v-else-if="state.selectedPaperDetail" class="min-h-0 flex-1 overflow-y-auto">
+              <div class="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+                <div class="grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,1fr)_100px_100px_100px] sm:items-center">
+                  <div class="col-span-2 min-w-0 sm:col-span-1"><div class="truncate text-lg font-black">{{ state.selectedPaperDetail.name }}</div><div class="mt-1 truncate text-xs font-semibold text-slate-400">{{ state.selectedPaperDetail.id }}</div></div>
+                  <div><div class="text-base font-black">{{ state.selectedPaperDetail.questionCount || 0 }}</div><div class="text-[11px] font-bold text-slate-500">题目</div></div>
+                  <div><div class="text-base font-black">{{ state.selectedPaperDetail.score || 0 }}</div><div class="text-[11px] font-bold text-slate-500">总分</div></div>
+                  <div><span class="inline-flex rounded px-2 py-1 text-xs font-black" :class="paperStatusClass(state.selectedPaperDetail.status)">{{ displayPaperStatus(state.selectedPaperDetail.status) }}</span></div>
+                </div>
+                <div class="mt-4 flex items-center justify-between gap-3">
+                  <div class="text-sm font-black">题目内容</div>
+                  <div class="grid grid-cols-2 rounded border border-slate-200 bg-slate-50 p-1" aria-label="题目详情模式">
+                    <button type="button" class="h-7 px-3 text-xs font-black" :class="state.paperDetailMode === 'compact' ? 'rounded bg-white text-ink shadow-sm' : 'text-slate-500'" @click="state.paperDetailMode = 'compact'">紧凑</button>
+                    <button type="button" class="h-7 px-3 text-xs font-black" :class="state.paperDetailMode === 'full' ? 'rounded bg-white text-ink shadow-sm' : 'text-slate-500'" @click="state.paperDetailMode = 'full'">完整</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="divide-y divide-slate-100 px-4 sm:px-6">
+                <div v-for="(question, index) in state.selectedPaperDetail.questions || []" :key="question.id" class="py-4">
+                  <div class="grid grid-cols-[36px_minmax(0,1fr)_52px] items-start gap-3 sm:grid-cols-[40px_68px_minmax(0,1fr)_56px]">
+                    <div class="pt-0.5 text-sm font-black text-slate-400">{{ String(index + 1).padStart(2, '0') }}</div>
+                    <div class="hidden sm:block"><span class="rounded px-2 py-1 text-xs font-bold" :class="typeClass[question.type] || 'bg-slate-50 text-slate-600'">{{ question.type }}</span></div>
+                    <div class="min-w-0">
+                      <div class="mb-2 sm:hidden"><span class="rounded px-2 py-1 text-xs font-bold" :class="typeClass[question.type] || 'bg-slate-50 text-slate-600'">{{ question.type }}</span></div>
+                      <div class="text-sm font-semibold leading-6" :class="state.paperDetailMode === 'compact' ? 'max-h-12 overflow-hidden' : ''">{{ question.stem }}</div>
+                      <div v-if="state.paperDetailMode === 'full' && ['单选','多选','判断'].includes(question.type)" class="mt-3 grid gap-2 text-xs font-semibold text-slate-600 sm:grid-cols-2">
+                        <div v-for="(option, optionIndex) in displayQuestionOptions(question)" :key="optionIndex" class="rounded border border-slate-100 bg-slate-50 px-3 py-2">{{ String.fromCharCode(65 + optionIndex) }}. {{ option }}</div>
+                      </div>
+                      <div class="mt-2 whitespace-pre-line text-xs font-semibold leading-5 text-slate-500">答案：{{ Array.isArray(question.answer) ? question.answer.join('、') : question.answer }}</div>
+                    </div>
+                    <div class="text-right text-sm font-black text-slate-600">{{ question.score }} 分</div>
+                  </div>
+                </div>
+                <div v-if="!(state.selectedPaperDetail.questions || []).length" class="py-16 text-center text-sm font-bold text-slate-500">该试卷暂无题目内容</div>
+              </div>
+            </div>
+          </aside>
+        </div>
 
           </div>
 
@@ -1639,6 +1718,12 @@ function workflowStatusText(status) {
 
 function displayPaperStatus(status) {
   return ["已组卷", "已保存", "未发布"].includes(status) ? "草稿" : status || "未保存";
+}
+
+function paperStatusClass(status) {
+  if (displayPaperStatus(status) === "已发布") return "bg-emerald-50 text-leaf";
+  if (displayPaperStatus(status) === "草稿") return "bg-indigo-50 text-iris";
+  return "bg-slate-100 text-slate-600";
 }
 
 function displayQuestionOptions(question = {}) {

@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:
 import { createHash } from "node:crypto";
 import net from "node:net";
 import tls from "node:tls";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exam } from "../data/store.js";
 
@@ -13,13 +13,10 @@ const backupRetention = Math.max(1, Math.min(200, Number(process.env.SMARTQ_BACK
 const backupMinIntervalMs = Math.max(0, Math.min(3600, Number(process.env.SMARTQ_BACKUP_MIN_INTERVAL_SECONDS || 60))) * 1000;
 const storageStatus = resolveStorageStatus();
 const postgresStore = storageStatus.requestedAdapter === "postgres" ? createPostgresStore() : null;
-const legacyPersonPattern = /(?:\u540c\u5b66|\u5b66\u751f|\u8003\u751f)/;
-const legacyPersonNamePattern = /[\u4e00-\u9fff]+(?:\u540c\u5b66|\u5b66\u751f|\u8003\u751f)/g;
-const legacyClassToken = "\u73ed";
-const legacyClassNameToken = "\u73ed\u7ea7";
 const legacySeedAuditPattern = /MVP|初始数据|题库初始化内容/;
-const legacySeedSessionIdPattern = /^s-\d{3}$/;
 const legacySeedQuestionIdPattern = /^q-\d{3}$/;
+const retiredRuntimeKeys = ["sessions", "candidates", "participants", "groups", "answers", "gradingResults", "proctorRules"];
+const retiredAuditTypePattern = /^(?:assignment|candidate|participant|group|proctor|exam|grading)(?:-|$)|^answer-save$/;
 
 let state = null;
 let writeQueue = Promise.resolve();
@@ -34,7 +31,7 @@ export async function loadState() {
     if (loaded) {
       state = normalizeState(loaded);
       if (consumeNormalizedStateNeedsSave()) {
-        await saveState({ forceBackup: true, reason: "strip-demo-data" });
+        await saveState({ forceBackup: true, reason: "strip-retired-features" });
       }
       return state;
     }
@@ -44,7 +41,7 @@ export async function loadState() {
     const raw = await readFile(dataFile, "utf8");
     state = normalizeState(JSON.parse(raw));
     if (consumeNormalizedStateNeedsSave()) {
-      await saveState({ forceBackup: true, reason: "strip-demo-data" });
+      await saveState({ forceBackup: true, reason: "strip-retired-features" });
     }
   } catch {
     state = normalizeState(defaultState());
@@ -123,49 +120,6 @@ export async function storageInfo() {
   };
 }
 
-export async function exportStateSnapshot() {
-  const current = await loadState();
-  return {
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    storage: await storageInfo(),
-    state: sanitizeBackupState(current),
-  };
-}
-
-export async function replaceStateSnapshot(snapshot = {}) {
-  const nextState = snapshot.state && typeof snapshot.state === "object" ? snapshot.state : snapshot;
-  state = normalizeState({
-    ...nextState,
-    adminSessions: {},
-  });
-  state.auditLog.push({
-    id: `backup-restore-${Date.now()}`,
-    type: "backup-restore",
-    message: "运行时数据已从备份恢复",
-    createdAt: new Date().toISOString(),
-  });
-  await saveState({ forceBackup: true, reason: "before-restore" });
-  return state;
-}
-
-export async function listBackupSnapshots() {
-  return listLocalBackups();
-}
-
-export async function readBackupSnapshot(name) {
-  const fileName = safeBackupName(name);
-  if (!fileName) return null;
-  const backups = await listLocalBackups();
-  const backup = backups.find((item) => item.name === fileName);
-  if (!backup) return null;
-  const raw = await readFile(join(backupDir, fileName), "utf8");
-  return {
-    backup,
-    snapshot: JSON.parse(raw),
-  };
-}
-
 export function getStateSync() {
   if (!state) {
     state = normalizeState(defaultState());
@@ -202,15 +156,6 @@ function resolveStorageStatus() {
     degraded: false,
     reason: "",
     databaseConfigured: false,
-  };
-}
-
-function sanitizeBackupState(input = {}) {
-  const { adminSessions, loginSecurity, ...safe } = input;
-  return {
-    ...safe,
-    adminSessions: {},
-    loginSecurity: defaultLoginSecurity(),
   };
 }
 
@@ -268,11 +213,6 @@ async function pruneLocalBackups() {
   await Promise.all(
     backups.slice(backupRetention).map((item) => unlink(join(backupDir, item.name)).catch(() => {})),
   );
-}
-
-function safeBackupName(name = "") {
-  const fileName = basename(String(name || ""));
-  return /^runtime-.+\.json$/.test(fileName) ? fileName : "";
 }
 
 function createPostgresStore() {
@@ -485,10 +425,6 @@ function defaultState() {
   return {
     exam,
     questions: [],
-    sessions: [],
-    candidates: [],
-    groups: [],
-    answers: {},
     paper: {
       id: null,
       name: "",
@@ -499,10 +435,8 @@ function defaultState() {
     },
     papers: [],
     generationTask: null,
-    gradingResults: {},
     adminSessions: {},
     loginSecurity: defaultLoginSecurity(),
-    proctorRules: defaultProctorRules(),
     auditLog: [
       {
         id: "log-init",
@@ -515,11 +449,6 @@ function defaultState() {
 }
 
 function normalizeState(input) {
-  const normalizedSessions = (Array.isArray(input.sessions) ? input.sessions : []).map(normalizeSession);
-  const normalizedCandidates = Array.isArray(input.candidates)
-    ? input.candidates.map(normalizeCandidate).filter(Boolean)
-    : normalizedSessions.map(candidateFromSession).filter(Boolean);
-  const normalizedGroups = Array.isArray(input.groups) ? input.groups.map(normalizeGroup).filter(Boolean) : groupsFromRows([...normalizedSessions, ...normalizedCandidates]);
   const normalizedPaper = {
     id: input.paper?.id || null,
     name: input.paper?.name || "",
@@ -529,23 +458,21 @@ function normalizeState(input) {
     buildSpec: input.paper?.buildSpec || null,
   };
   const hasDiscardableAuthoringDraft = Boolean(input.generationTask && !normalizedPaper.id && !normalizedPaper.status);
+  const hasRetiredRuntimeData = retiredRuntimeKeys.some((key) => Object.prototype.hasOwnProperty.call(input, key));
+  const sourceAuditLog = Array.isArray(input.auditLog) ? input.auditLog : [];
+  const auditLog = sourceAuditLog.filter((item) => !retiredAuditTypePattern.test(String(item?.type || "")));
   const normalized = {
     exam: input.exam || exam,
     questions: hasDiscardableAuthoringDraft ? [] : (Array.isArray(input.questions) ? input.questions : []),
-    sessions: normalizedSessions,
-    candidates: normalizedCandidates,
-    groups: normalizedGroups,
-    answers: input.answers && typeof input.answers === "object" ? input.answers : {},
     paper: hasDiscardableAuthoringDraft ? { ...normalizedPaper, questionIds: [], buildSpec: null } : normalizedPaper,
     papers: Array.isArray(input.papers) ? input.papers.map(normalizePaperSnapshot).filter(Boolean) : [],
     generationTask: hasDiscardableAuthoringDraft ? null : (input.generationTask || null),
-    gradingResults: input.gradingResults && typeof input.gradingResults === "object" ? input.gradingResults : {},
     adminSessions: input.adminSessions && typeof input.adminSessions === "object" ? input.adminSessions : {},
     loginSecurity: normalizeLoginSecurity(input.loginSecurity),
-    proctorRules: normalizeProctorRules(input.proctorRules),
-    auditLog: Array.isArray(input.auditLog) ? input.auditLog.map(normalizeAuditItem) : [],
+    auditLog,
   };
-  return stripLegacyDemoRuntimeData(normalized);
+  if (hasRetiredRuntimeData || auditLog.length !== sourceAuditLog.length) normalizedStateNeedsSave = true;
+  return stripLegacyQuestionSeed(normalized);
 }
 
 function defaultLoginSecurity() {
@@ -560,63 +487,18 @@ function normalizeLoginSecurity(input = {}) {
   };
 }
 
-function defaultProctorRules() {
-  return {
-    visibilityHidden: "中",
-    cameraMissing: "高",
-    screenUnshared: "中",
-    fullscreenExited: "中",
-    clipboard: "中",
-    requireCamera: false,
-    requireScreen: false,
-    requireFullscreen: false,
-    duplicateWindowSeconds: 10,
-  };
-}
-
-function normalizeProctorRules(input = {}) {
-  const defaults = defaultProctorRules();
-  const risk = (value, fallback) => ["低", "中", "高"].includes(value) ? value : fallback;
-  const duplicateWindowSeconds = Number(input?.duplicateWindowSeconds);
-  return {
-    visibilityHidden: risk(input?.visibilityHidden, defaults.visibilityHidden),
-    cameraMissing: risk(input?.cameraMissing, defaults.cameraMissing),
-    screenUnshared: risk(input?.screenUnshared, defaults.screenUnshared),
-    fullscreenExited: risk(input?.fullscreenExited, defaults.fullscreenExited),
-    clipboard: risk(input?.clipboard, defaults.clipboard),
-    requireCamera: Boolean(input?.requireCamera),
-    requireScreen: Boolean(input?.requireScreen),
-    requireFullscreen: Boolean(input?.requireFullscreen),
-    duplicateWindowSeconds: Number.isFinite(duplicateWindowSeconds)
-      ? Math.max(1, Math.min(300, Math.round(duplicateWindowSeconds)))
-      : defaults.duplicateWindowSeconds,
-  };
-}
-
-function stripLegacyDemoRuntimeData(normalized) {
-  const stripRuntime = isLegacyDemoOnlyRuntimeState(normalized);
+function stripLegacyQuestionSeed(normalized) {
   const stripQuestions = isOnlyLegacySeedQuestionBank(normalized) && !hasConfiguredPaper(normalized);
-  if (!stripRuntime && !stripQuestions) return normalized;
-  const auditMessages = [];
+  if (!stripQuestions) return normalized;
   const next = { ...normalized };
-  if (stripRuntime) {
-    next.sessions = [];
-    next.candidates = [];
-    next.groups = [];
-    next.answers = {};
-    auditMessages.push("默认参与者、会话、分组和答案");
-  }
-  if (stripQuestions) {
-    next.questions = [];
-    next.generationTask = null;
-    auditMessages.push("题库初始化内容");
-  }
+  next.questions = [];
+  next.generationTask = null;
   next.auditLog = [
     ...normalized.auditLog,
     {
       id: `log-strip-demo-${Date.now()}`,
       type: "system",
-      message: `已移除${auditMessages.join("、")}历史初始化数据`,
+      message: "已移除题库历史初始化数据",
       createdAt: new Date().toISOString(),
     },
   ];
@@ -628,31 +510,6 @@ function consumeNormalizedStateNeedsSave() {
   const needsSave = normalizedStateNeedsSave;
   normalizedStateNeedsSave = false;
   return needsSave;
-}
-
-function isLegacyDemoOnlyRuntimeState(state = {}) {
-  const sessionsOnlyDemo = isOnlyLegacyDemoSessions(state.sessions);
-  const candidatesOnlyDemo = isOnlyLegacyDemoCandidates(state.candidates);
-  const answersOnlyDemo = isOnlyLegacyDemoAnswers(state.answers);
-  const groupsOnlyFromDemo = isOnlyLegacyDemoGroups(state.groups, state.sessions, state.candidates);
-  const hasRuntimeDemoData = Boolean(
-    (state.sessions || []).length ||
-    (state.candidates || []).length ||
-    Object.keys(state.answers || {}).length,
-  );
-  return hasRuntimeDemoData && hasLegacySeedAudit(state) && sessionsOnlyDemo && candidatesOnlyDemo && answersOnlyDemo && groupsOnlyFromDemo;
-}
-
-function isOnlyLegacyDemoSessions(sessions = []) {
-  return sessions.every((session) => legacySeedSessionIdPattern.test(String(session.id || "")) && /^20\d{10}$/.test(String(session.ticket || "")));
-}
-
-function isOnlyLegacyDemoCandidates(candidates = []) {
-  return candidates.every((candidate) => /^20\d{10}$/.test(String(candidate.ticket || "")));
-}
-
-function isOnlyLegacyDemoAnswers(answers = {}) {
-  return Object.keys(answers || {}).every((id) => legacySeedSessionIdPattern.test(id));
 }
 
 function isOnlyLegacySeedQuestionBank(state = {}) {
@@ -670,123 +527,6 @@ function hasConfiguredPaper(state = {}) {
     (Array.isArray(state.paper?.questionIds) && state.paper.questionIds.length) ||
     (Array.isArray(state.papers) && state.papers.length),
   );
-}
-
-function isOnlyLegacyDemoGroups(groups = [], sessions = [], candidates = []) {
-  const demoGroupNames = new Set(groupsFromRows([...sessions, ...candidates]).map((group) => group.name));
-  return groups.every((group) => demoGroupNames.has(group.name));
-}
-
-function groupsFromRows(rows = []) {
-  const names = [...new Set(rows.map((item) => neutralizeGroupName(item.className || item.class || "")).filter(Boolean))];
-  return names.map((name, index) => ({
-    id: `group-${index + 1}-${stableIdPart(name)}`,
-    name,
-    description: "",
-    createdAt: new Date().toISOString(),
-    updatedAt: null,
-  }));
-}
-
-function normalizeGroup(item) {
-  if (!item || typeof item !== "object") return null;
-  const name = neutralizeGroupName(item.name || item.className || "");
-  if (!name) return null;
-  return {
-    id: item.id || `group-${stableIdPart(name)}`,
-    name,
-    description: String(item.description || item.remark || "").trim(),
-    createdAt: item.createdAt || new Date().toISOString(),
-    updatedAt: item.updatedAt || null,
-  };
-}
-
-function stableIdPart(value) {
-  return Buffer.from(String(value || "group")).toString("hex").slice(0, 16) || "group";
-}
-
-function candidateFromSession(session) {
-  if (!session?.candidate || !session?.ticket) return null;
-  return normalizeCandidate({
-    id: `cand-${session.ticket}`,
-    candidate: session.candidate,
-    ticket: session.ticket,
-    className: session.className || "",
-    createdAt: session.assignedAt || session.createdAt,
-  });
-}
-
-function normalizeCandidate(item) {
-  if (!item || typeof item !== "object") return null;
-  const candidate = neutralizePersonName(item.candidate || item.name || "", item.ticket);
-  const ticket = String(item.ticket || "").trim();
-  if (!candidate || !ticket) return null;
-  return {
-    id: item.id || `cand-${ticket}`,
-    candidate,
-    ticket,
-    className: neutralizeGroupName(item.className || item.class || ""),
-    phone: String(item.phone || "").trim(),
-    email: String(item.email || "").trim(),
-    description: String(item.description || item.remark || "").trim(),
-    avatar: String(item.avatar || "").trim(),
-    passwordHash: item.passwordHash || null,
-    passwordUpdatedAt: item.passwordUpdatedAt || null,
-    passwordMustChange: Boolean(item.passwordMustChange),
-    loginToken: item.loginToken || null,
-    loginTokenExpiresAt: item.loginTokenExpiresAt || null,
-    lastLoginAt: item.lastLoginAt || null,
-    disabledAt: item.disabledAt || null,
-    tags: Array.isArray(item.tags) ? item.tags : [],
-    createdAt: item.createdAt || new Date().toISOString(),
-    updatedAt: item.updatedAt || null,
-  };
-}
-
-function normalizeAuditItem(item) {
-  if (!item || typeof item !== "object") return item;
-  return {
-    ...item,
-    message: neutralizeText(item.message),
-  };
-}
-
-function neutralizeText(value) {
-  return String(value || "").replace(legacyPersonNamePattern, "参与者");
-}
-
-function normalizeSession(item) {
-  const time = item.time || `${item.startTime || "10:00"}-${item.endTime || "11:30"}`;
-  const [startTime = "10:00", endTime = "11:30"] = String(time).split("-");
-  return {
-    ...item,
-    candidate: neutralizePersonName(item.candidate || item.name || "", item.ticket),
-    className: neutralizeGroupName(item.className || item.class || ""),
-    remark: String(item.remark || item.description || "").trim(),
-    paper: item.paperName || item.paper || "未绑定试卷",
-    paperId: item.paperId || null,
-    paperName: item.paperName || item.paper || "未绑定试卷",
-    paperVariant: item.paperVariant || null,
-    paperSnapshotVersion: item.paperSnapshotVersion || null,
-    startTime: item.startTime || startTime,
-    endTime: item.endTime || endTime,
-    time,
-    accessToken: item.accessToken || null,
-    assignedAt: item.assignedAt || item.createdAt || null,
-  };
-}
-
-function neutralizePersonName(value, ticket = "") {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  if (legacyPersonPattern.test(text)) return `参与者 ${String(ticket || "").slice(-2) || ""}`.trim();
-  return text;
-}
-
-function neutralizeGroupName(value) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  return text.replaceAll(legacyClassNameToken, "分组").replaceAll(legacyClassToken, "组");
 }
 
 function normalizePaperSnapshot(item) {

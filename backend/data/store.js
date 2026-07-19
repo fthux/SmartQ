@@ -17,7 +17,3 @@ export const exam = {
 };
 
 export const questions = [];
-
-export const sessions = [];
-
-export const answers = new Map();

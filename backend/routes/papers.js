@@ -1,0 +1,112 @@
+import { buildPaper, saveFormalPaper } from "../lib/ai.js";
+import { logItem } from "../lib/audit.js";
+import { readJson, sendJson } from "../lib/http.js";
+import { updateState } from "../lib/runtime-store.js";
+import { paperSnapshotDetail, upsertPaperSnapshot } from "../services/paper-service.js";
+
+export async function handlePaperRoutes(req, res, url, state) {
+  if (req.method === "POST" && url.pathname === "/api/papers/build") {
+    const body = await readJson(req);
+    const paper = await updateState((current) => {
+      const saved = saveFormalPaper(current.questions, {
+        ...current.paper,
+        id: `paper-${Date.now()}`,
+        name: body.name || current.generationTask?.paperName || current.paper.name || "未命名试卷",
+      });
+      if (saved.error) return saved;
+      current.paper = {
+        ...current.paper,
+        id: saved.id,
+        name: saved.name,
+        status: "草稿",
+        questionIds: saved.questionIds,
+        buildSpec: saved.buildSpec,
+        publishedAt: null,
+      };
+      upsertPaperSnapshot(current, buildPaper(current.questions, current.paper));
+      current.auditLog.push(logItem("paper-save", `保存试卷：${saved.name}，${saved.questionCount} 题 / ${saved.score} 分`));
+      return buildPaper(current.questions, current.paper);
+    });
+    if (paper.error) sendJson(res, 409, paper);
+    else sendJson(res, 200, paper);
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/papers/publish") {
+    const paper = await updateState((current) => {
+      if (!current.paper.id || !["草稿", "未发布", "已保存", "已组卷", "已发布"].includes(current.paper.status)) {
+        return { error: "请先保存试卷", paperStatus: current.paper.status };
+      }
+      const ids = new Set(current.paper.questionIds || []);
+      const paperQuestions = current.questions.filter((item) => ids.has(item.id));
+      const pending = paperQuestions.filter((item) => item.status !== "已校验").length;
+      if (pending) return { error: `试卷内还有 ${pending} 道题待审核`, pending };
+      if (!paperQuestions.length) return { error: "当前试卷没有题目，请先保存试卷" };
+      current.paper.status = "已发布";
+      current.paper.publishedAt = new Date().toISOString();
+      upsertPaperSnapshot(current, buildPaper(current.questions, current.paper));
+      current.auditLog.push(logItem("paper-publish", `${current.paper.name} 已发布`));
+      return buildPaper(current.questions, current.paper);
+    });
+    if (paper.error) sendJson(res, 409, paper);
+    else sendJson(res, 200, paper);
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/api/papers/") && url.pathname.endsWith("/activate")) {
+    const id = url.pathname.split("/").at(-2);
+    const paper = await updateState((current) => {
+      const target = (current.papers || []).find((item) => item.id === id);
+      if (!target) return null;
+      current.paper = {
+        id: target.id,
+        name: target.name,
+        status: target.status,
+        publishedAt: target.publishedAt || null,
+        questionIds: target.questionIds || [],
+        buildSpec: target.buildSpec || null,
+      };
+      const targetQuestions = paperSnapshotDetail(target, current.questions).questions;
+      if (targetQuestions.length) {
+        current.questions = targetQuestions.map((question, index) => ({
+          ...question,
+          id: question.id || `q-${String(index + 1).padStart(3, "0")}`,
+        }));
+        current.paper.questionIds = current.questions.map((question) => question.id);
+      }
+      current.auditLog.push(logItem("paper-activate", `${target.name} 已设为当前试卷`));
+      return buildPaper(current.questions, current.paper);
+    });
+    if (!paper) sendJson(res, 404, { error: "Paper Not Found" });
+    else sendJson(res, 200, paper);
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname.startsWith("/api/papers/")) {
+    const id = url.pathname.split("/").pop();
+    const target = (state.papers || []).find((item) => item.id === id);
+    if (!target) sendJson(res, 404, { error: "Paper Not Found" });
+    else sendJson(res, 200, paperSnapshotDetail(target, state.questions));
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/papers/")) {
+    const id = url.pathname.split("/").pop();
+    const result = await updateState((current) => {
+      const index = (current.papers || []).findIndex((item) => item.id === id);
+      if (index < 0) return null;
+      const [deleted] = current.papers.splice(index, 1);
+      if (current.paper.id === id) {
+        current.paper = { id: null, name: "", status: null, publishedAt: null, questionIds: [], buildSpec: null };
+        current.questions = [];
+        current.generationTask = null;
+      }
+      current.auditLog.push(logItem("paper-delete", `删除试卷：${deleted.name}`));
+      return { deleted: true, paper: deleted };
+    });
+    if (!result) sendJson(res, 404, { error: "Paper Not Found" });
+    else sendJson(res, 200, result);
+    return true;
+  }
+  return false;
+}

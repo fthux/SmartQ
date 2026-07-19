@@ -49,19 +49,32 @@ try {
   const nestedShell = await getText("/smartq/");
   assert(nestedShell.includes('<div id="app"') && nestedShell.includes("assets/app.js"), "subdirectory path serves the Vue app shell");
   const appJs = await getText("/assets/app.js");
-  assert(appJs.includes('aria-label="管理功能导航"') && appJs.includes('data-admin-route-content'), "frontend keeps the management sidebar layout");
-  assert(appJs.includes('window.scrollTo({ top: 0, left: 0, behavior: "auto" });'), "frontend resets scroll on module switches");
-  assert(appJs.includes("出题制卷") && appJs.includes("已出卷子"), "frontend keeps authoring and paper UI");
-  assert(appJs.indexOf('{ key: "papers"') < appJs.indexOf('{ key: "authoring"'), "paper management is the first navigation item");
-  assert(appJs.includes('return ["authoring", "papers"].includes(route) ? route : "papers";'), "papers is the default route");
-  assert(appJs.includes('if (route === "papers") return "";'), "papers uses the root URL");
-  assert(!/控制台首页|数据维护|运营会话|审计日志|自动备份历史/.test(appJs), "frontend removes the console homepage and maintenance UI");
-  assert(!/参与者管理|试卷分配|监考工作台|阅卷分析|考生系统/.test(appJs), "frontend removes retired navigation and pages");
-  assert(!/#\/candidate|\/api\/candidate\/|\/api\/participants|\/api\/assignments|\/api\/proctor|\/api\/grading|\/api\/analysis/.test(appJs), "frontend removes retired routes and API calls");
-  assert(appJs.includes("cleanupLegacyServiceWorkers") && appJs.includes("registration.unregister()"), "frontend still clears legacy service workers");
-  assert(appJs.includes("paperTypeConfig") && appJs.includes("computedSpecTotalScore"), "frontend keeps paper score calculation");
-  assert(appJs.includes('paperPageSize: 20') && appJs.includes('aria-label="试卷状态筛选"'), "paper management uses the dense list controls");
-  assert(appJs.includes('aria-label="试卷详情抽屉"') && appJs.includes("paperDetailMode"), "paper details open in the responsive drawer");
+  const frontendFiles = [
+    "/assets/components/ConsoleShell.js",
+    "/assets/components/PaperDetailDrawer.js",
+    "/assets/core/public-path.js",
+    "/assets/core/router.js",
+    "/assets/pages/AuthoringPage.js",
+    "/assets/pages/PapersPage.js",
+    "/assets/stores/app-store.js",
+    "/assets/stores/authoring-store.js",
+  ];
+  const frontendSources = await Promise.all(frontendFiles.map((path) => getText(path)));
+  const frontend = [appJs, ...frontendSources].join("\n");
+  assert(appJs.includes('import { AppRoot }') && appJs.includes('mount("#app")'), "frontend entry only mounts the root component");
+  assert(frontend.includes('aria-label="管理功能导航"') && frontend.includes('data-admin-route-content'), "frontend keeps the management sidebar layout");
+  assert(frontend.includes('window.scrollTo({ top: 0, left: 0, behavior: "auto" });'), "frontend resets scroll on module switches");
+  assert(frontend.includes("出题制卷") && frontend.includes("已出卷子"), "frontend keeps authoring and paper UI");
+  assert(frontend.indexOf('{ key: "papers"') < frontend.indexOf('{ key: "authoring"'), "paper management is the first navigation item");
+  assert(frontend.includes('return ["authoring", "papers"].includes(route) ? route : "papers";'), "papers is the default route");
+  assert(frontend.includes('if (route === "papers") return "";'), "papers uses the root URL");
+  assert(!/控制台首页|数据维护|运营会话|审计日志|自动备份历史/.test(frontend), "frontend removes the console homepage and maintenance UI");
+  assert(!/参与者管理|试卷分配|监考工作台|阅卷分析|考生系统/.test(frontend), "frontend removes retired navigation and pages");
+  assert(!/#\/candidate|\/api\/candidate\/|\/api\/participants|\/api\/assignments|\/api\/proctor|\/api\/grading|\/api\/analysis/.test(frontend), "frontend removes retired routes and API calls");
+  assert(frontend.includes("cleanupLegacyServiceWorkers") && frontend.includes("registration.unregister()"), "frontend still clears legacy service workers");
+  assert(frontend.includes("paperTypeConfig") && frontend.includes("computedSpecTotalScore"), "frontend keeps paper score calculation");
+  assert(frontend.includes('paperPageSize: 20') && frontend.includes('aria-label="试卷状态筛选"'), "paper management uses the dense list controls");
+  assert(frontend.includes('aria-label="试卷详情抽屉"') && frontend.includes("paperDetailMode"), "paper details open in the responsive drawer");
 
   const blockedDashboard = await getJson("/api/dashboard", { expectedStatus: 401 });
   assert(blockedDashboard.error.includes("运营控制台"), "dashboard requires admin login");

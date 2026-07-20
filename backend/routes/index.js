@@ -31,10 +31,10 @@ export async function handleApi(req, res, url) {
 
   if (await handleAdminRoutes(req, res, url, state, auth, token)) return;
   if (await handleAdminUserRoutes(req, res, url, state, auth, token)) return;
-  if (handleDashboardRoute(req, res, url, state)) return;
+  if (handleDashboardRoute(req, res, url, state, auth)) return;
   if (await handleQuestionBankRoutes(req, res, url, state, auth)) return;
   if (await handleMaterialRoutes(req, res, url, state, auth)) return;
   if (await handleAuthoringRoutes(req, res, url, state, auth)) return;
-  if (await handlePaperRoutes(req, res, url, state)) return;
+  if (await handlePaperRoutes(req, res, url, state, auth)) return;
   sendJson(res, 404, { error: "Not Found" });
 }

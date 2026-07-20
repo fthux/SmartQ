@@ -8,6 +8,11 @@ import { exam } from "../data/store.js";
 import { normalizeQuestionBankRecord } from "./question-utils.js";
 import { normalizeCategoryIds, normalizeQuestionBankCategory } from "./question-bank-categories.js";
 import { initializeAdminUsers } from "../services/admin-user-service.js";
+import {
+  emptyAuthoringPaper,
+  initializeAuthoringWorkspaces,
+  normalizeAuthoringWorkspaces,
+} from "../services/authoring-workspace-service.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dataFile = process.env.SMARTQ_DATA_FILE || join(root, "data", "runtime.json");
@@ -34,6 +39,7 @@ export async function loadState() {
     if (loaded) {
       state = normalizeState(loaded);
       if (await initializeAdminUsers(state)) normalizedStateNeedsSave = true;
+      if (initializeAuthoringWorkspaces(state)) normalizedStateNeedsSave = true;
       if (consumeNormalizedStateNeedsSave()) {
         await saveState({ forceBackup: true, reason: "normalize-runtime" });
       }
@@ -45,12 +51,14 @@ export async function loadState() {
     const raw = await readFile(dataFile, "utf8");
     state = normalizeState(JSON.parse(raw));
     if (await initializeAdminUsers(state)) normalizedStateNeedsSave = true;
+    if (initializeAuthoringWorkspaces(state)) normalizedStateNeedsSave = true;
     if (consumeNormalizedStateNeedsSave()) {
       await saveState({ forceBackup: true, reason: "normalize-runtime" });
     }
   } catch {
     state = normalizeState(defaultState());
     await initializeAdminUsers(state);
+    initializeAuthoringWorkspaces(state);
     consumeNormalizedStateNeedsSave();
     await saveState();
   }
@@ -432,17 +440,8 @@ function defaultState() {
   return {
     exam,
     questions: [],
-    paper: {
-      id: null,
-      name: "",
-      status: null,
-      publishedAt: null,
-      questionIds: [],
-      buildSpec: null,
-      sourcePlanSnapshot: null,
-      categoryId: "",
-      categorySnapshot: null,
-    },
+    paper: emptyAuthoringPaper(),
+    authoringWorkspaces: {},
     papers: [],
     questionBank: [],
     questionBankCategories: [],
@@ -471,23 +470,24 @@ function normalizeState(input) {
     questionIds: Array.isArray(input.paper?.questionIds) ? input.paper.questionIds : [],
     buildSpec: input.paper?.buildSpec || null,
     sourcePlanSnapshot: input.paper?.sourcePlanSnapshot || input.paper?.buildSpec?.sourcePlanSnapshot || null,
+    generationSpecSnapshot: input.paper?.generationSpecSnapshot || null,
     categoryId: String(input.paper?.categoryId || ""),
     categorySnapshot: normalizeCategorySnapshot(input.paper?.categorySnapshot),
   };
-  const hasDiscardableAuthoringDraft = Boolean(input.generationTask && !normalizedPaper.id && !normalizedPaper.status);
   const hasRetiredRuntimeData = retiredRuntimeKeys.some((key) => Object.prototype.hasOwnProperty.call(input, key));
   const hasPendingQuestionBankItems = Array.isArray(input.questionBank) && input.questionBank.some((item) => item?.status === "待确认");
   const sourceAuditLog = Array.isArray(input.auditLog) ? input.auditLog : [];
   const auditLog = sourceAuditLog.filter((item) => !retiredAuditTypePattern.test(String(item?.type || "")));
   const normalized = {
     exam: input.exam || exam,
-    questions: hasDiscardableAuthoringDraft ? [] : (Array.isArray(input.questions) ? input.questions : []),
-    paper: hasDiscardableAuthoringDraft ? { ...normalizedPaper, questionIds: [], buildSpec: null, sourcePlanSnapshot: null } : normalizedPaper,
+    questions: Array.isArray(input.questions) ? input.questions : [],
+    paper: normalizedPaper,
+    authoringWorkspaces: normalizeAuthoringWorkspaces(input.authoringWorkspaces),
     papers: Array.isArray(input.papers) ? input.papers.map(normalizePaperSnapshot).filter(Boolean) : [],
     questionBank: Array.isArray(input.questionBank) ? input.questionBank.map(normalizeQuestionBankRecord).filter(Boolean) : [],
     questionBankCategories: Array.isArray(input.questionBankCategories) ? input.questionBankCategories.map(normalizeQuestionBankCategory).filter(Boolean) : [],
     sourceMaterials: Array.isArray(input.sourceMaterials) ? input.sourceMaterials.map(normalizeSourceMaterial).filter(Boolean) : [],
-    generationTask: hasDiscardableAuthoringDraft ? null : (input.generationTask || null),
+    generationTask: input.generationTask || null,
     adminSessions: input.adminSessions && typeof input.adminSessions === "object" ? input.adminSessions : {},
     adminUsers: Array.isArray(input.adminUsers) ? input.adminUsers : [],
     ...(input.adminProfiles && typeof input.adminProfiles === "object" ? { adminProfiles: normalizeAdminProfiles(input.adminProfiles) } : {}),
@@ -600,10 +600,37 @@ function normalizePaperSnapshot(item) {
     questions: Array.isArray(item.questions) ? item.questions : [],
     buildSpec: item.buildSpec || null,
     sourcePlanSnapshot: item.sourcePlanSnapshot || item.buildSpec?.sourcePlanSnapshot || null,
+    generationSpecSnapshot: item.generationSpecSnapshot || null,
     categoryId: String(item.categoryId || ""),
     categorySnapshot: normalizeCategorySnapshot(item.categorySnapshot),
     publishedAt: item.publishedAt || null,
     createdAt: item.createdAt || item.buildSpec?.builtAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || item.publishedAt || item.createdAt || item.buildSpec?.builtAt || new Date().toISOString(),
+    publishedVersions: Array.isArray(item.publishedVersions)
+      ? item.publishedVersions.map(normalizePublishedPaperVersion).filter(Boolean)
+      : [],
+  };
+}
+
+function normalizePublishedPaperVersion(item) {
+  if (!item || typeof item !== "object" || !item.id || !item.publishedAt) return null;
+  return {
+    id: String(item.id),
+    name: String(item.name || "未命名试卷"),
+    status: "已发布",
+    score: Number(item.score || 0),
+    questionCount: Number(item.questionCount || 0),
+    typeGroups: item.typeGroups && typeof item.typeGroups === "object" ? item.typeGroups : {},
+    questionIds: Array.isArray(item.questionIds) ? item.questionIds : [],
+    questions: Array.isArray(item.questions) ? item.questions : [],
+    buildSpec: item.buildSpec || null,
+    sourcePlanSnapshot: item.sourcePlanSnapshot || item.buildSpec?.sourcePlanSnapshot || null,
+    generationSpecSnapshot: item.generationSpecSnapshot || null,
+    categoryId: String(item.categoryId || ""),
+    categorySnapshot: normalizeCategorySnapshot(item.categorySnapshot),
+    publishedAt: item.publishedAt,
+    createdAt: item.createdAt || item.publishedAt,
+    updatedAt: item.updatedAt || item.publishedAt,
   };
 }
 

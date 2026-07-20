@@ -17,6 +17,10 @@ export function questionFingerprint(question = {}) {
     options: normalizeOptions(question.options, type).map(normalizeFingerprintText),
     answer: normalizeFingerprintAnswer(question.answer, type),
     rubric: normalizeStringList(question.rubric).map(normalizeFingerprintText),
+    explanation: normalizeFingerprintText(question.explanation),
+    defaultScore: clampNumber(question.defaultScore ?? question.score, 1, 200, 1),
+    difficulty: questionDifficulties.includes(question.difficulty) ? question.difficulty : "中",
+    knowledge: normalizeStringList(question.knowledge).map(normalizeFingerprintText),
   };
 }
 

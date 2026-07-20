@@ -29,6 +29,9 @@ export async function request(path, options = {}) {
     const error = new Error(message);
     error.status = response.status;
     error.payload = payload;
+    if (response.status === 401 && !options.skipAuth && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("smartq:unauthorized", { detail: { path, error } }));
+    }
     throw error;
   }
   return response.json();

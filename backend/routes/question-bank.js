@@ -17,6 +17,7 @@ import {
 
 export async function handleQuestionBankRoutes(req, res, url, state, auth) {
   const actor = auth?.user?.username || "";
+  const userId = auth?.user?.id || "";
   if (req.method === "GET" && url.pathname === "/api/question-bank/categories") {
     sendJson(res, 200, listQuestionBankCategories(state));
     return true;
@@ -52,7 +53,7 @@ export async function handleQuestionBankRoutes(req, res, url, state, auth) {
     return true;
   }
   if (req.method === "POST" && url.pathname === "/api/question-bank/import") {
-    const result = await importQuestionsToBank(await readJson(req), actor);
+    const result = await importQuestionsToBank(await readJson(req), actor, userId);
     if (!result) sendJson(res, 404, { error: "试卷不存在" });
     else sendJson(res, 200, result);
     return true;

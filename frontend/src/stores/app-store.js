@@ -36,6 +36,7 @@ export function createAppStore() {
       dashboard: null,
       dashboardError: "",
       loading: true,
+      systemLimits: { materialFileMaxBytes: 8 * 1024 * 1024 },
       toast: null,
       admin: {
         token: localStorage.getItem("smartqAdminToken") || "",
@@ -218,9 +219,11 @@ export function createAppStore() {
       editingPaperId: null,
       authoringPaperId: currentAuthoringPaperId(),
       authoringNewDraftActive: false,
+      authoringCreateMode: false,
       spec: freshSpec(),
       specFormErrors: {},
     });
+    let dashboardRequestSequence = 0;
 
     const navItems = [
       { key: "papers", label: "已出卷子", icon: "files" },
@@ -324,7 +327,7 @@ export function createAppStore() {
       if (state.paperSort === "name") {
         return rows.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
       }
-      return rows.sort((a, b) => new Date(b.publishedAt || b.createdAt || 0) - new Date(a.publishedAt || a.createdAt || 0));
+      return rows.sort((a, b) => new Date(b.updatedAt || b.publishedAt || b.createdAt || 0) - new Date(a.updatedAt || a.publishedAt || a.createdAt || 0));
     });
     const filteredPaperRows = computed(() => {
       const keyword = String(state.paperSearch || "").trim().toLowerCase();
@@ -376,6 +379,7 @@ export function createAppStore() {
       canAccessRoute: (...args) => canAccessRoute(...args),
       go: (...args) => go(...args),
       mountIcons,
+      resetSessionState,
     });
     const {
       applyAdminUserFilters,
@@ -494,22 +498,27 @@ export function createAppStore() {
         return;
       }
       const token = state.admin.token;
+      const requestSequence = ++dashboardRequestSequence;
       state.loading = true;
       try {
         const dashboard = await request("/api/dashboard");
-        if (state.admin.token !== token) return;
+        if (state.admin.token !== token || requestSequence !== dashboardRequestSequence) return;
         state.dashboard = dashboard;
         state.dashboardError = "";
         if (!canAccessRoute(state.route)) go("papers");
         state.paperPage = Math.min(state.paperPage, Math.max(1, Math.ceil((dashboard.papers || []).length / state.paperPageSize) || 1));
+        if (state.route === "authoring" && !state.authoringPaperId && !state.authoringCreateMode) {
+          state.authoringNewDraftActive = Boolean(!dashboard.paper?.id && dashboard.questions?.length);
+          if (state.authoringNewDraftActive) syncRecoveredDraftSpec(dashboard.generationTask);
+        }
       } catch (error) {
-        if (state.admin.token !== token) return;
+        if (state.admin.token !== token || requestSequence !== dashboardRequestSequence) return;
         console.warn("Dashboard data load failed:", error);
         handleAdminAuthError(error);
         state.dashboardError = error.message || "控制台数据加载失败";
         if (!state.dashboard) notify("控制台数据加载失败：" + state.dashboardError);
       } finally {
-        if (state.admin.token === token) state.loading = false;
+        if (state.admin.token === token && requestSequence === dashboardRequestSequence) state.loading = false;
         mountIcons();
       }
     }
@@ -526,6 +535,7 @@ export function createAppStore() {
         state.authoringPaperId = params.paperid || params.paperId || params.papeid || "";
         state.editingPaperId = state.authoringPaperId || null;
         state.authoringNewDraftActive = false;
+        state.authoringCreateMode = !state.authoringPaperId;
         state.publishQualityFailures = [];
         if (!state.authoringPaperId) {
           state.generatedDraft = null;
@@ -561,6 +571,81 @@ export function createAppStore() {
       else history.replaceState(null, "", `${location.pathname}${location.search}`);
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
       mountIcons();
+    }
+
+    function syncRecoveredDraftSpec(spec) {
+      if (!spec || typeof spec !== "object") return;
+      state.spec = freshSpec({
+        ...spec,
+        knowledge: Array.isArray(spec.knowledge) ? spec.knowledge.join("，") : spec.knowledge || "",
+        sourceMode: spec.sourcePlan?.mode || "ai-only",
+        questionBankIds: spec.sourcePlan?.questionBankIds || [],
+        questionBankItems: spec.sourcePlan?.questionBankItems || [],
+        materialIds: spec.sourcePlan?.materialIds || [],
+        materialQuestionCount: spec.sourcePlan?.materialQuestionCount || 0,
+      });
+      state.activeWorkflowStep = "edit";
+    }
+
+    function resetSessionState() {
+      dashboardRequestSequence += 1;
+      if (state.generationTimer) clearInterval(state.generationTimer);
+      sessionStorage.removeItem("smartqAuthoringSpec");
+      Object.assign(state, {
+        dashboard: null,
+        dashboardError: "",
+        loading: false,
+        generatedDraft: null,
+        regeneratingDraft: false,
+        activeWorkflowStep: "config",
+        saving: false,
+        publishing: false,
+        publishQualityFailures: [],
+        generating: false,
+        generationProgress: 0,
+        generationStage: "",
+        generationError: "",
+        generationStartedAt: 0,
+        generationTimer: null,
+        selectedPaperId: null,
+        selectedPaperDetail: null,
+        paperDetailLoading: false,
+        paperActionMenuId: null,
+        confirmDeletePaper: null,
+        editingQuestion: null,
+        questionEditForm: null,
+        questionEditErrors: {},
+        editingPaperId: null,
+        authoringPaperId: "",
+        authoringNewDraftActive: false,
+        authoringCreateMode: false,
+        spec: freshSpec(),
+        specFormErrors: {},
+      });
+      Object.assign(state.questionAi, {
+        loading: false,
+        operation: "",
+        customPrompt: "",
+        candidate: null,
+        changedFields: [],
+        warnings: [],
+        error: "",
+        previousForm: null,
+        appliedOperation: "",
+      });
+      Object.assign(state.materialManagement, {
+        items: [], options: [], total: 0, selectorOpen: false, editorOpen: false,
+        editingId: null, detailOpen: false, detail: null, usages: [], formError: "",
+      });
+      Object.assign(state.questionBankManagement, {
+        categories: [], categoryTree: [], items: [], total: 0, selectedRows: [],
+        categoryDrawerOpen: false, categoryEditorOpen: false, bulkOpen: false,
+        editorOpen: false, detailOpen: false, detail: null,
+      });
+      Object.assign(state.questionBankManagement.picker, { open: false, items: [], total: 0, selection: [] });
+      Object.assign(state.userManagement, {
+        items: [], total: 0, editorOpen: false, editingId: null, resetOpen: false, resetUser: null,
+      });
     }
 
     function canAccessRoute(route) {
@@ -609,6 +694,10 @@ export function createAppStore() {
         if (event.key === "Escape" && state.selectedPaperId) clearSelectedPaper();
       });
       initializeLayout();
+      window.addEventListener("smartq:unauthorized", (event) => handleAdminAuthError(event.detail?.error));
+      request("/api/health", { skipAuth: true }).then((health) => {
+        state.systemLimits.materialFileMaxBytes = Number(health.limits?.materialFileMaxBytes || state.systemLimits.materialFileMaxBytes);
+      }).catch(() => {});
       if (state.route === "authoring" && state.authoringPaperId) state.activeWorkflowStep = "edit";
       await loadAdminSession();
       await refresh();

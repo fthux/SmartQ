@@ -13,6 +13,7 @@ export function normalizeQuestionBankCategory(item = {}) {
     updatedBy: String(item.updatedBy || item.createdBy || ""),
     createdAt: item.createdAt || now,
     updatedAt: item.updatedAt || item.createdAt || now,
+    archivedByCategoryIds: normalizeCategoryIds(item.archivedByCategoryIds),
   };
 }
 

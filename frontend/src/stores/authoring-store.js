@@ -142,7 +142,7 @@ export function createAuthoringStore({
         body: JSON.stringify({
           questions: generated.questions,
           spec: generated.spec,
-          paperId: state.authoringPaperId || state.dashboard?.paper?.id || "",
+          paperId: state.authoringPaperId || "",
         }),
       });
       const builtPaper = await request("/api/papers/build", {
@@ -158,6 +158,7 @@ export function createAuthoringStore({
       state.editingPaperId = builtPaper.id;
       await refresh();
       state.authoringNewDraftActive = false;
+      state.authoringCreateMode = false;
       syncSpecFromActiveDraft();
       state.publishQualityFailures = [];
       state.activeWorkflowStep = "edit";
@@ -245,6 +246,7 @@ export function createAuthoringStore({
       state.authoringPaperId = builtPaper.id;
       state.editingPaperId = builtPaper.id;
       state.authoringNewDraftActive = false;
+      state.authoringCreateMode = false;
       await refresh();
       go("authoring", { paperid: builtPaper.id });
       state.activeWorkflowStep = options.nextStep || "edit";

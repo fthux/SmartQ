@@ -7,7 +7,7 @@ import { resolveGenerationQuestionBank } from "./question-bank-service.js";
 const generationJobs = new Map();
 const generationJobTtlMs = 30 * 60 * 1000;
 
-export function startGenerationJob(spec = {}) {
+export function startGenerationJob(spec = {}, ownerUserId = "") {
   cleanupGenerationJobs();
   const now = new Date().toISOString();
   const job = {
@@ -19,16 +19,17 @@ export function startGenerationJob(spec = {}) {
     updatedAt: now,
     result: null,
     error: null,
+    ownerUserId: String(ownerUserId || ""),
   };
   generationJobs.set(job.id, job);
   runGenerationJob(job, spec);
   return publicGenerationJob(job);
 }
 
-export function getGenerationJob(id) {
+export function getGenerationJob(id, ownerUserId = "") {
   cleanupGenerationJobs();
   const job = generationJobs.get(id);
-  return job ? publicGenerationJob(job) : null;
+  return job && job.ownerUserId === String(ownerUserId || "") ? publicGenerationJob(job) : null;
 }
 
 async function runGenerationJob(job, spec) {

@@ -25,7 +25,7 @@ export function listMaterials(state, query = {}) {
   const keyword = String(query.search || query.keyword || "").trim().toLowerCase();
   const status = String(query.status || "").trim();
   const page = clampNumber(query.page, 1, 10_000, 1);
-  const pageSize = clampNumber(query.pageSize, 1, 100, 20);
+  const pageSize = clampNumber(query.pageSize, 1, 1000, 20);
   const usages = materialUsageMap(state);
   const rows = (state.sourceMaterials || [])
     .filter((item) => !status || item.status === status)

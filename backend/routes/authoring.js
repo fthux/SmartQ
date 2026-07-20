@@ -1,4 +1,4 @@
-import { repairQuestions, transformQuestionWithAi, validateQuestions } from "../lib/ai.js";
+import { repairQuestions, transformQuestionWithAi, validateGenerationSpec, validateQuestions } from "../lib/ai.js";
 import { logItem } from "../lib/audit.js";
 import { readJson, sendJson } from "../lib/http.js";
 import { updateState } from "../lib/runtime-store.js";
@@ -7,17 +7,20 @@ import { importQuestionBankIntoAuthoring } from "../services/question-bank-servi
 import { questionContentChanged, upsertPaperSnapshot } from "../services/paper-service.js";
 import { buildPaper } from "../lib/ai.js";
 import { activeLeafCategory, categorySnapshotForId } from "../lib/question-bank-categories.js";
+import { scopedAuthoringState } from "../services/authoring-workspace-service.js";
 
 export async function handleAuthoringRoutes(req, res, url, state, auth) {
+  const userId = auth?.user?.id;
+  const scopedState = scopedAuthoringState(state, userId);
   if (req.method === "POST" && url.pathname === "/api/ai/generate-questions") {
     const body = await readJson(req);
-    sendJson(res, 202, startGenerationJob(body));
+    sendJson(res, 202, startGenerationJob(body, userId));
     return true;
   }
 
   if (req.method === "GET" && url.pathname.startsWith("/api/ai/generation-jobs/")) {
     const id = decodeURIComponent(url.pathname.split("/").pop() || "");
-    const job = getGenerationJob(id);
+    const job = getGenerationJob(id, userId);
     if (!job) {
       sendJson(res, 404, { error: "出题任务不存在或已过期" });
       return true;
@@ -40,43 +43,54 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
       return true;
     }
     const checks = validateQuestions(questions);
+    const specChecks = validateGenerationSpec(questions, spec);
+    if (specChecks.failures.length) {
+      sendJson(res, 409, {
+        error: "生成结果与命题配置不一致，请重新生成",
+        failures: specChecks.failures,
+        checks: { ...checks, specPass: false, specFailures: specChecks.failures },
+      });
+      return true;
+    }
     await updateState((current) => {
-      const activePaper = paperId && current.paper?.id === paperId
-        ? current.paper
-        : paperId ? (current.papers || []).find((item) => item.id === paperId) : null;
-      current.questions = questions.map((item, index) => ({
+      const currentState = scopedAuthoringState(current, userId);
+      const activePaper = paperId && currentState.paper?.id === paperId
+        ? currentState.paper
+        : paperId ? (currentState.papers || []).find((item) => item.id === paperId) : null;
+      currentState.questions = questions.map((item, index) => ({
         ...item,
         id: item.id || `q-${String(index + 1).padStart(3, "0")}`,
         quality: item.quality || 90,
         status: item.status || "待确认",
       }));
-      current.generationTask = spec;
-      current.paper = {
+      currentState.generationTask = spec;
+      currentState.paper = {
         id: activePaper?.id || null,
         name: activePaper?.name || spec.paperName || "",
         status: activePaper?.id ? "草稿" : null,
         publishedAt: null,
-        questionIds: activePaper?.id ? current.questions.map((item) => item.id) : [],
+        questionIds: activePaper?.id ? currentState.questions.map((item) => item.id) : [],
         buildSpec: activePaper?.buildSpec || null,
         sourcePlanSnapshot: spec.sourcePlan || null,
+        generationSpecSnapshot: spec,
         categoryId: String(spec.categoryId || ""),
         categorySnapshot: categorySnapshotForId(current, spec.categoryId),
       };
-      current.auditLog.push(logItem("ai-draft-save", `保存「${spec.paperName || "未命名试卷"}」试卷内容 ${current.questions.length} 道，稳定性 ${checks.stabilityScore}`));
+      currentState.auditLog.push(logItem("ai-draft-save", `保存「${spec.paperName || "未命名试卷"}」试卷内容 ${currentState.questions.length} 道，稳定性 ${checks.stabilityScore}`));
     });
     sendJson(res, 200, { saved: true, questions, spec, checks });
     return true;
   }
 
   if (req.method === "POST" && url.pathname === "/api/authoring/questions/import") {
-    const result = await importQuestionBankIntoAuthoring(await readJson(req), auth?.user?.username || "");
+    const result = await importQuestionBankIntoAuthoring(await readJson(req), auth?.user?.username || "", userId);
     sendJson(res, 200, result);
     return true;
   }
 
   if (req.method === "POST" && url.pathname.startsWith("/api/questions/") && url.pathname.endsWith("/ai-transform")) {
     const id = decodeURIComponent(url.pathname.split("/").at(-2) || "");
-    const question = state.questions.find((item) => item.id === id);
+    const question = scopedState.questions.find((item) => item.id === id);
     if (!question) {
       sendJson(res, 404, { error: "Question Not Found" });
       return true;
@@ -84,10 +98,10 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
     const body = await readJson(req);
     try {
       const result = await transformQuestionWithAi(question, {
-        categoryId: state.generationTask?.categoryId || state.paper?.categoryId || "",
-        categoryName: state.paper?.categorySnapshot?.path || state.paper?.categorySnapshot?.name || "",
-        direction: state.generationTask?.direction || "",
-        requirements: state.generationTask?.requirements || "",
+        categoryId: scopedState.generationTask?.categoryId || scopedState.paper?.categoryId || "",
+        categoryName: scopedState.paper?.categorySnapshot?.path || scopedState.paper?.categorySnapshot?.name || "",
+        direction: scopedState.generationTask?.direction || "",
+        requirements: scopedState.generationTask?.requirements || "",
       }, body);
       sendJson(res, 200, result);
     } catch (error) {
@@ -103,23 +117,24 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
     const id = url.pathname.split("/").pop();
     const body = await readJson(req);
     const question = await updateState((current) => {
-      const target = current.questions.find((item) => item.id === id);
+      const currentState = scopedAuthoringState(current, userId);
+      const target = currentState.questions.find((item) => item.id === id);
       if (!target) return null;
       const before = JSON.stringify(target);
       const { aiTransformMeta, ...updates } = body;
       Object.assign(target, updates);
       if (questionContentChanged(before, target)) {
         target.origin = { ...(target.origin || { type: "ai", materialRefs: [] }), edited: true };
-        const inPaper = (current.paper.questionIds || []).includes(id);
+        const inPaper = (currentState.paper.questionIds || []).includes(id);
         if (inPaper) {
-          current.paper.status = "草稿";
-          current.paper.publishedAt = null;
-          upsertPaperSnapshot(current, buildPaper(current.questions, current.paper));
+          currentState.paper.status = "草稿";
+          currentState.paper.publishedAt = null;
+          upsertPaperSnapshot(currentState, buildPaper(currentState.questions, currentState.paper));
         } else {
-          current.auditLog.push(logItem("question-bank-update", `未入卷题目 ${id} 内容已更新`));
+          currentState.auditLog.push(logItem("question-bank-update", `未入卷题目 ${id} 内容已更新`));
         }
       }
-      current.auditLog.push(logItem(aiTransformMeta ? "question-ai-update" : "question-update", `题目 ${id} 已更新`, {
+      currentState.auditLog.push(logItem(aiTransformMeta ? "question-ai-update" : "question-update", `题目 ${id} 已更新`, {
         operation: aiTransformMeta?.operation || "manual",
       }));
       return target;
@@ -131,7 +146,7 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/quality/check") {
-    const checks = validateQuestions(state.questions);
+    const checks = validateQuestions(scopedState.questions);
     await updateState((current) => {
       current.auditLog.push(logItem("quality-check", `质量复检完成：${checks.failures.length} 个问题，${checks.pendingReview} 道待确认`));
     });
@@ -141,13 +156,16 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
 
   if (req.method === "POST" && url.pathname === "/api/quality/repair") {
     const result = await updateState((current) => {
-      const repaired = repairQuestions(current.questions);
-      current.questions = repaired.questions;
-      if (current.paper.id) {
-        current.paper.status = "草稿";
-        current.paper.publishedAt = null;
+      const currentState = scopedAuthoringState(current, userId);
+      const repaired = repairQuestions(currentState.questions);
+      currentState.questions = repaired.questions;
+      if (currentState.paper.id) {
+        currentState.paper.status = "草稿";
+        currentState.paper.publishedAt = null;
+        currentState.paper.questionIds = currentState.questions.map((item) => item.id);
+        upsertPaperSnapshot(currentState, buildPaper(currentState.questions, currentState.paper));
       }
-      current.auditLog.push(logItem("quality-repair", `自动修复完成：剩余 ${repaired.checks.failures.length} 个问题`));
+      currentState.auditLog.push(logItem("quality-repair", `自动修复完成：剩余 ${repaired.checks.failures.length} 个问题`));
       return repaired;
     });
     sendJson(res, 200, result);

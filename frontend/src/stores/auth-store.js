@@ -1,7 +1,7 @@
 import { ElNotification } from "element-plus";
 import "element-plus/theme-chalk/el-notification.css";
 
-export function createAuthStore({ state, request, notify, refresh, canAccessRoute, go, mountIcons }) {
+export function createAuthStore({ state, request, notify, refresh, canAccessRoute, go, mountIcons, resetSessionState }) {
   function toggleAdminMenu() {
     state.admin.menuOpen = !state.admin.menuOpen;
     state.ui.themeMenuOpen = false;
@@ -20,12 +20,12 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
 
   function handleAdminAuthError(error) {
     const message = String(error?.message || "");
-    if (message.includes("运营登录") || message.includes("请先登录运营控制台")) {
+    if (error?.status === 401 || message.includes("运营登录") || message.includes("请先登录运营控制台")) {
       state.admin.token = "";
       state.admin.user = null;
       state.admin.menuOpen = false;
       localStorage.removeItem("smartqAdminToken");
-      state.dashboard = null;
+      resetSessionState();
     }
   }
 
@@ -85,8 +85,7 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
     state.admin.token = "";
     state.admin.user = null;
     state.admin.menuOpen = false;
-    state.dashboard = null;
-    state.dashboardError = "";
+    resetSessionState();
     localStorage.removeItem("smartqAdminToken");
     notify("已退出运营控制台");
     mountIcons();

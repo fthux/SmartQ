@@ -1,6 +1,8 @@
 import { aiConfig, buildPaper, validateQuestions } from "../lib/ai.js";
 import { maxRequestBytes, sendJson } from "../lib/http.js";
 import { storageInfo } from "../lib/runtime-store.js";
+import { materialFileMaxBytes } from "../services/material-service.js";
+import { scopedAuthoringState } from "../services/authoring-workspace-service.js";
 
 export async function handlePublicSystemRoutes(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/health") {
@@ -24,7 +26,7 @@ export async function handlePublicSystemRoutes(req, res, url) {
         backupCount: storage.backupCount,
         latestBackupAt: storage.latestBackupAt,
       },
-      limits: { maxRequestBytes },
+      limits: { maxRequestBytes, materialFileMaxBytes },
     });
     return true;
   }
@@ -45,24 +47,25 @@ export async function handlePublicSystemRoutes(req, res, url) {
   return false;
 }
 
-export function handleDashboardRoute(req, res, url, state) {
+export function handleDashboardRoute(req, res, url, state, auth) {
   if (req.method !== "GET" || url.pathname !== "/api/dashboard") return false;
-  const paper = buildPaper(state.questions, state.paper);
+  const scopedState = scopedAuthoringState(state, auth?.user?.id);
+  const paper = buildPaper(scopedState.questions, scopedState.paper);
   const papers = state.papers || [];
   sendJson(res, 200, {
     exam: state.exam,
     stats: {
-      questions: state.questions.length,
+      questions: scopedState.questions.length,
       papers: papers.length,
       published: papers.filter((item) => item.status === "已发布").length,
       drafts: papers.filter((item) => item.status !== "已发布").length,
-      pendingReview: state.questions.filter((item) => item.status !== "已校验").length,
+      pendingReview: scopedState.questions.filter((item) => item.status !== "已校验").length,
     },
-    questions: state.questions,
+    questions: scopedState.questions,
     paper,
     papers,
-    quality: validateQuestions(state.questions),
-    generationTask: state.generationTask,
+    quality: validateQuestions(scopedState.questions),
+    generationTask: scopedState.generationTask,
     auditLog: state.auditLog.slice(-8).reverse(),
   });
   return true;

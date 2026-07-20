@@ -23,10 +23,8 @@ export function createMaterialsStore({ state, notify, go }) {
   async function loadMaterialOptions() {
     state.materialManagement.optionsLoading = true;
     try {
-      const result = await request("/api/materials?status=ready&page=1&pageSize=100");
+      const result = await request("/api/materials?status=ready&page=1&pageSize=1000");
       state.materialManagement.options = result.items || [];
-      const validIds = new Set(state.materialManagement.options.map((item) => item.id));
-      state.spec.materialIds = (state.spec.materialIds || []).filter((id) => validIds.has(id));
     } catch (error) {
       notify(`资料选项加载失败：${error.message}`);
     } finally {
@@ -112,8 +110,9 @@ export function createMaterialsStore({ state, notify, go }) {
       notify("仅支持 TXT、MD、PDF 和 DOCX 文件");
       return;
     }
-    if (file.size > 8 * 1024 * 1024) {
-      notify("资料文件不能超过 8 MB");
+    const maxBytes = Number(state.systemLimits?.materialFileMaxBytes || 8 * 1024 * 1024);
+    if (file.size > maxBytes) {
+      notify(`资料文件不能超过 ${formatFileSize(maxBytes)}`);
       return;
     }
     state.materialManagement.form.file = file;
@@ -241,4 +240,9 @@ export function createMaterialsStore({ state, notify, go }) {
     selectMaterialFile,
     toggleMaterialSelection,
   };
+}
+
+function formatFileSize(bytes) {
+  const megabytes = Number(bytes || 0) / 1024 / 1024;
+  return `${Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)} MB`;
 }

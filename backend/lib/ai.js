@@ -149,7 +149,7 @@ export async function transformQuestionWithAi(question = {}, context = {}, input
 }
 
 function normalizeTransformDraft(question = {}, draft = {}) {
-  const type = normalizeQuestionType(question.type || draft.type, "单选");
+  const type = normalizeQuestionType(draft.type || question.type, "单选");
   const source = { ...question, ...draft, type };
   return {
     id: String(question.id || draft.id || ""),
@@ -157,9 +157,9 @@ function normalizeTransformDraft(question = {}, draft = {}) {
     stem: cleanText(source.stem, ""),
     options: normalizeOptions(source.options),
     answer: normalizeAnswer(source.answer, type),
-    score: clampNumber(question.score ?? draft.score, 1, 200, 1),
+    score: clampNumber(draft.score ?? question.score, 1, 200, 1),
     difficulty: normalizeDifficulty(source.difficulty),
-    knowledge: normalizeList(question.knowledge).length ? normalizeList(question.knowledge) : ["综合能力"],
+    knowledge: normalizeList(source.knowledge).length ? normalizeList(source.knowledge) : ["综合能力"],
     explanation: cleanText(source.explanation, ""),
     rubric: Array.isArray(source.rubric) ? source.rubric.map((item) => cleanText(item, "")).filter(Boolean) : [],
     quality: clampNumber(source.quality, 70, 100, 88),
@@ -710,6 +710,7 @@ export function buildPaper(sourceQuestions = questions, meta = {}) {
     questionIds: selected.map((item) => item.id),
     buildSpec: meta.buildSpec || { targetScore, source: "preview" },
     sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
+    generationSpecSnapshot: meta.generationSpecSnapshot || null,
     categoryId: String(meta.categoryId || ""),
     categorySnapshot: meta.categorySnapshot || null,
     score,
@@ -728,6 +729,7 @@ function emptyPaper(meta = {}) {
     questionIds: [],
     buildSpec: meta.buildSpec || null,
     sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
+    generationSpecSnapshot: meta.generationSpecSnapshot || null,
     categoryId: String(meta.categoryId || ""),
     categorySnapshot: meta.categorySnapshot || null,
     score: 0,
@@ -1120,23 +1122,24 @@ function ensureSpecCompliance(items, spec, options = {}) {
   }));
 }
 
-function validateGenerationSpec(items, spec) {
+export function validateGenerationSpec(items, spec) {
   const failures = [];
-  if (items.length !== spec.count) {
-    failures.push({ field: "count", message: `题目数量应为 ${spec.count}，实际 ${items.length}` });
+  const normalizedSpec = Array.isArray(spec?.typeMix) ? spec : normalizeGenerationSpec(spec || {});
+  if (items.length !== normalizedSpec.count) {
+    failures.push({ field: "count", message: `题目数量应为 ${normalizedSpec.count}，实际 ${items.length}` });
   }
   const total = items.reduce((sum, item) => sum + Number(item.score || 0), 0);
-  if (total !== spec.totalScore) {
-    failures.push({ field: "totalScore", message: `总分应为 ${spec.totalScore}，实际 ${total}` });
+  if (total !== normalizedSpec.totalScore) {
+    failures.push({ field: "totalScore", message: `总分应为 ${normalizedSpec.totalScore}，实际 ${total}` });
   }
   const actualTypes = countBy(items, "type");
-  spec.typeMix.forEach((item) => {
+  normalizedSpec.typeMix.forEach((item) => {
     if ((actualTypes[item.type] || 0) !== item.count) {
       failures.push({ field: "typeMix", message: `${item.type} 应为 ${item.count} 道，实际 ${actualTypes[item.type] || 0} 道` });
     }
   });
-  items.forEach((item, index) => {
-    const expectedScore = scoreForType(item.type, spec);
+  if (!normalizedSpec.allowMixedTypeScores) items.forEach((item, index) => {
+    const expectedScore = scoreForType(item.type, normalizedSpec);
     if (Number(item.score || 0) !== expectedScore) {
       failures.push({ field: "typeScores", message: `第 ${index + 1} 题${item.type}应为 ${expectedScore} 分，实际 ${item.score || 0} 分` });
     }

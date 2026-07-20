@@ -87,6 +87,9 @@ export async function updateQuestionBankCategory(id, body = {}, actor = "") {
     if (parentId === category.id || categoryDescendantIds(state, category.id).has(parentId)) throw badRequest("分类不能移动到自身或子分类下");
     validateParent(state, parentId, category.id);
     ensureUniqueSiblingName(state, name, parentId, category.id);
+    if (parentId !== category.parentId && parentId && (state.questionBank || []).some((item) => item.categoryIds?.includes(parentId))) {
+      throw conflict("目标上级分类已有题目，请先将题目移动到其他分类");
+    }
     const subtreeDepth = maxSubtreeDepth(state, category.id);
     const targetDepth = parentId ? categoryDepth(state, parentId) + 1 : 1;
     if (targetDepth + subtreeDepth - 1 > 3) throw badRequest("题库分类最多支持 3 级");
@@ -108,11 +111,18 @@ export async function setQuestionBankCategoryArchived(id, archived, actor = "") 
     if (!category) return null;
     const ids = categoryDescendantIds(state, category.id);
     for (const item of state.questionBankCategories || []) {
-      if (ids.has(item.id)) {
-        item.status = archived ? "archived" : "active";
-        item.updatedBy = actor;
-        item.updatedAt = new Date().toISOString();
+      if (!ids.has(item.id)) continue;
+      const sources = new Set(item.archivedByCategoryIds || []);
+      if (archived) {
+        if (item.status === "active" || item.id === category.id) sources.add(category.id);
+        item.status = "archived";
+      } else if (sources.has(category.id) || item.id === category.id) {
+        sources.delete(category.id);
+        item.status = sources.size ? "archived" : "active";
       }
+      item.archivedByCategoryIds = [...sources];
+      item.updatedBy = actor;
+      item.updatedAt = new Date().toISOString();
     }
     state.auditLog.push(logItem(archived ? "question-bank-category-archive" : "question-bank-category-restore", `${archived ? "归档" : "恢复"}题库分类：${category.name}`, { actor, categoryId: category.id }));
     return listQuestionBankCategories(state);

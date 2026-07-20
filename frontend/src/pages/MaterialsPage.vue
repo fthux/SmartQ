@@ -11,6 +11,7 @@ import {
   View,
 } from "@element-plus/icons-vue";
 import { useSmartQ } from "../stores/context.js";
+import { computed } from "vue";
 
 const {
   state,
@@ -33,6 +34,10 @@ const statusOptions = [
   { label: "解析失败", value: "failed" },
   { label: "已归档", value: "archived" },
 ];
+const materialFileMaxLabel = computed(() => {
+  const megabytes = Number(state.systemLimits.materialFileMaxBytes || 0) / 1024 / 1024;
+  return `${Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)} MB`;
+});
 
 function statusLabel(status) {
   return { ready: "可用", failed: "解析失败", archived: "已归档" }[status] || status;
@@ -143,7 +148,7 @@ function formatTextLength(value) {
           <el-upload drag :auto-upload="false" :limit="1" accept=".txt,.md,.pdf,.docx" :on-change="selectMaterialFile" :on-remove="() => state.materialManagement.form.file = null">
             <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
             <div class="el-upload__text">拖入文件或点击选择</div>
-            <template #tip><div class="el-upload__tip">支持 TXT、MD、PDF、DOCX，单个文件不超过 8 MB</div></template>
+            <template #tip><div class="el-upload__tip">支持 TXT、MD、PDF、DOCX，单个文件不超过 {{ materialFileMaxLabel }}</div></template>
           </el-upload>
         </el-form-item>
         <el-form-item v-else label="资料正文">

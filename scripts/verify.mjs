@@ -48,6 +48,7 @@ try {
   assert(health.storage.adapter === "json-file" && health.storage.degraded === false, "health exposes JSON runtime storage");
   assert(!("proctor" in health) && !("evidence" in health), "health no longer exposes retired monitoring services");
   assert(health.limits.maxRequestBytes === 128 * 1024, "health exposes request body limit");
+  assert(health.limits.materialFileMaxBytes === 8 * 1024 * 1024, "health exposes the configured material upload limit");
 
   const shell = await getText("/");
   assert(shell.includes('<div id="app"') && shell.includes('type="module"') && shell.includes("./assets/"), "root serves the Vite-built Vue app shell");
@@ -75,6 +76,7 @@ try {
     "frontend/src/stores/auth-store.js",
     "frontend/src/stores/layout-store.js",
     "frontend/src/stores/materials-store.js",
+    "frontend/src/stores/papers-store.js",
     "frontend/src/stores/question-bank-store.js",
     "frontend/src/stores/users-store.js",
     "frontend/src/styles/index.css",
@@ -91,6 +93,7 @@ try {
     "backend/lib/question-bank-categories.js",
     "backend/services/admin-user-service.js",
     "backend/services/auth-service.js",
+    "backend/services/authoring-workspace-service.js",
   ];
   const backend = (await Promise.all(backendFiles.map((path) => readFile(path, "utf8")))).join("\n");
   assert(frontend.includes('createApp(App)') && frontend.includes('app.mount("#app")') && frontend.includes("ElementPlusResolver"), "frontend mounts Vue 3 with on-demand Element Plus components");
@@ -142,6 +145,10 @@ try {
   assert(!frontend.includes("质量复检") && !frontend.includes('key: "quality"'), "authoring UI hides quality review as a workflow step");
   assert(!frontend.includes('key: "save"') && !frontend.includes("savePaper"), "authoring removes the visible save-paper step and action");
   assert(frontend.includes("generationStageForProgress") && !frontend.includes("连接 AI 出题服务"), "generation progress uses stable progress-based stage text");
+  assert(frontend.includes("dashboardRequestSequence") && frontend.includes("detailRequestSequence"), "dashboard and paper detail responses ignore stale requests");
+  assert(frontend.includes("smartq:unauthorized") && frontend.includes("resetSessionState"), "global unauthorized responses clear session-scoped application state");
+  assert(frontend.includes('paperId: state.authoringPaperId || ""') && !frontend.includes('paperId: state.authoringPaperId || state.dashboard?.paper?.id'), "new-paper saves never fall back to the active paper id");
+  assert(frontend.includes("pageSize=1000") && !frontend.includes("filter((id) => validIds.has(id))"), "material selector loads beyond the first 100 items without dropping retained selections");
   assert(frontend.includes("publishQualityFailures") && frontend.includes("发布已终止") && frontend.includes("editPublishIssue"), "publish failures stay visible and link to question editing");
   assert(frontend.includes("data-authoring-workbench") && frontend.includes("data-authoring-summary") && frontend.includes("data-authoring-action-bar"), "authoring uses the dense workbench, summary, and action bar layout");
   assert(frontend.includes("data-question-type-matrix") && frontend.includes("typeMatrixRows") && frontend.includes("试卷编辑"), "authoring keeps the compact type matrix and direct question editing flow");
@@ -443,8 +450,18 @@ try {
   assert(new Set(materialQuestions.flatMap((question) => question.origin.materialRefs.map((ref) => ref.materialId))).size === 2, "balanced material generation covers multiple selected materials");
   assert(materialQuestions.every((question) => question.origin.materialRefs.every((ref) => ref.excerpt && Number.isFinite(ref.version))), "material questions preserve versioned evidence excerpts");
   assert(generated.spec.sourcePlan.materials.find((item) => item.id === materialOne.id)?.version === 2, "generation freezes the current material version");
+  const ownedGenerationJob = await postJson("/api/ai/generate-questions", generationSpec, { headers: contentUserHeaders, expectedStatus: 202 });
+  await getJson(`/api/ai/generation-jobs/${encodeURIComponent(ownedGenerationJob.id)}`, { headers: adminHeaders, expectedStatus: 404 });
+  const ownedGenerationResult = await waitForGenerationJob(ownedGenerationJob.id, contentUserHeaders);
+  assert(ownedGenerationResult.status === "done", "generation jobs are visible only to their authenticated owner");
   const previewDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
   assert(previewDashboard.questions.length === 0, "unsaved generation does not mutate runtime content");
+
+  const rejectedSpecDraft = await postJson("/api/ai/save-question-draft", {
+    questions: generated.questions.slice(0, -1),
+    spec: generated.spec,
+  }, { headers: contentUserHeaders, expectedStatus: 409 });
+  assert(rejectedSpecDraft.checks.specPass === false && rejectedSpecDraft.failures.some((item) => item.field === "count"), "saving blocks generated drafts that do not match the requested specification");
 
   const savedDraft = await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: generated.spec }, { headers: contentUserHeaders });
   assert(savedDraft.saved === true, "generated preview can be saved");
@@ -499,6 +516,7 @@ try {
   assert(published.status === "已发布" && published.questionCount === 4 && published.score === 10, "publish automatically validates and publishes valid unreviewed questions");
   const paper = published;
   const paperDetail = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
+  const publishedPaperAQuestions = JSON.stringify(paperDetail.questions);
   assert(paperDetail.questions.length === 4 && paperDetail.status === "已发布", "paper detail returns the published snapshot");
   assert(paperDetail.categoryId === frontendCategory.id && paperDetail.categorySnapshot.path.map((item) => item.name).join(" / ") === "专业能力 / 前端基础", "paper snapshot freezes its leaf category path");
   assert(paperDetail.sourcePlanSnapshot.materialQuestionCount === 2 && paperDetail.sourcePlanSnapshot.materials.length === 2, "paper snapshot preserves source allocation and material versions");
@@ -526,6 +544,8 @@ try {
   await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: secondSpec }, { headers: contentUserHeaders });
   const paperB = await postJson("/api/papers/publish", {}, { headers: contentUserHeaders });
   assert(paperB.id !== paper.id && paperB.status === "已发布", "a second paper with the same questions is saved independently");
+  const paperAAfterCreatingB = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
+  assert(JSON.stringify(paperAAfterCreatingB.questions) === publishedPaperAQuestions && paperAAfterCreatingB.status === "已发布", "creating paper B does not overwrite the active paper A snapshot");
   const importedPaperB = await postJson("/api/question-bank/import", { paperId: paperB.id }, { headers: contentUserHeaders });
   assert(importedPaperB.created === 0 && importedPaperB.reused === 4, "same questions from paper B reuse paper A bank records");
   const bankAfterPaperB = await getJson("/api/question-bank?page=1&pageSize=20", { headers: contentUserHeaders });
@@ -562,8 +582,78 @@ try {
   const repeatedPaperImport = await postJson("/api/authoring/questions/import", { questionBankIds: [manualBankQuestion.id] }, { headers: contentUserHeaders });
   assert(repeatedPaperImport.added === 0 && repeatedPaperImport.skipped === 1, "adding the same bank question twice to a paper is skipped");
 
-  const dashboard = await getJson("/api/dashboard", { headers: adminHeaders });
+  const sourcePlanAfterImport = await getJson("/api/dashboard", { headers: contentUserHeaders });
+  assert(
+    sourcePlanAfterImport.generationTask.sourcePlan.questionBankIds.includes(manualBankQuestion.id)
+      && sourcePlanAfterImport.generationTask.sourcePlan.materialIds.length === 2
+      && sourcePlanAfterImport.generationTask.sourcePlan.aiQuestionCount === 2
+      && sourcePlanAfterImport.generationTask.count === sourcePlanAfterImport.questions.length,
+    "adding bank questions rebuilds the complete generation and source plan",
+  );
+
+  const repairTarget = importedIntoPaper.questions[0];
+  await patchJson(`/api/questions/${repairTarget.id}`, { score: 0 }, { headers: contentUserHeaders });
+  const repaired = await postJson("/api/quality/repair", {}, { headers: contentUserHeaders });
+  assert(repaired.questions.find((item) => item.id === repairTarget.id)?.score === 3, "automatic repair updates the active question set");
+  await postJson(`/api/papers/${paper.id}/activate`, {}, { headers: contentUserHeaders });
+  await postJson(`/api/papers/${paperB.id}/activate`, {}, { headers: contentUserHeaders });
+  const repairedPaperB = await getJson(`/api/papers/${paperB.id}`, { headers: contentUserHeaders });
+  assert(repairedPaperB.questions.find((item) => item.id === repairTarget.id)?.score === 3, "automatic repair persists in the paper snapshot across paper switches");
+
+  const dashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
   assert(dashboard.stats.questions === 5 && dashboard.stats.papers === 2 && dashboard.stats.published === 1, "dashboard reflects question-bank additions without duplicating papers");
+
+  await postJson(`/api/papers/${paper.id}/activate`, {}, { headers: contentUserHeaders });
+  const paperABeforeEdit = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
+  const paperAEditTarget = paperABeforeEdit.questions[0];
+  await patchJson(`/api/questions/${paperAEditTarget.id}`, { stem: `${paperAEditTarget.stem}（编辑稿）` }, { headers: contentUserHeaders });
+  const paperAAfterEdit = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
+  assert(paperAAfterEdit.createdAt === paperABeforeEdit.createdAt && paperAAfterEdit.updatedAt !== paperABeforeEdit.updatedAt, "paper edits preserve createdAt and advance updatedAt");
+  assert(
+    paperAAfterEdit.publishedVersions.some((version) => version.publishedAt === paperABeforeEdit.publishedAt && version.questions[0].stem === paperAEditTarget.stem),
+    "editing a published paper preserves its immutable published version",
+  );
+  await postJson(`/api/papers/${paperB.id}/activate`, {}, { headers: contentUserHeaders });
+
+  const adminSpec = { ...generated.spec, categoryId: backendCategory.id, paperName: "管理员独立试卷" };
+  await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: adminSpec }, { headers: adminHeaders });
+  const adminPaper = await postJson("/api/papers/build", {}, { headers: adminHeaders });
+  const adminDashboard = await getJson("/api/dashboard", { headers: adminHeaders });
+  const contentDashboardAfterAdminEdit = await getJson("/api/dashboard", { headers: contentUserHeaders });
+  assert(adminDashboard.paper.id === adminPaper.id && adminDashboard.questions.length === 4, "the first user owns an independent authoring workspace");
+  assert(contentDashboardAfterAdminEdit.paper.id === paperB.id && contentDashboardAfterAdminEdit.questions.length === 5, "a second user keeps their own active paper and questions");
+
+  const emptyMoveCategories = await postJson("/api/question-bank/categories", { name: "待移动分类" }, { headers: contentUserHeaders, expectedStatus: 201 });
+  const emptyMoveCategory = emptyMoveCategories.items.find((item) => item.name === "待移动分类");
+  const rejectedCategoryMove = await patchJson(`/api/question-bank/categories/${emptyMoveCategory.id}`, { parentId: frontendCategory.id }, { headers: contentUserHeaders, expectedStatus: 409 });
+  assert(rejectedCategoryMove.error.includes("已有题目"), "moving a category cannot turn a question-owning leaf into a parent");
+
+  const archiveRootResult = await postJson("/api/question-bank/categories", { name: "归档测试" }, { headers: contentUserHeaders, expectedStatus: 201 });
+  const archiveRoot = archiveRootResult.items.find((item) => item.name === "归档测试");
+  const archiveChildResult = await postJson("/api/question-bank/categories", { name: "独立归档子类", parentId: archiveRoot.id }, { headers: contentUserHeaders, expectedStatus: 201 });
+  const archiveChild = archiveChildResult.items.find((item) => item.name === "独立归档子类");
+  await postJson(`/api/question-bank/categories/${archiveChild.id}/archive`, {}, { headers: contentUserHeaders });
+  await postJson(`/api/question-bank/categories/${archiveRoot.id}/archive`, {}, { headers: contentUserHeaders });
+  const restoredArchiveTree = await postJson(`/api/question-bank/categories/${archiveRoot.id}/restore`, {}, { headers: contentUserHeaders });
+  assert(restoredArchiveTree.items.find((item) => item.id === archiveChild.id)?.status === "archived", "restoring a parent does not restore an independently archived child");
+
+  const fingerprintBefore = await getJson(`/api/question-bank/${manualBankQuestion.id}`, { headers: contentUserHeaders });
+  const fingerprintAfter = await patchJson(`/api/question-bank/${manualBankQuestion.id}`, {
+    explanation: `${fingerprintBefore.explanation} 补充说明。`,
+    defaultScore: Number(fingerprintBefore.defaultScore || 1) + 1,
+    difficulty: fingerprintBefore.difficulty === "难" ? "中" : "难",
+    knowledge: [...(fingerprintBefore.knowledge || []), "版本指纹"],
+  }, { headers: contentUserHeaders });
+  assert(fingerprintAfter.version === fingerprintBefore.version + 1, "question-bank versions include explanation, score, difficulty, and knowledge changes");
+
+  for (let index = 0; index < 99; index += 1) {
+    await postJson("/api/materials", {
+      name: `批量资料 ${String(index + 1).padStart(3, "0")}`,
+      content: `用于验证资料选择器超过一百条记录时仍可完整加载。编号 ${index + 1}`,
+    }, { headers: contentUserHeaders, expectedStatus: 201 });
+  }
+  const allMaterials = await getJson("/api/materials?page=1&pageSize=1000", { headers: contentUserHeaders });
+  assert(allMaterials.total === 101 && allMaterials.items.length === 101, "material options can load more than 100 records in one selector request");
   console.log("SmartQ verification passed");
 } catch (error) {
   console.error(error.stack || error.message || error);

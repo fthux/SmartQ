@@ -1,31 +1,40 @@
 export function createPapersStore({ state, request, refresh, notify, mountIcons, paperTotalPages, currentPaperPage, go }) {
+  let detailRequestSequence = 0;
+
   async function activatePaper(id, options = {}) {
     try {
       await request(`/api/papers/${id}/activate`, { method: "POST", body: JSON.stringify({}) });
       await refresh();
       if (!options.silent) notify("已切换当前试卷");
+      return true;
     } catch (error) {
-      notify(`切换失败：${error.message}`);
+      if (!options.silent) notify(`切换失败：${error.message}`);
+      throw error;
     }
   }
 
   async function selectPaper(id) {
+    const requestSequence = ++detailRequestSequence;
     state.selectedPaperId = id;
     state.selectedPaperDetail = null;
     state.paperDetailLoading = true;
     state.paperActionMenuId = null;
     try {
-      state.selectedPaperDetail = await request(`/api/papers/${id}`);
+      const detail = await request(`/api/papers/${id}`);
+      if (requestSequence !== detailRequestSequence || state.selectedPaperId !== id) return;
+      state.selectedPaperDetail = detail;
     } catch (error) {
+      if (requestSequence !== detailRequestSequence || state.selectedPaperId !== id) return;
       state.selectedPaperDetail = null;
       notify(`加载试卷失败：${error.message}`);
     } finally {
-      state.paperDetailLoading = false;
+      if (requestSequence === detailRequestSequence && state.selectedPaperId === id) state.paperDetailLoading = false;
       mountIcons();
     }
   }
 
   function clearSelectedPaper() {
+    detailRequestSequence += 1;
     state.selectedPaperId = null;
     state.selectedPaperDetail = null;
     state.paperDetailLoading = false;
@@ -69,8 +78,14 @@ export function createPapersStore({ state, request, refresh, notify, mountIcons,
   }
 
   async function editPaper(item) {
+    if (state.dashboard?.paper?.id !== item.id) {
+      try {
+        await activatePaper(item.id);
+      } catch {
+        return;
+      }
+    }
     state.editingPaperId = item.id;
-    if (state.dashboard?.paper?.id !== item.id) await activatePaper(item.id);
     state.activeWorkflowStep = "edit";
     go("authoring", { paperid: item.id });
     notify("已进入试卷编辑模式");

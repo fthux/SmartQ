@@ -22,8 +22,9 @@ import { createAuthStore } from "./auth-store.js";
 import { createAuthoringStore } from "./authoring-store.js";
 import { createPapersStore } from "./papers-store.js";
 import { createUiStore } from "./ui-store.js";
-
-const { computed, onMounted, reactive, watch } = Vue;
+import { createLayoutStore } from "./layout-store.js";
+import { createUsersStore } from "./users-store.js";
+import { computed, onMounted, reactive, watch } from "vue";
 
 cleanupLegacyServiceWorkers();
 
@@ -43,6 +44,52 @@ export function createAppStore() {
         loading: false,
         error: "",
         menuOpen: false,
+      },
+      profile: {
+        displayName: "",
+        avatarPreview: "",
+        avatarFile: null,
+        error: "",
+        saving: false,
+        uploadingAvatar: false,
+      },
+      password: {
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+        error: "",
+        saving: false,
+      },
+      userManagement: {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        search: "",
+        role: "",
+        status: "",
+        roles: [],
+        loading: false,
+        error: "",
+        editorOpen: false,
+        editorMode: "create",
+        editingId: null,
+        form: { username: "", displayName: "", role: "author", password: "", confirmPassword: "" },
+        formError: "",
+        saving: false,
+        resetOpen: false,
+        resetUser: null,
+        resetPassword: "",
+        resetPasswordConfirm: "",
+        resetError: "",
+        resetting: false,
+      },
+      ui: {
+        sidebarCollapsed: localStorage.getItem("smartqSidebarCollapsed") === "1",
+        theme: ["system", "light", "dark"].includes(localStorage.getItem("smartqTheme")) ? localStorage.getItem("smartqTheme") : "system",
+        themeMenuOpen: false,
+        isDark: false,
+        isFullscreen: false,
       },
       generatedDraft: null,
       regeneratingDraft: false,
@@ -78,14 +125,20 @@ export function createAppStore() {
     const navItems = [
       { key: "papers", label: "已出卷子", icon: "files", permission: "papers" },
       { key: "authoring", label: "出题制卷", icon: "sparkles", permission: "authoring" },
+      { key: "users", label: "用户管理", icon: "users", permission: "users" },
+      { key: "profile", label: "个人资料", icon: "user-round", showInNav: false },
     ];
 
     const adminPermissions = computed(() => state.admin.user?.permissions || []);
-    const adminDisplayName = computed(() => state.admin.user?.username || state.admin.username || "admin");
+    const adminDisplayName = computed(() => state.admin.user?.displayName || state.admin.user?.username || state.admin.username || "admin");
+    const adminRoleLabel = computed(() => state.admin.user?.roleLabel || (state.admin.user?.role === "admin" ? "管理员" : "内容运营"));
     const adminAccountMenuItems = computed(() => [
+      { key: "profile", label: "个人资料", icon: "user-round", action: openAdminProfile },
       { key: "logout", label: "退出登录", icon: "log-out", tone: "danger", action: logoutAdmin },
     ]);
-    const visibleNavItems = computed(() => navItems.filter((item) => !item.permission || hasAdminPermission(item.permission)));
+    const visibleNavItems = computed(() => state.admin.user?.mustChangePassword
+      ? []
+      : navItems.filter((item) => item.showInNav !== false && (!item.permission || hasAdminPermission(item.permission))));
     const currentNavItem = computed(() => navItems.find((item) => item.key === state.route) || navItems[0]);
     const questions = computed(() => state.dashboard?.questions || []);
     const paper = computed(() => state.dashboard?.paper || {});
@@ -212,12 +265,26 @@ export function createAppStore() {
     const paperPageEnd = computed(() => Math.min(currentPaperPage.value * state.paperPageSize, filteredPaperRows.value.length));
     const { notify, toastClass, toastIcon } = createUiStore(state);
     const {
+      themeOptions,
+      toggleSidebar,
+      toggleThemeMenu,
+      closeThemeMenu,
+      setTheme,
+      toggleTheme,
+      toggleFullscreen,
+      initializeLayout,
+    } = createLayoutStore({ state, mountIcons });
+    const {
       closeAdminMenu,
+      changeAdminPassword,
       handleAdminAuthError,
       loadAdminSession,
       loginAdmin,
       logoutAdmin,
+      openAdminProfile,
       runAdminAccountMenuItem,
+      saveAdminProfile,
+      selectAdminAvatar,
       toggleAdminMenu,
     } = createAuthStore({
       state,
@@ -228,6 +295,19 @@ export function createAppStore() {
       go: (...args) => go(...args),
       mountIcons,
     });
+    const {
+      applyAdminUserFilters,
+      changeAdminUserPage,
+      changeAdminUserPageSize,
+      loadAdminUsers,
+      openCreateAdminUser,
+      openEditAdminUser,
+      openResetAdminPassword,
+      resetManagedAdminPassword,
+      revokeManagedAdminSessions,
+      saveManagedAdminUser,
+      setManagedAdminUserStatus,
+    } = createUsersStore({ state, request, notify });
     const {
       activatePaper,
       askDeletePaper,
@@ -301,7 +381,7 @@ export function createAppStore() {
     function go(route, params = {}) {
       if (!canAccessRoute(route)) {
         notify("当前账号无权访问该模块");
-        route = "papers";
+        route = state.admin.user?.mustChangePassword ? "profile" : "papers";
         params = {};
       }
       state.route = route;
@@ -317,6 +397,7 @@ export function createAppStore() {
         }
       }
       if (route === "papers") clearSelectedPaper();
+      if (route === "users") loadAdminUsers();
       const routeHash = formatRouteHash(route, params);
       if (routeHash) location.hash = routeHash;
       else history.replaceState(null, "", `${location.pathname}${location.search}`);
@@ -331,6 +412,7 @@ export function createAppStore() {
     }
 
     function canAccessRoute(route) {
+      if (state.admin.user?.mustChangePassword) return route === "profile";
       const item = navItems.find((entry) => entry.key === route);
       return item ? hasAdminPermission(item.permission) : false;
     }
@@ -343,13 +425,16 @@ export function createAppStore() {
       window.addEventListener("hashchange", () => {
         state.route = currentRoute();
         if (state.admin.token && !canAccessRoute(state.route)) {
-          state.route = "papers";
-          history.replaceState(null, "", `${location.pathname}${location.search}`);
+          state.route = state.admin.user?.mustChangePassword ? "profile" : "papers";
+          const routeHash = formatRouteHash(state.route);
+          if (routeHash) location.hash = routeHash;
+          else history.replaceState(null, "", `${location.pathname}${location.search}`);
           notify("当前账号无权访问该模块");
         }
         state.authoringPaperId = currentAuthoringPaperId();
         state.editingPaperId = state.route === "authoring" && state.authoringPaperId ? state.authoringPaperId : null;
         if (state.route === "papers") clearSelectedPaper();
+        if (state.route === "users") loadAdminUsers();
         if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
           activatePaper(state.authoringPaperId, { silent: true }).catch(() => {});
         }
@@ -357,13 +442,16 @@ export function createAppStore() {
       });
       document.addEventListener("click", (event) => {
         if (!event.target?.closest?.("[data-admin-account-menu]")) closeAdminMenu();
+        if (!event.target?.closest?.("[data-theme-menu]")) closeThemeMenu();
         if (!event.target?.closest?.("[data-paper-action-menu]")) state.paperActionMenuId = null;
       });
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && state.selectedPaperId) clearSelectedPaper();
       });
+      initializeLayout();
       await loadAdminSession();
-      await refresh();
+      if (!state.admin.user?.mustChangePassword) await refresh();
+      if (state.route === "users") await loadAdminUsers();
       if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
         await activatePaper(state.authoringPaperId, { silent: true });
       }
@@ -376,7 +464,9 @@ export function createAppStore() {
       currentNavItem,
       adminPermissions,
       adminDisplayName,
+      adminRoleLabel,
       adminAccountMenuItems,
+      themeOptions,
       questions,
       authoringQuestions,
       authoringQuality,
@@ -406,11 +496,31 @@ export function createAppStore() {
       go,
       hasAdminPermission,
       canAccessRoute,
+      applyAdminUserFilters,
+      changeAdminUserPage,
+      changeAdminUserPageSize,
+      loadAdminUsers,
+      openCreateAdminUser,
+      openEditAdminUser,
+      openResetAdminPassword,
+      resetManagedAdminPassword,
+      revokeManagedAdminSessions,
+      saveManagedAdminUser,
+      setManagedAdminUserStatus,
       loginAdmin,
       logoutAdmin,
+      openAdminProfile,
       toggleAdminMenu,
       closeAdminMenu,
       runAdminAccountMenuItem,
+      saveAdminProfile,
+      changeAdminPassword,
+      selectAdminAvatar,
+      toggleSidebar,
+      toggleThemeMenu,
+      setTheme,
+      toggleTheme,
+      toggleFullscreen,
       setWorkflowStep,
       generateDraft,
       saveDraft,

@@ -5,6 +5,7 @@ import tls from "node:tls";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exam } from "../data/store.js";
+import { initializeAdminUsers } from "../services/admin-user-service.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dataFile = process.env.SMARTQ_DATA_FILE || join(root, "data", "runtime.json");
@@ -30,8 +31,9 @@ export async function loadState() {
     const loaded = await postgresStore.load().catch(() => null);
     if (loaded) {
       state = normalizeState(loaded);
+      if (await initializeAdminUsers(state)) normalizedStateNeedsSave = true;
       if (consumeNormalizedStateNeedsSave()) {
-        await saveState({ forceBackup: true, reason: "strip-retired-features" });
+        await saveState({ forceBackup: true, reason: "normalize-runtime" });
       }
       return state;
     }
@@ -40,11 +42,14 @@ export async function loadState() {
   try {
     const raw = await readFile(dataFile, "utf8");
     state = normalizeState(JSON.parse(raw));
+    if (await initializeAdminUsers(state)) normalizedStateNeedsSave = true;
     if (consumeNormalizedStateNeedsSave()) {
-      await saveState({ forceBackup: true, reason: "strip-retired-features" });
+      await saveState({ forceBackup: true, reason: "normalize-runtime" });
     }
   } catch {
     state = normalizeState(defaultState());
+    await initializeAdminUsers(state);
+    consumeNormalizedStateNeedsSave();
     await saveState();
   }
 
@@ -436,6 +441,7 @@ function defaultState() {
     papers: [],
     generationTask: null,
     adminSessions: {},
+    adminUsers: [],
     loginSecurity: defaultLoginSecurity(),
     auditLog: [
       {
@@ -468,6 +474,8 @@ function normalizeState(input) {
     papers: Array.isArray(input.papers) ? input.papers.map(normalizePaperSnapshot).filter(Boolean) : [],
     generationTask: hasDiscardableAuthoringDraft ? null : (input.generationTask || null),
     adminSessions: input.adminSessions && typeof input.adminSessions === "object" ? input.adminSessions : {},
+    adminUsers: Array.isArray(input.adminUsers) ? input.adminUsers : [],
+    ...(input.adminProfiles && typeof input.adminProfiles === "object" ? { adminProfiles: normalizeAdminProfiles(input.adminProfiles) } : {}),
     loginSecurity: normalizeLoginSecurity(input.loginSecurity),
     auditLog,
   };
@@ -485,6 +493,15 @@ function normalizeLoginSecurity(input = {}) {
   return {
     attempts: input?.attempts && typeof input.attempts === "object" ? input.attempts : {},
   };
+}
+
+function normalizeAdminProfiles(input = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  return Object.fromEntries(Object.entries(input).map(([username, profile]) => [username, {
+    displayName: String(profile?.displayName || username).trim().slice(0, 32),
+    avatar: String(profile?.avatar || ""),
+    updatedAt: profile?.updatedAt || null,
+  }]));
 }
 
 function stripLegacyQuestionSeed(normalized) {

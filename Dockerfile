@@ -1,10 +1,21 @@
+FROM node:20-alpine AS frontend-build
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY frontend ./frontend
+COPY vite.config.js postcss.config.js tailwind.config.js ./
+RUN npm run build
+
 FROM node:20-alpine
 
 WORKDIR /app
 
 COPY package.json ./
 COPY backend ./backend
-COPY frontend ./frontend
+COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 ENV NODE_ENV=production
 ENV PORT=3000

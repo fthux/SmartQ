@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
-const roots = ["backend", "frontend/assets", "scripts"];
+const roots = ["backend", "frontend/src", "scripts"];
 const files = [];
 
 for (const root of roots) await collectJavaScript(root, files);

@@ -1,5 +1,5 @@
 export function mountIcons() {
-  Vue.nextTick(() => window.lucide?.createIcons());
+  // Element Plus icons are Vue components and update with the render cycle.
 }
 
 export function workflowStatusText(status) {

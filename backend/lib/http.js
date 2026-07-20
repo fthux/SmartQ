@@ -4,19 +4,23 @@ export const maxRequestBytes = Math.max(
 );
 
 export async function readJson(req) {
+  const raw = await readBuffer(req, maxRequestBytes);
+  return raw.length ? JSON.parse(raw.toString("utf8")) : {};
+}
+
+export async function readBuffer(req, limit = maxRequestBytes) {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > maxRequestBytes) {
-      const error = new Error(`请求体过大，最大允许 ${formatBytes(maxRequestBytes)}`);
+    if (size > limit) {
+      const error = new Error(`请求体过大，最大允许 ${formatBytes(limit)}`);
       error.statusCode = 413;
       throw error;
     }
     chunks.push(chunk);
   }
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
+  return Buffer.concat(chunks);
 }
 
 export function sendJson(res, status, data) {

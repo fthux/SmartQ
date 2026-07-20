@@ -2,6 +2,7 @@
 .codegraph
 .env
 node_modules
+frontend/dist
 npm-debug.log*
 .DS_Store
 backend/data/runtime.json

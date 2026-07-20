@@ -3,7 +3,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { securityHeaders } from "./http.js";
 
-const frontendRoot = fileURLToPath(new URL("../../frontend/", import.meta.url));
+const frontendRoot = fileURLToPath(new URL("../../frontend/dist/", import.meta.url));
 
 export async function serveStatic(res, pathname) {
   const route = pathname === "/" ? "/index.html" : pathname;

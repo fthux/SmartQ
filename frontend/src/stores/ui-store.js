@@ -1,3 +1,5 @@
+import { ElMessage } from "element-plus";
+
 export function createUiStore(state) {
   function notify(message, variant = "") {
     const toast = {
@@ -6,6 +8,12 @@ export function createUiStore(state) {
       variant: variant || toastVariant(message),
     };
     state.toast = toast;
+    ElMessage({
+      message,
+      type: toast.variant === "error" ? "error" : toast.variant === "warning" ? "warning" : "success",
+      duration: 2600,
+      showClose: true,
+    });
     setTimeout(() => {
       if (state.toast?.id === toast.id) state.toast = null;
     }, 2600);

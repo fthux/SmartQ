@@ -1,29 +1,30 @@
 import { randomBytes } from "node:crypto";
 import { logItem } from "../lib/audit.js";
+import {
+  findAdminUser,
+  permissionsForAdminRole,
+  publicAdminUser,
+  verifyAdminPassword,
+} from "./admin-user-service.js";
 
-const rolePermissions = {
-  admin: ["authoring", "papers"],
-  author: ["authoring", "papers"],
-};
-const adminUsername = process.env.SMARTQ_ADMIN_USER || "admin";
-const adminPassword = process.env.SMARTQ_ADMIN_PASSWORD || "123456";
-const adminAccounts = loadAdminAccounts();
 const loginSecurity = {
   maxFailures: Number(process.env.SMARTQ_LOGIN_MAX_FAILURES || 5),
   windowMs: Number(process.env.SMARTQ_LOGIN_WINDOW_SECONDS || 15 * 60) * 1000,
   lockMs: Number(process.env.SMARTQ_LOGIN_LOCK_SECONDS || 10 * 60) * 1000,
 };
+export const maxAdminAvatarBytes = 100 * 1024;
 
 export function requiresAdminAuth(req, url) {
   if (!url.pathname.startsWith("/api/")) return false;
   if (req.method === "GET" && ["/api/health", "/api/config"].includes(url.pathname)) return false;
-  if (url.pathname.startsWith("/api/admin/")) return false;
+  if (req.method === "POST" && url.pathname === "/api/admin/login") return false;
   return true;
 }
 
 export function requiredAdminPermission(req, url) {
   const path = url.pathname;
   if (path === "/api/dashboard") return null;
+  if (path === "/api/admin/users" || path.startsWith("/api/admin/users/")) return "users";
   if (path.startsWith("/api/ai/") || path.startsWith("/api/quality/") || path.startsWith("/api/questions/")) return "authoring";
   if (path.startsWith("/api/papers/") || path === "/api/papers/build" || path === "/api/papers/publish") return "papers";
   return null;
@@ -31,12 +32,12 @@ export function requiredAdminPermission(req, url) {
 
 export function requireAdminPermission(session = {}, permission) {
   if (!permission) return {};
-  const permissions = Array.isArray(session.permissions) ? session.permissions : rolePermissions[session.role] || [];
+  const permissions = Array.isArray(session.permissions) ? session.permissions : permissionsForAdminRole(session.role);
   if (permissions.includes(permission)) return {};
   return { error: `无权访问该功能：需要 ${permission} 权限`, statusCode: 403, permission };
 }
 
-export function loginAdmin(state, body = {}, req = {}) {
+export async function loginAdmin(state, body = {}, req = {}) {
   const username = String(body.username || "").trim();
   const password = String(body.password || "");
   if (!username || !password) return { error: "请输入管理员账号和密码", statusCode: 400 };
@@ -49,8 +50,9 @@ export function loginAdmin(state, body = {}, req = {}) {
     }));
     return loginLockedResponse(limit);
   }
-  const account = adminAccounts.find((item) => item.username === username);
-  if (!account || password !== account.password) {
+  const user = findAdminUser(state, username);
+  const passwordMatches = user ? await verifyAdminPassword(password, user.passwordHash) : false;
+  if (!user || !passwordMatches) {
     const failure = recordLoginFailure(state, attemptKey);
     state.auditLog.push(logItem("admin-login-failed", `${username || "unknown"} 管理员登录失败`, {
       identifier: username || "unknown",
@@ -60,22 +62,27 @@ export function loginAdmin(state, body = {}, req = {}) {
     return { error: "管理员账号或密码错误", statusCode: 401 };
   }
   clearLoginFailures(state, attemptKey);
+  if (user.status !== "active") {
+    state.auditLog.push(logItem("admin-login-disabled", `${username} 已停用账号尝试登录`, { identifier: username }));
+    return { error: "账号已停用，请联系管理员", statusCode: 403 };
+  }
   state.adminSessions = pruneAdminSessions(state.adminSessions || {});
   const token = randomToken(32);
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
   const session = {
     id: `admin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    username,
-    role: account.role,
-    permissions: account.permissions,
+    userId: user.id,
+    username: user.username,
+    authVersion: user.authVersion,
     createdAt: now,
     expiresAt,
     lastSeenAt: now,
   };
   state.adminSessions[token] = session;
+  user.lastLoginAt = now;
   state.auditLog.push(logItem("admin-login", `${username} 登录运营控制台`));
-  return { token, expiresAt, admin: publicAdminSession(session) };
+  return { token, expiresAt, admin: publicAdminSession(session, user) };
 }
 
 export function logoutAdmin(state, token = "") {
@@ -100,19 +107,47 @@ export function authenticateAdmin(state, token = "") {
     delete state.adminSessions[value];
     return { error: "运营登录已过期，请重新登录", statusCode: 401 };
   }
+  const user = findAdminUser(state, session.userId || session.username);
+  if (!user || user.status !== "active" || session.authVersion !== user.authVersion) {
+    delete state.adminSessions[value];
+    return { error: "运营登录已失效，请重新登录", statusCode: 401 };
+  }
   session.lastSeenAt = new Date().toISOString();
-  return { session };
+  session.username = user.username;
+  session.role = user.role;
+  session.permissions = permissionsForAdminRole(user.role);
+  session.mustChangePassword = Boolean(user.mustChangePassword);
+  return { session, user };
 }
 
-export function publicAdminSession(session = {}) {
-  return {
-    id: session.id || "",
-    username: session.username || "",
-    role: session.role || "admin",
-    permissions: Array.isArray(session.permissions) ? session.permissions : rolePermissions[session.role] || rolePermissions.admin,
-    expiresAt: session.expiresAt || null,
-    lastSeenAt: session.lastSeenAt || null,
-  };
+export function publicAdminSession(session = {}, user = {}) {
+  return publicAdminUser(user, session);
+}
+
+export function updateAdminProfile(state, session = {}, body = {}) {
+  const displayName = String(body.displayName || "").trim();
+  if (!displayName) return { error: "请输入用户名", statusCode: 400 };
+  if (displayName.length > 32) return { error: "用户名不能超过 32 个字符", statusCode: 400 };
+  const user = findAdminUser(state, session.userId || session.username);
+  if (!user) return { error: "用户不存在", statusCode: 404 };
+  user.displayName = displayName;
+  user.updatedAt = new Date().toISOString();
+  state.auditLog.push(logItem("admin-profile-update", `${session.username} 更新个人资料`));
+  return { admin: publicAdminSession(session, user) };
+}
+
+export function updateAdminAvatar(state, session = {}, buffer, mimeType = "") {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) return { error: "请选择头像图片", statusCode: 400 };
+  if (buffer.length > maxAdminAvatarBytes) return { error: "头像图片不能超过 100KB", statusCode: 413 };
+  const dimensions = imageDimensions(buffer, mimeType);
+  if (!dimensions) return { error: "头像仅支持 PNG、JPG 或 WebP 图片", statusCode: 400 };
+  if (dimensions.width !== dimensions.height) return { error: "头像必须是方形图片", statusCode: 400 };
+  const user = findAdminUser(state, session.userId || session.username);
+  if (!user) return { error: "用户不存在", statusCode: 404 };
+  user.avatar = `data:${dimensions.mimeType};base64,${buffer.toString("base64")}`;
+  user.updatedAt = new Date().toISOString();
+  state.auditLog.push(logItem("admin-avatar-update", `${session.username} 更新用户头像`));
+  return { admin: publicAdminSession(session, user) };
 }
 
 export function authToken(req, url) {
@@ -121,39 +156,51 @@ export function authToken(req, url) {
   return String(url.searchParams.get("token") || "").trim();
 }
 
-function loadAdminAccounts() {
-  const configured = parseAdminAccounts(process.env.SMARTQ_ADMIN_ACCOUNTS);
-  if (configured.length) return configured;
-  return [{ username: adminUsername, password: adminPassword, role: process.env.SMARTQ_ADMIN_ROLE || "admin" }]
-    .map(normalizeAdminAccount)
-    .filter(Boolean);
-}
-
-function parseAdminAccounts(raw = "") {
-  if (!String(raw || "").trim()) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    const rows = Array.isArray(parsed) ? parsed : parsed.accounts;
-    return (Array.isArray(rows) ? rows : []).map(normalizeAdminAccount).filter(Boolean);
-  } catch {
-    return [];
+function imageDimensions(buffer, declaredMime = "") {
+  if (buffer.length >= 24 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    return { mimeType: "image/png", width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
   }
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString() === "RIFF" && buffer.subarray(8, 12).toString() === "WEBP") {
+    const webp = webpDimensions(buffer);
+    if (webp) return { mimeType: "image/webp", ...webp };
+  }
+  if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+    const jpeg = jpegDimensions(buffer);
+    if (jpeg) return { mimeType: "image/jpeg", ...jpeg };
+  }
+  void declaredMime;
+  return null;
 }
 
-function normalizeAdminAccount(account = {}) {
-  const username = String(account.username || "").trim();
-  const password = String(account.password || "");
-  if (!username || !password) return null;
-  const role = rolePermissions[account.role] ? account.role : "author";
-  const explicitPermissions = Array.isArray(account.permissions)
-    ? account.permissions.filter((item) => Object.values(rolePermissions).flat().includes(item))
-    : null;
-  return {
-    username,
-    password,
-    role,
-    permissions: [...new Set(explicitPermissions?.length ? explicitPermissions : rolePermissions[role])],
-  };
+function jpegDimensions(buffer) {
+  let offset = 2;
+  while (offset + 8 < buffer.length) {
+    if (buffer[offset] !== 0xff) { offset += 1; continue; }
+    const marker = buffer[offset + 1];
+    if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+      return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) };
+    }
+    if (marker === 0xd8 || marker === 0xd9) { offset += 2; continue; }
+    const length = buffer.readUInt16BE(offset + 2);
+    if (length < 2) break;
+    offset += length + 2;
+  }
+  return null;
+}
+
+function webpDimensions(buffer) {
+  const chunk = buffer.subarray(12, 16).toString();
+  if (chunk === "VP8X" && buffer.length >= 30) {
+    return { width: 1 + buffer.readUIntLE(24, 3), height: 1 + buffer.readUIntLE(27, 3) };
+  }
+  if (chunk === "VP8L" && buffer.length >= 25 && buffer[20] === 0x2f) {
+    const bits = buffer.readUInt32LE(21);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+  }
+  if (chunk === "VP8 " && buffer.length >= 30 && buffer[23] === 0x9d && buffer[24] === 0x01 && buffer[25] === 0x2a) {
+    return { width: buffer.readUInt16LE(26) & 0x3fff, height: buffer.readUInt16LE(28) & 0x3fff };
+  }
+  return null;
 }
 
 function checkLoginLimit(state, key) {

@@ -8,12 +8,13 @@ SmartQ 是一个面向考试与测评内容生产的轻量管理系统。当前�
 - 生成稳定性：规范化 AI 输出并校验题量、题型、总分和必填字段
 - 题目质量：质量复检、自动修复、人工审核和题目编辑
 - 试卷管理：保存草稿、发布试卷、查看详情、切换当前试卷和删除试卷
-- 管理员系统：登录限流和出题、试卷角色权限
+- 用户管理：创建、编辑、启停、重置密码、强制下线和角色权限
+- 账号安全：登录限流、首次强制改密和 scrypt 密码哈希
 - 存储适配：默认 JSON 文件，可选 PostgreSQL JSONB 存储并保留本地镜像
 
 ## 项目结构
 
-- `frontend/`：Vue 单页管理控制台
+- `frontend/`：Vite + Vue 3 SFC + Element Plus 单页管理控制台
 - `backend/`：Node API、AI 封装和运行时存储
 - `scripts/`：端到端验证脚本
 - `Dockerfile` / `docker-compose.yml`：容器部署配置
@@ -23,12 +24,13 @@ SmartQ 是一个面向考试与测评内容生产的轻量管理系统。当前�
 ## 本地运行
 
 ```bash
-npm start
+npm install
+npm run dev
 ```
 
 打开：
 
-- 管理控制台：http://localhost:3000
+- 管理控制台：http://localhost:5173
 - 健康检查：http://localhost:3000/api/health
 
 登录后默认进入“已出卷子”，可从左侧第二个入口进入“出题制卷”。
@@ -38,13 +40,20 @@ npm start
 - 账号：`admin`
 - 密码：`123456`
 
-正式部署前请修改默认账号密码。
+默认账号首次登录后必须修改密码。正式部署前仍建议通过环境变量设置独立的初始管理员账号和密码。
 
 验证：
 
 ```bash
 npm run check
 npm run verify
+```
+
+生产运行前先构建前端：
+
+```bash
+npm run build
+npm start
 ```
 
 ## 环境变量
@@ -80,8 +89,10 @@ AI_MOCK_MODE=false
 
 `SMARTQ_ADMIN_ROLE` 支持：
 
-- `admin`：出题和试卷权限
+- `admin`：用户管理、出题和试卷权限
 - `author`：出题和试卷权限
+
+`SMARTQ_ADMIN_USER`、`SMARTQ_ADMIN_PASSWORD`、`SMARTQ_ADMIN_ROLE` 和 `SMARTQ_ADMIN_ACCOUNTS` 只用于首次初始化账号。初始化完成后，账号、角色和密码以运行时存储中的 `adminUsers` 为准；已有 `adminProfiles` 会自动合并到对应用户，旧会话会失效。密码只以 scrypt 哈希保存，不会把环境变量中的明文密码写入运行时文件。
 
 `npm run verify` 会使用 `AI_MOCK_MODE=true` 启动临时服务，不会调用真实 AI 接口。
 

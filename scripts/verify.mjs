@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -45,39 +45,75 @@ try {
   assert(health.limits.maxRequestBytes === 128 * 1024, "health exposes request body limit");
 
   const shell = await getText("/");
-  assert(shell.includes('<div id="app"') && shell.includes("assets/app.js"), "root serves the Vue app shell");
+  assert(shell.includes('<div id="app"') && shell.includes('type="module"') && shell.includes("./assets/"), "root serves the Vite-built Vue app shell");
   const nestedShell = await getText("/smartq/");
-  assert(nestedShell.includes('<div id="app"') && nestedShell.includes("assets/app.js"), "subdirectory path serves the Vue app shell");
-  const appJs = await getText("/assets/app.js");
+  assert(nestedShell.includes('<div id="app"') && nestedShell.includes("./assets/"), "subdirectory path serves the Vite-built Vue app shell");
   const frontendFiles = [
-    "/assets/components/ConsoleShell.js",
-    "/assets/components/PaperDetailDrawer.js",
-    "/assets/core/public-path.js",
-    "/assets/core/router.js",
-    "/assets/pages/AuthoringPage.js",
-    "/assets/pages/PapersPage.js",
-    "/assets/stores/app-store.js",
-    "/assets/stores/authoring-store.js",
+    "vite.config.js",
+    "frontend/src/main.js",
+    "frontend/src/App.vue",
+    "frontend/src/components/ConsoleShell.vue",
+    "frontend/src/components/PaperDetailDrawer.vue",
+    "frontend/src/components/QuestionEditorDialog.vue",
+    "frontend/src/core/public-path.js",
+    "frontend/src/core/router.js",
+    "frontend/src/pages/AuthoringPage.vue",
+    "frontend/src/pages/LoginPage.vue",
+    "frontend/src/pages/PapersPage.vue",
+    "frontend/src/pages/ProfilePage.vue",
+    "frontend/src/pages/UsersPage.vue",
+    "frontend/src/stores/app-store.js",
+    "frontend/src/stores/authoring-store.js",
+    "frontend/src/stores/auth-store.js",
+    "frontend/src/stores/layout-store.js",
+    "frontend/src/stores/users-store.js",
+    "frontend/src/styles/index.css",
   ];
-  const frontendSources = await Promise.all(frontendFiles.map((path) => getText(path)));
-  const frontend = [appJs, ...frontendSources].join("\n");
-  assert(appJs.includes('import { AppRoot }') && appJs.includes('mount("#app")'), "frontend entry only mounts the root component");
+  const frontendSources = await Promise.all(frontendFiles.map((path) => readFile(path, "utf8")));
+  const frontend = frontendSources.join("\n");
+  assert(frontend.includes('createApp(App)') && frontend.includes('app.mount("#app")') && frontend.includes("ElementPlusResolver"), "frontend mounts Vue 3 with on-demand Element Plus components");
+  assert(frontend.includes("<script setup>") && frontend.includes("<el-form") && frontend.includes("<el-button"), "frontend pages use Vue SFC and Element Plus controls");
+  assert(frontend.includes("<el-table") && frontend.includes("<el-drawer") && frontend.includes("<el-dialog"), "tables, drawers, and dialogs use Element Plus components");
   assert(frontend.includes('aria-label="管理功能导航"') && frontend.includes('data-admin-route-content'), "frontend keeps the management sidebar layout");
+  assert(frontend.includes("toggleSidebar") && frontend.includes("smartqSidebarCollapsed"), "desktop sidebar can collapse and persist its state");
+  assert(frontend.includes("requestFullscreen") && frontend.includes("fullscreenchange"), "header exposes synchronized fullscreen controls");
+  assert(frontend.includes('value: "system"') && frontend.includes("prefers-color-scheme: dark"), "theme defaults to the system preference");
+  assert(frontend.includes("<el-switch") && frontend.includes("active-action-icon") && frontend.includes("inactive-action-icon"), "header uses the Element Plus style sun and moon theme switch");
+  assert(frontend.includes("document.startViewTransition") && frontend.includes("Math.hypot") && frontend.includes("clipPath"), "theme switch reveals the new theme with a viewport-filling circle");
+  assert(frontend.includes("::view-transition-new(root)") && frontend.includes("prefers-reduced-motion: reduce"), "theme reveal targets the new root view and respects reduced motion");
+  assert(frontend.includes('@command="handleThemePreference"') && frontend.includes("setTheme(theme, { animate: true, origin })"), "theme preference menu reuses the circular reveal after its dropdown closes");
+  assert(frontend.includes("--el-bg-color: #171a21") && frontend.includes("--el-border-color-lighter: #2a303b"), "Element Plus dark theme uses the neutral charcoal palette");
+  assert(frontend.includes("html.dark") && frontend.includes("dark:bg-night-surface"), "theme switching updates Element Plus and application surfaces");
+  assert(!frontend.includes(":global(html.dark)"), "dark descendant rules stay out of scoped styles");
+  const frontendAssets = await readdir("frontend/dist/assets");
+  const builtCssFiles = frontendAssets.filter((name) => name.endsWith(".css"));
+  const builtCss = (await Promise.all(builtCssFiles.map((name) => readFile(join("frontend/dist/assets", name), "utf8")))).join("\n");
+  assert(builtCss.includes("html.dark .login-art-skyline") && builtCss.includes("html.dark .smartq-menu"), "built dark rules keep their descendant selectors");
+  assert(!/html\.dark\{[^}]*opacity:\s*\.2/.test(builtCss), "built CSS never dims the entire dark document");
+  assert(frontend.includes("个人资料") && frontend.includes("/api/admin/profile/avatar"), "profile page supports persistent avatar updates");
+  assert(frontend.includes("用户管理") && frontend.includes("/api/admin/users") && frontend.includes("重置密码"), "admin user management UI is available");
+  assert(frontend.includes("mustChangePassword") && frontend.includes("/api/admin/password"), "initial password changes are enforced in the frontend");
+  assert(frontend.includes("await uploadAdminAvatar(file)") && frontend.includes("用户头像已更新"), "valid avatar selection uploads immediately");
+  assert(frontend.includes("100 * 1024") && frontend.includes("width !== dimensions.height"), "avatar selection enforces 100KB square images");
   assert(frontend.includes('window.scrollTo({ top: 0, left: 0, behavior: "auto" });'), "frontend resets scroll on module switches");
   assert(frontend.includes("出题制卷") && frontend.includes("已出卷子"), "frontend keeps authoring and paper UI");
   assert(frontend.indexOf('{ key: "papers"') < frontend.indexOf('{ key: "authoring"'), "paper management is the first navigation item");
-  assert(frontend.includes('return ["authoring", "papers"].includes(route) ? route : "papers";'), "papers is the default route");
+  assert(frontend.includes('return ["authoring", "papers", "users", "profile"].includes(route) ? route : "papers";'), "papers is the default route and protected user/profile routes are routable");
   assert(frontend.includes('if (route === "papers") return "";'), "papers uses the root URL");
   assert(!/控制台首页|数据维护|运营会话|审计日志|自动备份历史/.test(frontend), "frontend removes the console homepage and maintenance UI");
   assert(!/参与者管理|试卷分配|监考工作台|阅卷分析|考生系统/.test(frontend), "frontend removes retired navigation and pages");
   assert(!/#\/candidate|\/api\/candidate\/|\/api\/participants|\/api\/assignments|\/api\/proctor|\/api\/grading|\/api\/analysis/.test(frontend), "frontend removes retired routes and API calls");
   assert(frontend.includes("cleanupLegacyServiceWorkers") && frontend.includes("registration.unregister()"), "frontend still clears legacy service workers");
   assert(frontend.includes("paperTypeConfig") && frontend.includes("computedSpecTotalScore"), "frontend keeps paper score calculation");
-  assert(frontend.includes('paperPageSize: 20') && frontend.includes('aria-label="试卷状态筛选"'), "paper management uses the dense list controls");
+  assert(frontend.includes('paperPageSize: 20') && frontend.includes('aria-label="试卷状态筛选"'), "paper management uses the Element Plus list controls");
   assert(frontend.includes('aria-label="试卷详情抽屉"') && frontend.includes("paperDetailMode"), "paper details open in the responsive drawer");
 
   const blockedDashboard = await getJson("/api/dashboard", { expectedStatus: 401 });
   assert(blockedDashboard.error.includes("运营控制台"), "dashboard requires admin login");
+  const blockedProfile = await putJson("/api/admin/profile", { displayName: "unauthorized" }, { expectedStatus: 401 });
+  assert(blockedProfile.error.includes("运营控制台"), "profile updates require admin login");
+  const blockedUsers = await getJson("/api/admin/users", { expectedStatus: 401 });
+  assert(blockedUsers.error.includes("运营控制台"), "user management requires login");
   const oversizedLogin = await postJson("/api/admin/login", { username: "x".repeat(140 * 1024), password: "x" }, { expectedStatus: 413 });
   assert(oversizedLogin.error.includes("请求体过大"), "oversized JSON is rejected");
 
@@ -88,13 +124,95 @@ try {
 
   const adminLogin = await postJson("/api/admin/login", { username: "verify-admin", password: "123456" });
   adminHeaders = authHeaders(adminLogin.token);
-  assert(adminLogin.admin.permissions.join(",") === "authoring,papers", "admin permissions contain only retained modules");
+  assert(adminLogin.admin.permissions.join(",") === "authoring,papers,users", "admin permissions include user management");
   const adminMe = await getJson("/api/admin/me", { headers: adminHeaders });
   assert(adminMe.admin.username === "verify-admin", "admin token loads current user");
+  assert(adminMe.admin.displayName === "verify-admin" && adminMe.admin.avatar === "", "admin profile has stable defaults");
+  const updatedProfile = await putJson("/api/admin/profile", { displayName: "验证管理员" }, { headers: adminHeaders });
+  assert(updatedProfile.admin.displayName === "验证管理员", "admin display name can be updated");
+  const squareAvatar = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  const updatedAvatar = await putRaw("/api/admin/profile/avatar", squareAvatar, { headers: { ...adminHeaders, "content-type": "image/png" } });
+  assert(updatedAvatar.admin.avatar.startsWith("data:image/png;base64,"), "square avatar is persisted as an admin profile image");
+  const nonSquareAvatar = Buffer.from(squareAvatar);
+  nonSquareAvatar.writeUInt32BE(2, 16);
+  const rejectedAvatar = await putRaw("/api/admin/profile/avatar", nonSquareAvatar, { headers: { ...adminHeaders, "content-type": "image/png" }, expectedStatus: 400 });
+  assert(rejectedAvatar.error.includes("方形"), "non-square avatar is rejected");
+  const oversizedAvatar = await putRaw("/api/admin/profile/avatar", Buffer.alloc(100 * 1024 + 1), { headers: { ...adminHeaders, "content-type": "image/png" }, expectedStatus: 413 });
+  assert(oversizedAvatar.error.includes("100 KB"), "avatar upload rejects files over 100KB");
+  const persistedProfile = await getJson("/api/admin/me", { headers: adminHeaders });
+  assert(persistedProfile.admin.displayName === "验证管理员" && persistedProfile.admin.avatar === updatedAvatar.admin.avatar, "profile changes persist across session reads");
+  let persistedRuntime = JSON.parse(await readFile(runtimeFile, "utf8"));
+  const persistedAdmin = persistedRuntime.adminUsers?.find((user) => user.username === "verify-admin");
+  assert(persistedAdmin?.avatar === updatedAvatar.admin.avatar, "avatar is persisted on the unified admin user record");
+  assert(persistedRuntime.adminUsers.every((user) => user.passwordHash.startsWith("scrypt$") && !("password" in user)), "runtime users contain password hashes without plaintext passwords");
+
+  const initialUsers = await getJson("/api/admin/users", { headers: adminHeaders });
+  assert(initialUsers.total === 2 && initialUsers.roles.some((role) => role.value === "admin"), "admin can list bootstrapped users and role metadata");
+  assert(initialUsers.users.every((user) => !("passwordHash" in user)), "user management responses never expose password hashes");
+  const selfUpdate = await patchJson(`/api/admin/users/${adminMe.admin.id}`, { role: "author" }, { headers: adminHeaders, expectedStatus: 409 });
+  assert(selfUpdate.error.includes("不能修改自己"), "an admin cannot remove their own authority");
+
+  const createdUser = await postJson("/api/admin/users", {
+    username: "managed-user",
+    displayName: "受管用户",
+    role: "author",
+    password: "Managed@2026",
+  }, { headers: adminHeaders, expectedStatus: 201 });
+  assert(createdUser.user.mustChangePassword === true && createdUser.user.status === "active", "new users start active and must change their password");
+  await postJson("/api/admin/users", {
+    username: "managed-user",
+    displayName: "重复用户",
+    role: "author",
+    password: "Managed@2026",
+  }, { headers: adminHeaders, expectedStatus: 409 });
+  const filteredUsers = await getJson("/api/admin/users?search=managed&page=1&pageSize=10", { headers: adminHeaders });
+  assert(filteredUsers.total === 1 && filteredUsers.users[0].id === createdUser.user.id, "user list supports server-side search and pagination");
+
+  const managedLogin = await postJson("/api/admin/login", { username: "managed-user", password: "Managed@2026" });
+  let managedHeaders = authHeaders(managedLogin.token);
+  assert(managedLogin.admin.mustChangePassword === true, "new user login reports the required password change");
+  const forcedChange = await getJson("/api/dashboard", { headers: managedHeaders, expectedStatus: 403 });
+  assert(forcedChange.mustChangePassword === true, "business APIs are blocked until the initial password is changed");
+  const changedPassword = await putJson("/api/admin/password", {
+    currentPassword: "Managed@2026",
+    newPassword: "Managed@2027",
+  }, { headers: managedHeaders });
+  assert(changedPassword.admin.mustChangePassword === false, "user can replace the initial password");
+  await getJson("/api/dashboard", { headers: managedHeaders });
+
+  const promotedUser = await patchJson(`/api/admin/users/${createdUser.user.id}`, {
+    displayName: "受管管理员",
+    role: "admin",
+  }, { headers: adminHeaders });
+  assert(promotedUser.user.role === "admin" && promotedUser.user.displayName === "受管管理员", "admin can update another user's name and role");
+  await getJson("/api/dashboard", { headers: managedHeaders, expectedStatus: 401 });
+  const promotedLogin = await postJson("/api/admin/login", { username: "managed-user", password: "Managed@2027" });
+  managedHeaders = authHeaders(promotedLogin.token);
+  await getJson("/api/admin/users", { headers: managedHeaders });
+
+  const resetUser = await postJson(`/api/admin/users/${createdUser.user.id}/reset-password`, { password: "Reset@2028" }, { headers: adminHeaders });
+  assert(resetUser.user.mustChangePassword === true && resetUser.revokedSessions >= 1, "password reset marks the password temporary and revokes sessions");
+  await getJson("/api/dashboard", { headers: managedHeaders, expectedStatus: 401 });
+  const resetLogin = await postJson("/api/admin/login", { username: "managed-user", password: "Reset@2028" });
+  const resetHeaders = authHeaders(resetLogin.token);
+  const disabledUser = await patchJson(`/api/admin/users/${createdUser.user.id}`, { status: "disabled" }, { headers: adminHeaders });
+  assert(disabledUser.user.status === "disabled", "admin can disable another user");
+  await getJson("/api/admin/me", { headers: resetHeaders, expectedStatus: 401 });
+  await postJson("/api/admin/login", { username: "managed-user", password: "Reset@2028" }, { expectedStatus: 403 });
 
   const authorLogin = await postJson("/api/admin/login", { username: "verify-author", password: "Author@2026" });
-  const authorHeaders = authHeaders(authorLogin.token);
+  let authorHeaders = authHeaders(authorLogin.token);
   assert(authorLogin.admin.permissions.join(",") === "authoring,papers", "author role contains only content permissions");
+  const blockedAuthorUsers = await getJson("/api/admin/users", { headers: authorHeaders, expectedStatus: 403 });
+  assert(blockedAuthorUsers.permission === "users", "author role cannot access user management APIs");
+  const revokedAuthor = await postJson(`/api/admin/users/${authorLogin.admin.id}/revoke-sessions`, {}, { headers: adminHeaders });
+  assert(revokedAuthor.revokedSessions >= 1, "admin can force another user offline");
+  await getJson("/api/dashboard", { headers: authorHeaders, expectedStatus: 401 });
+  const authorRelogin = await postJson("/api/admin/login", { username: "verify-author", password: "Author@2026" });
+  authorHeaders = authHeaders(authorRelogin.token);
+
+  persistedRuntime = JSON.parse(await readFile(runtimeFile, "utf8"));
+  assert(persistedRuntime.auditLog.some((item) => item.type === "admin-user-password-reset"), "user management changes are audited");
 
   const retiredEndpoints = [
     ["GET", "/api/participants"],
@@ -198,6 +316,14 @@ function postJson(path, body = {}, options = {}) {
   return requestJson(path, { ...options, method: "POST", body });
 }
 
+function putJson(path, body = {}, options = {}) {
+  return requestJson(path, { ...options, method: "PUT", body });
+}
+
+function putRaw(path, rawBody, options = {}) {
+  return requestJson(path, { ...options, method: "PUT", rawBody });
+}
+
 function patchJson(path, body = {}, options = {}) {
   return requestJson(path, { ...options, method: "PATCH", body });
 }
@@ -206,7 +332,7 @@ async function requestJson(path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: options.method || "GET",
     headers: { "content-type": "application/json", ...(options.headers || {}) },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body: options.rawBody === undefined ? (options.body === undefined ? undefined : JSON.stringify(options.body)) : options.rawBody,
   });
   const expectedStatus = options.expectedStatus || 200;
   let payload = {};

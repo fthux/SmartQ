@@ -1,6 +1,6 @@
 export function currentRoute() {
   const { route } = parseHashRoute();
-  return ["authoring", "papers"].includes(route) ? route : "papers";
+  return ["authoring", "papers", "users", "profile"].includes(route) ? route : "papers";
 }
 
 export function currentAuthoringPaperId() {

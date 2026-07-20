@@ -16,15 +16,8 @@ const {
   saveManagedAdminUser,
   setManagedAdminUserStatus,
   formatDateTime,
+  publicUrl,
 } = useSmartQ();
-
-function roleLabel(role) {
-  return state.userManagement.roles.find((item) => item.value === role)?.label || role;
-}
-
-function roleTagType(role) {
-  return role === "admin" ? "danger" : "success";
-}
 
 function statusTagType(status) {
   return status === "active" ? "success" : "info";
@@ -36,13 +29,13 @@ function statusTagType(status) {
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <h1 class="text-2xl font-black">用户管理</h1>
-        <div class="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">管理运营控制台账号、角色和登录状态</div>
+        <div class="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">管理运营控制台账号和登录状态</div>
       </div>
       <el-button type="primary" :icon="Plus" size="large" @click="openCreateAdminUser">新建用户</el-button>
     </div>
 
     <el-card shadow="never" class="user-list-card">
-      <div class="grid gap-3 border-b border-slate-200 pb-4 lg:grid-cols-[minmax(240px,1fr)_160px_160px_auto] dark:border-night-border">
+      <div class="grid gap-3 border-b border-slate-200 pb-4 lg:grid-cols-[minmax(240px,1fr)_160px_auto] dark:border-night-border">
         <el-input
           v-model="state.userManagement.search"
           placeholder="搜索用户名或登录账号"
@@ -51,9 +44,6 @@ function statusTagType(status) {
           @keyup.enter="applyAdminUserFilters"
           @clear="applyAdminUserFilters"
         />
-        <el-select v-model="state.userManagement.role" placeholder="全部角色" clearable @change="applyAdminUserFilters">
-          <el-option v-for="role in state.userManagement.roles" :key="role.value" :label="role.label" :value="role.value" />
-        </el-select>
         <el-select v-model="state.userManagement.status" placeholder="全部状态" clearable @change="applyAdminUserFilters">
           <el-option label="已启用" value="active" />
           <el-option label="已停用" value="disabled" />
@@ -70,7 +60,7 @@ function statusTagType(status) {
         <el-table-column label="用户" min-width="220">
           <template #default="{ row }">
             <div class="flex min-w-0 items-center gap-3">
-              <el-avatar :size="36" shape="square" :src="row.avatar || undefined" class="shrink-0 bg-primary text-xs font-black text-emerald-950">
+              <el-avatar :size="36" shape="square" :src="row.avatar || publicUrl('/assets/favicon.svg')" class="shrink-0 bg-primary text-xs font-black text-emerald-950">
                 {{ (row.displayName || row.username).slice(0, 1).toUpperCase() }}
               </el-avatar>
               <div class="min-w-0">
@@ -83,15 +73,15 @@ function statusTagType(status) {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="角色" width="120">
-          <template #default="{ row }"><el-tag :type="roleTagType(row.role)" effect="light">{{ roleLabel(row.role) }}</el-tag></template>
-        </el-table-column>
         <el-table-column label="状态" width="130">
           <template #default="{ row }">
             <div class="flex items-center gap-2">
               <el-switch
-                :model-value="row.status === 'active'"
-                :disabled="row.id === state.admin.user?.id"
+                :model-value="row.status"
+                active-value="active"
+                inactive-value="disabled"
+                :loading="state.userManagement.statusUpdatingId === row.id"
+                :disabled="row.id === state.admin.user?.id || state.userManagement.statusUpdatingId !== null"
                 :aria-label="`${row.username}账号状态`"
                 @change="setManagedAdminUserStatus(row, $event)"
               />
@@ -105,7 +95,7 @@ function statusTagType(status) {
         <el-table-column label="创建时间" min-width="165">
           <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" fixed="right" width="245" align="right">
+        <el-table-column label="操作" width="245" align="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="EditPen" @click="openEditAdminUser(row)">编辑</el-button>
             <el-button v-if="row.id !== state.admin.user?.id" link type="warning" :icon="Key" @click="openResetAdminPassword(row)">重置密码</el-button>
@@ -128,7 +118,7 @@ function statusTagType(status) {
       </div>
     </el-card>
 
-    <el-dialog v-model="state.userManagement.editorOpen" :title="state.userManagement.editorMode === 'create' ? '新建用户' : '编辑用户'" width="520px" destroy-on-close>
+    <el-dialog v-model="state.userManagement.editorOpen" :title="state.userManagement.editorMode === 'create' ? '新建用户' : '编辑用户'" width="520px" append-to-body destroy-on-close>
       <el-form label-position="top" @submit.prevent="saveManagedAdminUser">
         <el-alert v-if="state.userManagement.formError" class="mb-4" :title="state.userManagement.formError" type="error" show-icon :closable="false" />
         <el-form-item label="登录账号">
@@ -137,19 +127,13 @@ function statusTagType(status) {
         <el-form-item label="用户名">
           <el-input v-model="state.userManagement.form.displayName" maxlength="32" show-word-limit placeholder="控制台显示名称" />
         </el-form-item>
-        <el-form-item label="角色">
-          <el-select v-model="state.userManagement.form.role" class="w-full" :disabled="state.userManagement.editingId === state.admin.user?.id">
-            <el-option v-for="role in state.userManagement.roles" :key="role.value" :label="role.label" :value="role.value" />
-          </el-select>
-        </el-form-item>
         <template v-if="state.userManagement.editorMode === 'create'">
-          <el-form-item label="初始密码">
+          <el-form-item label="登录密码">
             <el-input v-model="state.userManagement.form.password" type="password" show-password autocomplete="new-password" placeholder="至少 8 位，同时包含字母和数字" />
           </el-form-item>
           <el-form-item label="确认密码">
             <el-input v-model="state.userManagement.form.confirmPassword" type="password" show-password autocomplete="new-password" />
           </el-form-item>
-          <el-alert title="用户首次登录后必须修改初始密码" type="info" :closable="false" show-icon />
         </template>
       </el-form>
       <template #footer>
@@ -158,11 +142,11 @@ function statusTagType(status) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="state.userManagement.resetOpen" title="重置密码" width="460px" destroy-on-close>
-      <div class="mb-4 text-sm font-semibold text-slate-500 dark:text-slate-400">为 {{ state.userManagement.resetUser?.displayName }} 设置临时密码</div>
+    <el-dialog v-model="state.userManagement.resetOpen" title="重置密码" width="460px" append-to-body destroy-on-close>
+      <div class="mb-4 text-sm font-semibold text-slate-500 dark:text-slate-400">为 {{ state.userManagement.resetUser?.displayName }} 设置新的登录密码</div>
       <el-alert v-if="state.userManagement.resetError" class="mb-4" :title="state.userManagement.resetError" type="error" show-icon :closable="false" />
       <el-form label-position="top" @submit.prevent="resetManagedAdminPassword">
-        <el-form-item label="临时密码"><el-input v-model="state.userManagement.resetPassword" type="password" show-password autocomplete="new-password" placeholder="至少 8 位，同时包含字母和数字" /></el-form-item>
+        <el-form-item label="新密码"><el-input v-model="state.userManagement.resetPassword" type="password" show-password autocomplete="new-password" placeholder="至少 8 位，同时包含字母和数字" /></el-form-item>
         <el-form-item label="确认密码"><el-input v-model="state.userManagement.resetPasswordConfirm" type="password" show-password autocomplete="new-password" /></el-form-item>
       </el-form>
       <template #footer>

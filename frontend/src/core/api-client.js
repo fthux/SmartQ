@@ -20,11 +20,15 @@ export async function request(path, options = {}) {
   }
   if (!response.ok) {
     let message = `${path} ${response.status}`;
+    let payload = null;
     try {
-      const payload = await response.json();
+      payload = await response.json();
       message = payload.error || message;
     } catch {}
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
   }
   return response.json();
 }

@@ -3,8 +3,6 @@ import { loadState } from "../lib/runtime-store.js";
 import {
   authenticateAdmin,
   authToken,
-  requireAdminPermission,
-  requiredAdminPermission,
   requiresAdminAuth,
 } from "../services/auth-service.js";
 import { handleAdminLoginRoute, handleAdminRoutes } from "./admin.js";
@@ -25,22 +23,6 @@ export async function handleApi(req, res, url) {
     auth = authenticateAdmin(state, token);
     if (auth.error) {
       sendJson(res, auth.statusCode || 401, auth);
-      return;
-    }
-    const permission = requireAdminPermission(auth.session, requiredAdminPermission(req, url));
-    if (permission.error) {
-      sendJson(res, permission.statusCode || 403, permission);
-      return;
-    }
-    const passwordChangeAllowed = [
-      "/api/admin/me",
-      "/api/admin/password",
-      "/api/admin/profile",
-      "/api/admin/profile/avatar",
-      "/api/admin/logout",
-    ].includes(url.pathname);
-    if (auth.user.mustChangePassword && !passwordChangeAllowed) {
-      sendJson(res, 403, { error: "请先修改初始密码", mustChangePassword: true });
       return;
     }
   }

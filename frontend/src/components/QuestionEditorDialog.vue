@@ -38,6 +38,9 @@ const letters = ["A", "B", "C", "D"];
         </el-form-item>
         <el-form-item v-else label="答案" :error="state.questionEditErrors.answerText"><el-input v-model="state.questionEditForm.answerText" /></el-form-item>
         <el-form-item label="解析"><el-input v-model="state.questionEditForm.explanation" /></el-form-item>
+        <el-form-item v-if="['简答','论述'].includes(state.questionEditForm.type)" label="评分规则" :error="state.questionEditErrors.rubricText">
+          <el-input v-model="state.questionEditForm.rubricText" type="textarea" :rows="4" placeholder="每行或使用逗号分隔一条评分规则" />
+        </el-form-item>
       </div>
     </el-form>
     <template #footer>

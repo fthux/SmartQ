@@ -8,8 +8,8 @@ SmartQ 是一个面向考试与测评内容生产的轻量管理系统。当前�
 - 生成稳定性：规范化 AI 输出并校验题量、题型、总分和必填字段
 - 题目质量：质量复检、自动修复、人工审核和题目编辑
 - 试卷管理：保存草稿、发布试卷、查看详情、切换当前试卷和删除试卷
-- 用户管理：创建、编辑、启停、重置密码、强制下线和角色权限
-- 账号安全：登录限流、首次强制改密和 scrypt 密码哈希
+- 用户管理：创建、编辑、启停、重置密码和强制下线
+- 账号安全：登录限流和 scrypt 密码哈希
 - 存储适配：默认 JSON 文件，可选 PostgreSQL JSONB 存储并保留本地镜像
 
 ## 项目结构
@@ -40,7 +40,7 @@ npm run dev
 - 账号：`admin`
 - 密码：`123456`
 
-默认账号首次登录后必须修改密码。正式部署前仍建议通过环境变量设置独立的初始管理员账号和密码。
+默认账号可以直接登录。正式部署前请通过环境变量设置独立的初始管理员账号和密码。
 
 验证：
 
@@ -62,7 +62,6 @@ npm start
 PORT=3000
 SMARTQ_ADMIN_USER=admin
 SMARTQ_ADMIN_PASSWORD=123456
-SMARTQ_ADMIN_ROLE=admin
 SMARTQ_ADMIN_ACCOUNTS=
 SMARTQ_STORAGE_ADAPTER=json-file
 SMARTQ_DATABASE_URL=
@@ -87,12 +86,7 @@ OPENAI_WIRE_API=responses
 AI_MOCK_MODE=false
 ```
 
-`SMARTQ_ADMIN_ROLE` 支持：
-
-- `admin`：用户管理、出题和试卷权限
-- `author`：出题和试卷权限
-
-`SMARTQ_ADMIN_USER`、`SMARTQ_ADMIN_PASSWORD`、`SMARTQ_ADMIN_ROLE` 和 `SMARTQ_ADMIN_ACCOUNTS` 只用于首次初始化账号。初始化完成后，账号、角色和密码以运行时存储中的 `adminUsers` 为准；已有 `adminProfiles` 会自动合并到对应用户，旧会话会失效。密码只以 scrypt 哈希保存，不会把环境变量中的明文密码写入运行时文件。
+`SMARTQ_ADMIN_USER`、`SMARTQ_ADMIN_PASSWORD` 和 `SMARTQ_ADMIN_ACCOUNTS` 只用于首次初始化账号。初始化完成后，账号和密码以运行时存储中的 `adminUsers` 为准；已有 `adminProfiles` 会自动合并到对应用户，旧会话会失效。所有有效账号均可使用完整控制台功能，密码只以 scrypt 哈希保存，不会把环境变量中的明文密码写入运行时文件。
 
 `npm run verify` 会使用 `AI_MOCK_MODE=true` 启动临时服务，不会调用真实 AI 接口。
 

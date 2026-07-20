@@ -66,15 +66,14 @@ export function createAppStore() {
         page: 1,
         pageSize: 20,
         search: "",
-        role: "",
         status: "",
-        roles: [],
         loading: false,
         error: "",
+        statusUpdatingId: null,
         editorOpen: false,
         editorMode: "create",
         editingId: null,
-        form: { username: "", displayName: "", role: "author", password: "", confirmPassword: "" },
+        form: { username: "", displayName: "", password: "", confirmPassword: "" },
         formError: "",
         saving: false,
         resetOpen: false,
@@ -95,6 +94,8 @@ export function createAppStore() {
       regeneratingDraft: false,
       activeWorkflowStep: "config",
       saving: false,
+      publishing: false,
+      publishQualityFailures: [],
       generating: false,
       generationProgress: 0,
       generationStage: "",
@@ -123,26 +124,21 @@ export function createAppStore() {
     });
 
     const navItems = [
-      { key: "papers", label: "已出卷子", icon: "files", permission: "papers" },
-      { key: "authoring", label: "出题制卷", icon: "sparkles", permission: "authoring" },
-      { key: "users", label: "用户管理", icon: "users", permission: "users" },
+      { key: "papers", label: "已出卷子", icon: "files" },
+      { key: "authoring", label: "出题制卷", icon: "sparkles" },
+      { key: "users", label: "用户管理", icon: "users" },
       { key: "profile", label: "个人资料", icon: "user-round", showInNav: false },
     ];
 
-    const adminPermissions = computed(() => state.admin.user?.permissions || []);
     const adminDisplayName = computed(() => state.admin.user?.displayName || state.admin.user?.username || state.admin.username || "admin");
-    const adminRoleLabel = computed(() => state.admin.user?.roleLabel || (state.admin.user?.role === "admin" ? "管理员" : "内容运营"));
     const adminAccountMenuItems = computed(() => [
       { key: "profile", label: "个人资料", icon: "user-round", action: openAdminProfile },
       { key: "logout", label: "退出登录", icon: "log-out", tone: "danger", action: logoutAdmin },
     ]);
-    const visibleNavItems = computed(() => state.admin.user?.mustChangePassword
-      ? []
-      : navItems.filter((item) => item.showInNav !== false && (!item.permission || hasAdminPermission(item.permission))));
+    const visibleNavItems = computed(() => navItems.filter((item) => item.showInNav !== false));
     const currentNavItem = computed(() => navItems.find((item) => item.key === state.route) || navItems[0]);
     const questions = computed(() => state.dashboard?.questions || []);
     const paper = computed(() => state.dashboard?.paper || {});
-    const quality = computed(() => state.dashboard?.quality || {});
     const papers = computed(() => state.dashboard?.papers || []);
     const publishedPapers = computed(() => papers.value.filter((item) => item.status === "已发布"));
     const isEditingPaper = computed(() => state.route === "authoring" && Boolean(state.authoringPaperId));
@@ -156,8 +152,6 @@ export function createAppStore() {
     const pendingReviewCount = computed(() => Math.max(0, questions.value.length - reviewedCount.value));
     const authoringReviewedCount = computed(() => authoringQuestions.value.filter((item) => item.status === "已校验").length);
     const authoringPendingReviewCount = computed(() => Math.max(0, authoringQuestions.value.length - authoringReviewedCount.value));
-    const authoringQuality = computed(() => (authoringQuestions.value.length ? quality.value : {}));
-    const hasCurrentPaper = computed(() => ["草稿", "未发布", "已保存", "已组卷", "已发布"].includes(paper.value.status));
     const draftReady = computed(() => Boolean(state.generatedDraft?.questions?.length || authoringQuestions.value.length));
     const formLocked = computed(() => state.generating || (draftReady.value && !state.regeneratingDraft));
     const totalQuestionCount = computed(() => paperTypeConfig.reduce((sum, item) => sum + numberValue(state.spec[item.countKey]), 0));
@@ -173,11 +167,8 @@ export function createAppStore() {
       const hasPersistedQuestions = authoringQuestions.value.length > 0 && !hasUnsavedDraft;
       const hasActiveAuthoring = hasPersistedQuestions && authoringPaperReady.value;
       const configDone = (hasUnsavedDraft || hasActiveAuthoring) && !state.regeneratingDraft;
-      const q = authoringQuality.value;
-      const qualityPassed =
-        hasActiveAuthoring && Number(q.schemaPassRate || 0) >= 100 && Number(q.answerConsistency || 0) >= 90 && !(q.failures || []).length;
-      const saved = hasActiveAuthoring && hasCurrentPaper.value && (!isEditingPaper.value || paper.value.id === state.authoringPaperId);
-      const published = saved && paper.value.status === "已发布";
+      const published = hasActiveAuthoring && paper.value.status === "已发布" && (!isEditingPaper.value || paper.value.id === state.authoringPaperId);
+      const publishReady = hasActiveAuthoring && authoringPendingReviewCount.value === 0;
       return [
         {
           key: "config",
@@ -188,14 +179,6 @@ export function createAppStore() {
           clickable: true,
         },
         {
-          key: "quality",
-          title: "质量复检",
-          meta: hasActiveAuthoring ? `${(q.failures || []).length} 个结构问题` : "生成并保存内容后复检",
-          status: qualityPassed ? "done" : hasActiveAuthoring ? "active" : "pending",
-          action: "执行复检",
-          clickable: qualityPassed || hasActiveAuthoring,
-        },
-        {
           key: "review",
           title: "人工审核",
           meta: hasActiveAuthoring ? `${authoringReviewedCount.value}/${authoringQuestions.value.length} 已通过` : "等待生成试卷",
@@ -204,20 +187,12 @@ export function createAppStore() {
           clickable: hasActiveAuthoring,
         },
         {
-          key: "save",
-          title: "保存试卷",
-          meta: saved ? `${paper.value.score || 0} 分 · ${paper.value.questionCount || 0} 题` : "审核完成后保存",
-          status: saved ? "done" : hasActiveAuthoring && authoringPendingReviewCount.value === 0 ? "active" : "pending",
-          action: "保存试卷",
-          clickable: saved || (hasActiveAuthoring && authoringPendingReviewCount.value === 0),
-        },
-        {
           key: "publish",
           title: "发布试卷",
-          meta: published ? "已发布" : saved ? "可发布" : "等待保存",
-          status: published ? "done" : saved ? "active" : "pending",
+          meta: published ? "已发布" : publishReady ? "审核完成，可发布" : "等待审核完成",
+          status: published ? "done" : publishReady ? "active" : "pending",
           action: published ? "已发布" : "发布试卷",
-          clickable: published || saved,
+          clickable: published || publishReady,
         },
       ];
     });
@@ -334,12 +309,9 @@ export function createAppStore() {
       generateDraft,
       openQuestionEditor,
       publishPaper,
-      qualityCheck,
       regenerate,
-      repairQuality,
       reviewQuestion,
       saveDraft,
-      savePaper,
       saveQuestionEdit,
       setWorkflowStep,
     } = createAuthoringStore({
@@ -350,9 +322,7 @@ export function createAppStore() {
       workflowSteps,
       authoringQuestions,
       authoringPendingReviewCount,
-      questions,
       computedSpecTotalScore,
-      selectPaper,
       go: (...args) => go(...args),
     });
     async function refresh() {
@@ -381,7 +351,7 @@ export function createAppStore() {
     function go(route, params = {}) {
       if (!canAccessRoute(route)) {
         notify("当前账号无权访问该模块");
-        route = state.admin.user?.mustChangePassword ? "profile" : "papers";
+        route = "papers";
         params = {};
       }
       state.route = route;
@@ -389,6 +359,7 @@ export function createAppStore() {
         state.authoringPaperId = params.paperid || params.paperId || params.papeid || "";
         state.editingPaperId = state.authoringPaperId || null;
         state.authoringNewDraftActive = false;
+        state.publishQualityFailures = [];
         if (!state.authoringPaperId) {
           state.generatedDraft = null;
           state.regeneratingDraft = false;
@@ -405,16 +376,8 @@ export function createAppStore() {
       mountIcons();
     }
 
-    function hasAdminPermission(permission) {
-      if (!permission) return true;
-      const permissions = adminPermissions.value;
-      return permissions.includes(permission);
-    }
-
     function canAccessRoute(route) {
-      if (state.admin.user?.mustChangePassword) return route === "profile";
-      const item = navItems.find((entry) => entry.key === route);
-      return item ? hasAdminPermission(item.permission) : false;
+      return navItems.some((entry) => entry.key === route);
     }
 
     watch(documentTitle, (title) => {
@@ -425,7 +388,7 @@ export function createAppStore() {
       window.addEventListener("hashchange", () => {
         state.route = currentRoute();
         if (state.admin.token && !canAccessRoute(state.route)) {
-          state.route = state.admin.user?.mustChangePassword ? "profile" : "papers";
+          state.route = "papers";
           const routeHash = formatRouteHash(state.route);
           if (routeHash) location.hash = routeHash;
           else history.replaceState(null, "", `${location.pathname}${location.search}`);
@@ -450,7 +413,7 @@ export function createAppStore() {
       });
       initializeLayout();
       await loadAdminSession();
-      if (!state.admin.user?.mustChangePassword) await refresh();
+      await refresh();
       if (state.route === "users") await loadAdminUsers();
       if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
         await activatePaper(state.authoringPaperId, { silent: true });
@@ -462,18 +425,14 @@ export function createAppStore() {
       navItems,
       visibleNavItems,
       currentNavItem,
-      adminPermissions,
       adminDisplayName,
-      adminRoleLabel,
       adminAccountMenuItems,
       themeOptions,
       questions,
       authoringQuestions,
-      authoringQuality,
       authoringReviewedCount,
       authoringPendingReviewCount,
       paper,
-      quality,
       papers,
       publishedPapers,
       paperRows,
@@ -494,7 +453,6 @@ export function createAppStore() {
       computedSpecTotalScore,
       refresh,
       go,
-      hasAdminPermission,
       canAccessRoute,
       applyAdminUserFilters,
       changeAdminUserPage,
@@ -527,9 +485,6 @@ export function createAppStore() {
       discardDraft,
       regenerate,
       reviewQuestion,
-      qualityCheck,
-      repairQuality,
-      savePaper,
       publishPaper,
       activatePaper,
       selectPaper,

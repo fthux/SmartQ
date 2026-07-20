@@ -29,7 +29,7 @@ export function getGenerationJob(id) {
 }
 
 async function runGenerationJob(job, spec) {
-  updateGenerationJob(job, { progress: 36, stage: "连接 AI 出题服务" });
+  updateGenerationJob(job, { progress: 36, stage: "AI 正在生成题目" });
   try {
     const result = await generateQuestions(spec);
     updateGenerationJob(job, {

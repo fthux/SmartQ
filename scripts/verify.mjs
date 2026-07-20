@@ -10,6 +10,9 @@ const runtimeFile = join(runtimeDir, "runtime.json");
 const backupDir = join(runtimeDir, "backups");
 let adminHeaders = {};
 let output = "";
+const retiredInitialPasswordFlag = ["must", "ChangePassword"].join("");
+
+await verifyLegacyAdminNormalization();
 
 const server = spawn(process.execPath, ["backend/server.js"], {
   stdio: ["ignore", "pipe", "pipe"],
@@ -22,8 +25,8 @@ const server = spawn(process.execPath, ["backend/server.js"], {
     SMARTQ_BACKUP_MIN_INTERVAL_SECONDS: "0",
     SMARTQ_MAX_REQUEST_BYTES: String(128 * 1024),
     SMARTQ_ADMIN_ACCOUNTS: JSON.stringify([
-      { username: "verify-admin", password: "123456", role: "admin" },
-      { username: "verify-author", password: "Author@2026", role: "author" },
+      { username: "verify-admin", password: "123456" },
+      { username: "verify-user", password: "User@2026", role: "author" },
     ]),
     SMARTQ_LOGIN_MAX_FAILURES: "2",
     SMARTQ_LOGIN_WINDOW_SECONDS: "60",
@@ -71,6 +74,12 @@ try {
   ];
   const frontendSources = await Promise.all(frontendFiles.map((path) => readFile(path, "utf8")));
   const frontend = frontendSources.join("\n");
+  const backendFiles = [
+    "backend/routes/index.js",
+    "backend/services/admin-user-service.js",
+    "backend/services/auth-service.js",
+  ];
+  const backend = (await Promise.all(backendFiles.map((path) => readFile(path, "utf8")))).join("\n");
   assert(frontend.includes('createApp(App)') && frontend.includes('app.mount("#app")') && frontend.includes("ElementPlusResolver"), "frontend mounts Vue 3 with on-demand Element Plus components");
   assert(frontend.includes("<script setup>") && frontend.includes("<el-form") && frontend.includes("<el-button"), "frontend pages use Vue SFC and Element Plus controls");
   assert(frontend.includes("<el-table") && frontend.includes("<el-drawer") && frontend.includes("<el-dialog"), "tables, drawers, and dialogs use Element Plus components");
@@ -91,8 +100,14 @@ try {
   assert(builtCss.includes("html.dark .login-art-skyline") && builtCss.includes("html.dark .smartq-menu"), "built dark rules keep their descendant selectors");
   assert(!/html\.dark\{[^}]*opacity:\s*\.2/.test(builtCss), "built CSS never dims the entire dark document");
   assert(frontend.includes("个人资料") && frontend.includes("/api/admin/profile/avatar"), "profile page supports persistent avatar updates");
+  assert(frontend.includes("state.admin.user?.avatar || publicUrl('/assets/favicon.svg')") && frontend.includes("state.profile.avatarPreview || publicUrl('/assets/favicon.svg')") && frontend.includes("row.avatar || publicUrl('/assets/favicon.svg')"), "users without uploaded avatars display favicon.svg by default");
   assert(frontend.includes("用户管理") && frontend.includes("/api/admin/users") && frontend.includes("重置密码"), "admin user management UI is available");
-  assert(frontend.includes("mustChangePassword") && frontend.includes("/api/admin/password"), "initial password changes are enforced in the frontend");
+  assert(!frontend.includes("全部角色") && !frontend.includes('label="角色"') && !frontend.includes("adminRoleLabel"), "role controls and labels are removed from the frontend");
+  assert((frontend.match(/append-to-body/g) || []).length >= 2, "user management dialogs attach overlays to the document body");
+  assert(frontend.includes('active-value="active"') && frontend.includes('inactive-value="disabled"') && frontend.includes("statusUpdatingId"), "user status switches use Element Plus active, inactive, disabled, and loading states");
+  assert(frontend.includes("/api/admin/password"), "profile page keeps voluntary password changes");
+  assert(!frontend.includes(retiredInitialPasswordFlag) && !/首次登录.*修改.*密码|初始密码/.test(frontend), "frontend removes the initial-password change policy and UI");
+  assert(!backend.includes(retiredInitialPasswordFlag) && !backend.includes("请先修改初始密码"), "backend removes the initial-password field and API gate");
   assert(frontend.includes("await uploadAdminAvatar(file)") && frontend.includes("用户头像已更新"), "valid avatar selection uploads immediately");
   assert(frontend.includes("100 * 1024") && frontend.includes("width !== dimensions.height"), "avatar selection enforces 100KB square images");
   assert(frontend.includes('window.scrollTo({ top: 0, left: 0, behavior: "auto" });'), "frontend resets scroll on module switches");
@@ -105,6 +120,12 @@ try {
   assert(!/#\/candidate|\/api\/candidate\/|\/api\/participants|\/api\/assignments|\/api\/proctor|\/api\/grading|\/api\/analysis/.test(frontend), "frontend removes retired routes and API calls");
   assert(frontend.includes("cleanupLegacyServiceWorkers") && frontend.includes("registration.unregister()"), "frontend still clears legacy service workers");
   assert(frontend.includes("paperTypeConfig") && frontend.includes("computedSpecTotalScore"), "frontend keeps paper score calculation");
+  assert(!frontend.includes("质量复检") && !frontend.includes('key: "quality"'), "authoring UI hides quality review as a workflow step");
+  assert(!frontend.includes('key: "save"') && !frontend.includes("savePaper"), "authoring removes the visible save-paper step and action");
+  assert(frontend.includes("generationStageForProgress") && !frontend.includes("连接 AI 出题服务"), "generation progress uses stable progress-based stage text");
+  assert(frontend.includes("publishQualityFailures") && frontend.includes("发布已终止") && frontend.includes("editPublishIssue"), "publish failures stay visible and link to question editing");
+  assert(frontend.includes("data-authoring-workbench") && frontend.includes("data-authoring-summary") && frontend.includes("data-authoring-action-bar"), "authoring uses the dense workbench, summary, and action bar layout");
+  assert(frontend.includes("data-question-type-matrix") && frontend.includes("typeMatrixRows") && frontend.includes("通过并继续"), "authoring keeps the compact type matrix and next-question review flow");
   assert(frontend.includes('paperPageSize: 20') && frontend.includes('aria-label="试卷状态筛选"'), "paper management uses the Element Plus list controls");
   assert(frontend.includes('aria-label="试卷详情抽屉"') && frontend.includes("paperDetailMode"), "paper details open in the responsive drawer");
 
@@ -124,7 +145,7 @@ try {
 
   const adminLogin = await postJson("/api/admin/login", { username: "verify-admin", password: "123456" });
   adminHeaders = authHeaders(adminLogin.token);
-  assert(adminLogin.admin.permissions.join(",") === "authoring,papers,users", "admin permissions include user management");
+  assert(!("role" in adminLogin.admin) && !("roleLabel" in adminLogin.admin) && !("permissions" in adminLogin.admin), "login responses omit retired role metadata");
   const adminMe = await getJson("/api/admin/me", { headers: adminHeaders });
   assert(adminMe.admin.username === "verify-admin", "admin token loads current user");
   assert(adminMe.admin.displayName === "verify-admin" && adminMe.admin.avatar === "", "admin profile has stable defaults");
@@ -145,71 +166,68 @@ try {
   const persistedAdmin = persistedRuntime.adminUsers?.find((user) => user.username === "verify-admin");
   assert(persistedAdmin?.avatar === updatedAvatar.admin.avatar, "avatar is persisted on the unified admin user record");
   assert(persistedRuntime.adminUsers.every((user) => user.passwordHash.startsWith("scrypt$") && !("password" in user)), "runtime users contain password hashes without plaintext passwords");
+  assert(persistedRuntime.adminUsers.every((user) => !("role" in user)), "runtime users no longer persist role fields");
+  assert(persistedRuntime.adminUsers.every((user) => !(retiredInitialPasswordFlag in user)), "runtime users no longer persist the retired password-policy field");
 
   const initialUsers = await getJson("/api/admin/users", { headers: adminHeaders });
-  assert(initialUsers.total === 2 && initialUsers.roles.some((role) => role.value === "admin"), "admin can list bootstrapped users and role metadata");
-  assert(initialUsers.users.every((user) => !("passwordHash" in user)), "user management responses never expose password hashes");
-  const selfUpdate = await patchJson(`/api/admin/users/${adminMe.admin.id}`, { role: "author" }, { headers: adminHeaders, expectedStatus: 409 });
-  assert(selfUpdate.error.includes("不能修改自己"), "an admin cannot remove their own authority");
+  assert(initialUsers.total === 2 && !("roles" in initialUsers), "authenticated users can list bootstrapped accounts without role metadata");
+  assert(initialUsers.users.every((user) => !("passwordHash" in user) && !("role" in user)), "user management responses expose neither password hashes nor roles");
+  const selfUpdate = await patchJson(`/api/admin/users/${adminMe.admin.id}`, { status: "disabled" }, { headers: adminHeaders, expectedStatus: 409 });
+  assert(selfUpdate.error.includes("不能停用自己"), "a user cannot disable their own account");
 
   const createdUser = await postJson("/api/admin/users", {
     username: "managed-user",
     displayName: "受管用户",
-    role: "author",
     password: "Managed@2026",
   }, { headers: adminHeaders, expectedStatus: 201 });
-  assert(createdUser.user.mustChangePassword === true && createdUser.user.status === "active", "new users start active and must change their password");
+  assert(createdUser.user.status === "active" && !(retiredInitialPasswordFlag in createdUser.user), "new users start active without password-change metadata");
   await postJson("/api/admin/users", {
     username: "managed-user",
     displayName: "重复用户",
-    role: "author",
     password: "Managed@2026",
   }, { headers: adminHeaders, expectedStatus: 409 });
   const filteredUsers = await getJson("/api/admin/users?search=managed&page=1&pageSize=10", { headers: adminHeaders });
   assert(filteredUsers.total === 1 && filteredUsers.users[0].id === createdUser.user.id, "user list supports server-side search and pagination");
 
   const managedLogin = await postJson("/api/admin/login", { username: "managed-user", password: "Managed@2026" });
-  let managedHeaders = authHeaders(managedLogin.token);
-  assert(managedLogin.admin.mustChangePassword === true, "new user login reports the required password change");
-  const forcedChange = await getJson("/api/dashboard", { headers: managedHeaders, expectedStatus: 403 });
-  assert(forcedChange.mustChangePassword === true, "business APIs are blocked until the initial password is changed");
+  const managedHeaders = authHeaders(managedLogin.token);
+  assert(!(retiredInitialPasswordFlag in managedLogin.admin), "new user login omits retired password-change metadata");
+  await getJson("/api/dashboard", { headers: managedHeaders });
+  await getJson("/api/admin/users", { headers: managedHeaders });
   const changedPassword = await putJson("/api/admin/password", {
     currentPassword: "Managed@2026",
     newPassword: "Managed@2027",
   }, { headers: managedHeaders });
-  assert(changedPassword.admin.mustChangePassword === false, "user can replace the initial password");
+  assert(!(retiredInitialPasswordFlag in changedPassword.admin), "users can voluntarily update their password without policy metadata");
   await getJson("/api/dashboard", { headers: managedHeaders });
 
-  const promotedUser = await patchJson(`/api/admin/users/${createdUser.user.id}`, {
-    displayName: "受管管理员",
+  const renamedUser = await patchJson(`/api/admin/users/${createdUser.user.id}`, {
+    displayName: "受管账号",
     role: "admin",
   }, { headers: adminHeaders });
-  assert(promotedUser.user.role === "admin" && promotedUser.user.displayName === "受管管理员", "admin can update another user's name and role");
-  await getJson("/api/dashboard", { headers: managedHeaders, expectedStatus: 401 });
-  const promotedLogin = await postJson("/api/admin/login", { username: "managed-user", password: "Managed@2027" });
-  managedHeaders = authHeaders(promotedLogin.token);
-  await getJson("/api/admin/users", { headers: managedHeaders });
+  assert(renamedUser.user.displayName === "受管账号" && !("role" in renamedUser.user), "user profile updates ignore legacy role payloads");
+  const managedMe = await getJson("/api/admin/me", { headers: managedHeaders });
+  assert(managedMe.admin.displayName === "受管账号", "profile-only user updates keep existing sessions valid");
 
   const resetUser = await postJson(`/api/admin/users/${createdUser.user.id}/reset-password`, { password: "Reset@2028" }, { headers: adminHeaders });
-  assert(resetUser.user.mustChangePassword === true && resetUser.revokedSessions >= 1, "password reset marks the password temporary and revokes sessions");
+  assert(!(retiredInitialPasswordFlag in resetUser.user) && resetUser.revokedSessions >= 1, "password reset revokes sessions without adding password-change metadata");
   await getJson("/api/dashboard", { headers: managedHeaders, expectedStatus: 401 });
   const resetLogin = await postJson("/api/admin/login", { username: "managed-user", password: "Reset@2028" });
   const resetHeaders = authHeaders(resetLogin.token);
+  await getJson("/api/dashboard", { headers: resetHeaders });
   const disabledUser = await patchJson(`/api/admin/users/${createdUser.user.id}`, { status: "disabled" }, { headers: adminHeaders });
   assert(disabledUser.user.status === "disabled", "admin can disable another user");
   await getJson("/api/admin/me", { headers: resetHeaders, expectedStatus: 401 });
   await postJson("/api/admin/login", { username: "managed-user", password: "Reset@2028" }, { expectedStatus: 403 });
 
-  const authorLogin = await postJson("/api/admin/login", { username: "verify-author", password: "Author@2026" });
-  let authorHeaders = authHeaders(authorLogin.token);
-  assert(authorLogin.admin.permissions.join(",") === "authoring,papers", "author role contains only content permissions");
-  const blockedAuthorUsers = await getJson("/api/admin/users", { headers: authorHeaders, expectedStatus: 403 });
-  assert(blockedAuthorUsers.permission === "users", "author role cannot access user management APIs");
-  const revokedAuthor = await postJson(`/api/admin/users/${authorLogin.admin.id}/revoke-sessions`, {}, { headers: adminHeaders });
-  assert(revokedAuthor.revokedSessions >= 1, "admin can force another user offline");
-  await getJson("/api/dashboard", { headers: authorHeaders, expectedStatus: 401 });
-  const authorRelogin = await postJson("/api/admin/login", { username: "verify-author", password: "Author@2026" });
-  authorHeaders = authHeaders(authorRelogin.token);
+  const secondUserLogin = await postJson("/api/admin/login", { username: "verify-user", password: "User@2026" });
+  const secondUserHeaders = authHeaders(secondUserLogin.token);
+  await getJson("/api/admin/users", { headers: secondUserHeaders });
+  const revokedSecondUser = await postJson(`/api/admin/users/${secondUserLogin.admin.id}/revoke-sessions`, {}, { headers: adminHeaders });
+  assert(revokedSecondUser.revokedSessions >= 1, "one user can force another user offline");
+  await getJson("/api/dashboard", { headers: secondUserHeaders, expectedStatus: 401 });
+  const secondUserRelogin = await postJson("/api/admin/login", { username: "verify-user", password: "User@2026" });
+  const contentUserHeaders = authHeaders(secondUserRelogin.token);
 
   persistedRuntime = JSON.parse(await readFile(runtimeFile, "utf8"));
   assert(persistedRuntime.auditLog.some((item) => item.type === "admin-user-password-reset"), "user management changes are audited");
@@ -250,29 +268,35 @@ try {
     knowledge: ["语言基础", "工程质量"],
     requirements: "题干清晰，答案明确。",
   };
-  const generated = await generateQuestionsAsync(generationSpec, authorHeaders);
+  const generated = await generateQuestionsAsync(generationSpec, contentUserHeaders);
   assert(generated.questions.length === 4 && generated.spec.totalScore === 10, "AI mock generation respects retained paper specification");
-  const previewDashboard = await getJson("/api/dashboard", { headers: authorHeaders });
+  const previewDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
   assert(previewDashboard.questions.length === 0, "unsaved generation does not mutate runtime content");
 
-  const savedDraft = await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: generated.spec }, { headers: authorHeaders });
+  const savedDraft = await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: generated.spec }, { headers: contentUserHeaders });
   assert(savedDraft.saved === true, "generated preview can be saved");
-  const draftDashboard = await getJson("/api/dashboard", { headers: authorHeaders });
+  const draftDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
   assert(draftDashboard.questions.length === 4 && draftDashboard.stats.pendingReview === 4, "dashboard reflects saved draft and review count");
 
-  const quality = await postJson("/api/quality/check", {}, { headers: authorHeaders });
+  const quality = await postJson("/api/quality/check", {}, { headers: contentUserHeaders });
   assert(Array.isArray(quality.failures) && Number.isFinite(quality.schemaPassRate), "quality check remains available");
-  const blockedBuild = await postJson("/api/papers/build", {}, { headers: authorHeaders, expectedStatus: 409 });
+  const blockedBuild = await postJson("/api/papers/build", {}, { headers: contentUserHeaders, expectedStatus: 409 });
   assert(blockedBuild.eligibleCount === 0, "paper build requires manual review");
 
-  await Promise.all(draftDashboard.questions.map((question) => patchJson(`/api/questions/${question.id}`, { status: "已校验" }, { headers: authorHeaders })));
-  const paper = await postJson("/api/papers/build", {}, { headers: authorHeaders });
-  assert(paper.status === "草稿" && paper.questionCount === 4 && paper.score === 10, "reviewed questions build a draft paper");
-  const published = await postJson("/api/papers/publish", {}, { headers: authorHeaders });
-  assert(published.status === "已发布" && published.id === paper.id, "paper publishing remains available");
-  const paperDetail = await getJson(`/api/papers/${paper.id}`, { headers: authorHeaders });
+  await Promise.all(draftDashboard.questions.map((question) => patchJson(`/api/questions/${question.id}`, { status: "已校验" }, { headers: contentUserHeaders })));
+  const invalidQuestion = draftDashboard.questions[0];
+  await patchJson(`/api/questions/${invalidQuestion.id}`, { score: 0, status: "待确认" }, { headers: contentUserHeaders });
+  const blockedPublish = await postJson("/api/papers/publish", {}, { headers: contentUserHeaders, expectedStatus: 409 });
+  assert(blockedPublish.failures.some((failure) => failure.questionId === invalidQuestion.id && failure.field === "score"), "publish runs validation and returns actionable question failures");
+  const blockedPublishDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
+  assert(blockedPublishDashboard.paper.status !== "已发布", "failed publish keeps the paper unpublished");
+  await patchJson(`/api/questions/${invalidQuestion.id}`, { score: generated.questions[0].score, status: "已校验" }, { headers: contentUserHeaders });
+  const published = await postJson("/api/papers/publish", {}, { headers: contentUserHeaders });
+  assert(published.status === "已发布" && published.questionCount === 4 && published.score === 10, "publish automatically saves and publishes reviewed questions");
+  const paper = published;
+  const paperDetail = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
   assert(paperDetail.questions.length === 4 && paperDetail.status === "已发布", "paper detail returns the published snapshot");
-  const activated = await postJson(`/api/papers/${paper.id}/activate`, {}, { headers: authorHeaders });
+  const activated = await postJson(`/api/papers/${paper.id}/activate`, {}, { headers: contentUserHeaders });
   assert(activated.id === paper.id, "paper can be activated as current");
 
   const dashboard = await getJson("/api/dashboard", { headers: adminHeaders });
@@ -295,6 +319,64 @@ async function generateQuestionsAsync(spec, headers) {
     await delay(20);
   }
   throw new Error("AI generation timed out");
+}
+
+async function verifyLegacyAdminNormalization() {
+  const previous = {
+    accounts: process.env.SMARTQ_ADMIN_ACCOUNTS,
+    username: process.env.SMARTQ_ADMIN_USER,
+    password: process.env.SMARTQ_ADMIN_PASSWORD,
+  };
+  delete process.env.SMARTQ_ADMIN_ACCOUNTS;
+  delete process.env.SMARTQ_ADMIN_USER;
+  delete process.env.SMARTQ_ADMIN_PASSWORD;
+  try {
+    const { hashAdminPassword, initializeAdminUsers } = await import("../backend/services/admin-user-service.js");
+    const freshState = { adminUsers: [], adminSessions: {}, auditLog: [] };
+    await initializeAdminUsers(freshState);
+    assert(freshState.adminUsers[0].username === "admin" && !(retiredInitialPasswordFlag in freshState.adminUsers[0]), "default admin omits retired password-policy metadata");
+
+    const legacyState = {
+      adminUsers: [{
+        id: "legacy-default-admin",
+        username: "admin",
+        passwordHash: await hashAdminPassword("123456"),
+        displayName: "admin",
+        avatar: "",
+        role: "admin",
+        status: "active",
+        [retiredInitialPasswordFlag]: true,
+        authVersion: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastLoginAt: null,
+        passwordChangedAt: new Date().toISOString(),
+        createdBy: "bootstrap",
+      }],
+      adminSessions: {
+        legacy: {
+          userId: "legacy-default-admin",
+          role: "admin",
+          permissions: ["authoring", "papers", "users"],
+          [retiredInitialPasswordFlag]: true,
+        },
+      },
+      auditLog: [],
+    };
+    await initializeAdminUsers(legacyState);
+    assert(!(retiredInitialPasswordFlag in legacyState.adminUsers[0]), "legacy user password-policy metadata is removed during normalization");
+    assert(!("role" in legacyState.adminUsers[0]), "legacy role fields are removed during user normalization");
+    assert(!("role" in legacyState.adminSessions.legacy) && !("permissions" in legacyState.adminSessions.legacy) && !(retiredInitialPasswordFlag in legacyState.adminSessions.legacy), "legacy session metadata is removed during normalization");
+  } finally {
+    restoreEnv("SMARTQ_ADMIN_ACCOUNTS", previous.accounts);
+    restoreEnv("SMARTQ_ADMIN_USER", previous.username);
+    restoreEnv("SMARTQ_ADMIN_PASSWORD", previous.password);
+  }
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }
 
 async function waitForHealth() {

@@ -7,7 +7,7 @@ import {
   revokeManagedAdminUserSessions,
   updateAdminUser,
 } from "../services/admin-user-service.js";
-import { authenticateAdmin, requireAdminPermission } from "../services/auth-service.js";
+import { authenticateAdmin } from "../services/auth-service.js";
 
 export async function handleAdminUserRoutes(req, res, url, state, auth, token) {
   if (req.method === "GET" && url.pathname === "/api/admin/users") {
@@ -65,8 +65,5 @@ export async function handleAdminUserRoutes(req, res, url, state, auth, token) {
 }
 
 function authorizeUsers(state, token) {
-  const auth = authenticateAdmin(state, token);
-  if (auth.error) return auth;
-  const permission = requireAdminPermission(auth.session, "users");
-  return permission.error ? permission : auth;
+  return authenticateAdmin(state, token);
 }

@@ -2,7 +2,7 @@
 import { Upload } from "@element-plus/icons-vue";
 import { useSmartQ } from "../stores/context.js";
 
-const { state, adminDisplayName, saveAdminProfile, selectAdminAvatar, changeAdminPassword, go } = useSmartQ();
+const { state, adminDisplayName, saveAdminProfile, selectAdminAvatar, changeAdminPassword, go, publicUrl } = useSmartQ();
 </script>
 
 <template>
@@ -12,21 +12,12 @@ const { state, adminDisplayName, saveAdminProfile, selectAdminAvatar, changeAdmi
       <div class="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">管理控制台中显示的用户信息</div>
     </div>
 
-    <el-alert
-      v-if="state.admin.user?.mustChangePassword"
-      class="mt-5"
-      title="当前使用的是初始密码，修改密码后才能进入其他功能"
-      type="warning"
-      :closable="false"
-      show-icon
-    />
-
     <el-form class="mt-5" label-position="top" @submit.prevent="saveAdminProfile">
       <div class="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
         <div class="border-b border-slate-200 pb-6 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-6 dark:border-night-border">
           <div class="text-xs font-black text-slate-500 dark:text-slate-400">用户头像</div>
           <div class="mt-3 flex items-center gap-4 lg:flex-col lg:items-start">
-            <el-avatar :size="96" shape="square" :src="state.profile.avatarPreview || undefined" class="bg-primary text-2xl font-black text-emerald-950">
+            <el-avatar :size="96" shape="square" :src="state.profile.avatarPreview || publicUrl('/assets/favicon.svg')" class="bg-primary text-2xl font-black text-emerald-950">
               {{ adminDisplayName.slice(0, 1).toUpperCase() }}
             </el-avatar>
             <div>
@@ -46,7 +37,7 @@ const { state, adminDisplayName, saveAdminProfile, selectAdminAvatar, changeAdmi
             <el-input :model-value="state.admin.user?.username || state.admin.username" disabled />
           </el-form-item>
           <div class="mt-6 flex items-center justify-end gap-2 border-t border-slate-200 pt-4 dark:border-night-border">
-            <el-button v-if="!state.admin.user?.mustChangePassword" @click="go('papers')">取消</el-button>
+            <el-button @click="go('papers')">取消</el-button>
             <el-button type="primary" native-type="submit" :loading="state.profile.saving" :disabled="state.profile.uploadingAvatar">保存资料</el-button>
           </div>
         </div>

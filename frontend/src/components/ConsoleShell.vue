@@ -28,7 +28,6 @@ const {
   visibleNavItems,
   currentNavItem,
   adminDisplayName,
-  adminRoleLabel,
   adminAccountMenuItems,
   themeOptions,
   go,
@@ -154,7 +153,7 @@ async function handleThemePreference(theme) {
 
           <el-dropdown trigger="click" @command="handleAdminCommand">
             <el-button text class="account-button h-10">
-              <el-avatar :size="32" shape="square" :src="state.admin.user?.avatar || undefined" class="bg-primary text-xs font-black text-emerald-950">{{ adminDisplayName.slice(0, 1).toUpperCase() }}</el-avatar>
+              <el-avatar :size="32" shape="square" :src="state.admin.user?.avatar || publicUrl('/assets/favicon.svg')" class="bg-primary text-xs font-black text-emerald-950">{{ adminDisplayName.slice(0, 1).toUpperCase() }}</el-avatar>
               <span class="hidden max-w-28 truncate text-xs font-black sm:block">{{ adminDisplayName }}</span>
               <el-icon class="hidden text-slate-400 sm:inline-flex"><ArrowDown /></el-icon>
             </el-button>
@@ -163,7 +162,7 @@ async function handleThemePreference(theme) {
                 <el-dropdown-item disabled>
                   <div class="min-w-44 py-1">
                     <div class="truncate text-sm font-black">{{ adminDisplayName }}</div>
-                    <div class="mt-0.5 truncate text-[11px] text-slate-400">{{ state.admin.user?.username || state.admin.username }} · {{ adminRoleLabel }}</div>
+                    <div class="mt-0.5 truncate text-[11px] text-slate-400">{{ state.admin.user?.username || state.admin.username }}</div>
                   </div>
                 </el-dropdown-item>
                 <el-dropdown-item v-for="item in adminAccountMenuItems" :key="item.key" :command="item.key" :divided="item.key === 'logout'">

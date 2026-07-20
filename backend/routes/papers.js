@@ -1,4 +1,4 @@
-import { buildPaper, saveFormalPaper } from "../lib/ai.js";
+import { buildPaper, saveFormalPaper, validateQuestions } from "../lib/ai.js";
 import { logItem } from "../lib/audit.js";
 import { readJson, sendJson } from "../lib/http.js";
 import { updateState } from "../lib/runtime-store.js";
@@ -34,14 +34,50 @@ export async function handlePaperRoutes(req, res, url, state) {
 
   if (req.method === "POST" && url.pathname === "/api/papers/publish") {
     const paper = await updateState((current) => {
-      if (!current.paper.id || !["草稿", "未发布", "已保存", "已组卷", "已发布"].includes(current.paper.status)) {
-        return { error: "请先保存试卷", paperStatus: current.paper.status };
-      }
+      const hasSavedPaper = Boolean(current.paper.id && ["草稿", "未发布", "已保存", "已组卷", "已发布"].includes(current.paper.status));
       const ids = new Set(current.paper.questionIds || []);
-      const paperQuestions = current.questions.filter((item) => ids.has(item.id));
+      const paperQuestions = hasSavedPaper ? current.questions.filter((item) => ids.has(item.id)) : current.questions;
+      if (!paperQuestions.length) return { error: "当前试卷没有题目，请先完成出题" };
+      const checks = validateQuestions(paperQuestions);
+      if (checks.failures.length) {
+        const failures = checks.failures.map((failure) => {
+          const question = paperQuestions[failure.index] || {};
+          return {
+            ...failure,
+            questionId: question.id || "",
+            questionNumber: failure.index + 1,
+            type: question.type || "",
+            stem: question.stem || "",
+          };
+        });
+        const paperName = current.paper.name || current.generationTask?.paperName || "未命名试卷";
+        current.auditLog.push(logItem("paper-publish-blocked", `${paperName} 发布检查未通过：${failures.length} 个问题`));
+        return {
+          error: `发布检查未通过，请修正以下 ${failures.length} 个问题后重新发布`,
+          failures,
+          checks: { ...checks, failures },
+        };
+      }
       const pending = paperQuestions.filter((item) => item.status !== "已校验").length;
       if (pending) return { error: `试卷内还有 ${pending} 道题待审核`, pending };
-      if (!paperQuestions.length) return { error: "当前试卷没有题目，请先保存试卷" };
+      if (!hasSavedPaper) {
+        const saved = saveFormalPaper(paperQuestions, {
+          ...current.paper,
+          id: `paper-${Date.now()}`,
+          name: current.generationTask?.paperName || current.paper.name || "未命名试卷",
+        });
+        if (saved.error) return saved;
+        current.paper = {
+          ...current.paper,
+          id: saved.id,
+          name: saved.name,
+          status: "草稿",
+          questionIds: saved.questionIds,
+          buildSpec: saved.buildSpec,
+          publishedAt: null,
+        };
+        current.auditLog.push(logItem("paper-auto-save", `发布前自动保存试卷：${saved.name}，${saved.questionCount} 题 / ${saved.score} 分`));
+      }
       current.paper.status = "已发布";
       current.paper.publishedAt = new Date().toISOString();
       upsertPaperSnapshot(current, buildPaper(current.questions, current.paper));

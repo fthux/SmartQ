@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 import { logItem } from "../lib/audit.js";
 import {
   findAdminUser,
-  permissionsForAdminRole,
   publicAdminUser,
   verifyAdminPassword,
 } from "./admin-user-service.js";
@@ -19,22 +18,6 @@ export function requiresAdminAuth(req, url) {
   if (req.method === "GET" && ["/api/health", "/api/config"].includes(url.pathname)) return false;
   if (req.method === "POST" && url.pathname === "/api/admin/login") return false;
   return true;
-}
-
-export function requiredAdminPermission(req, url) {
-  const path = url.pathname;
-  if (path === "/api/dashboard") return null;
-  if (path === "/api/admin/users" || path.startsWith("/api/admin/users/")) return "users";
-  if (path.startsWith("/api/ai/") || path.startsWith("/api/quality/") || path.startsWith("/api/questions/")) return "authoring";
-  if (path.startsWith("/api/papers/") || path === "/api/papers/build" || path === "/api/papers/publish") return "papers";
-  return null;
-}
-
-export function requireAdminPermission(session = {}, permission) {
-  if (!permission) return {};
-  const permissions = Array.isArray(session.permissions) ? session.permissions : permissionsForAdminRole(session.role);
-  if (permissions.includes(permission)) return {};
-  return { error: `无权访问该功能：需要 ${permission} 权限`, statusCode: 403, permission };
 }
 
 export async function loginAdmin(state, body = {}, req = {}) {
@@ -114,9 +97,6 @@ export function authenticateAdmin(state, token = "") {
   }
   session.lastSeenAt = new Date().toISOString();
   session.username = user.username;
-  session.role = user.role;
-  session.permissions = permissionsForAdminRole(user.role);
-  session.mustChangePassword = Boolean(user.mustChangePassword);
   return { session, user };
 }
 

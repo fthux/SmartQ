@@ -8,7 +8,6 @@ import {
   splitList,
 } from "../core/domain-utils.js";
 import { mountIcons } from "../core/presentation.js";
-import { formatRouteHash } from "../core/router.js";
 
 export function createAuthoringStore({
   state,
@@ -18,9 +17,7 @@ export function createAuthoringStore({
   workflowSteps,
   authoringQuestions,
   authoringPendingReviewCount,
-  questions,
   computedSpecTotalScore,
-  selectPaper,
   go,
 }) {
   function setWorkflowStep(step) {
@@ -79,7 +76,8 @@ export function createAuthoringStore({
         await refresh();
       }
       setGenerationProgress(100, "试卷已生成，等待确认");
-      notify("试卷已生成预览，刷新页面不会保留；确认后再进入质量复检");
+      state.publishQualityFailures = [];
+      notify("试卷已生成预览，刷新页面不会保留；确认后进入人工审核");
     } catch (error) {
       stopGenerationProgress();
       state.generatedDraft = previousGeneratedDraft;
@@ -124,8 +122,9 @@ export function createAuthoringStore({
       await refresh();
       state.authoringNewDraftActive = !state.authoringPaperId;
       syncSpecFromActiveDraft();
-      state.activeWorkflowStep = "quality";
-      if (!options.silent) notify("试卷内容已进入质量复检");
+      state.publishQualityFailures = [];
+      state.activeWorkflowStep = "review";
+      if (!options.silent) notify("试卷内容已进入人工审核");
       return result;
     } finally {
       state.saving = false;
@@ -135,8 +134,8 @@ export function createAuthoringStore({
   function startGenerationProgress() {
     stopGenerationProgress();
     state.generationStartedAt = Date.now();
-    state.generationProgress = 6;
-    state.generationStage = "准备命题参数";
+    state.generationProgress = 0;
+    setGenerationProgress(6);
     state.generationTimer = setInterval(() => {
       const elapsed = Date.now() - state.generationStartedAt;
       const current = state.generationProgress;
@@ -145,8 +144,7 @@ export function createAuthoringStore({
       else if (elapsed < 5000) next = Math.min(45, current + 2);
       else if (elapsed < 11000) next = Math.min(72, current + 1);
       else next = Math.min(92, current + 0.5);
-      const stage = next < 20 ? "准备命题参数" : next < 48 ? "连接 AI 出题服务" : next < 76 ? "AI 正在生成试卷" : "等待 AI 返回并校验结构";
-      setGenerationProgress(Math.round(next), stage);
+      setGenerationProgress(Math.round(next));
     }, 420);
   }
 
@@ -157,8 +155,9 @@ export function createAuthoringStore({
   }
 
   function setGenerationProgress(value, stage) {
-    state.generationProgress = Math.max(0, Math.min(100, value));
-    state.generationStage = stage;
+    const progress = Math.max(state.generationProgress, Math.max(0, Math.min(100, value)));
+    state.generationProgress = progress;
+    state.generationStage = generationStageForProgress(progress, stage);
   }
 
   async function saveDraft() {
@@ -168,9 +167,6 @@ export function createAuthoringStore({
     }
     try {
       await saveGeneratedContent(state.generatedDraft);
-      const qualityResult = await qualityCheck({ auto: true });
-      const qualityFailures = qualityResult?.failures?.length || 0;
-      if (qualityFailures > 0) notify(`试卷内容已进入质量复检，发现 ${qualityFailures} 个问题，请先自动修复`);
     } catch (error) {
       notify(`保存失败：${error.message}`);
     }
@@ -179,6 +175,7 @@ export function createAuthoringStore({
   function discardDraft() {
     state.generatedDraft = null;
     state.regeneratingDraft = false;
+    state.publishQualityFailures = [];
     state.activeWorkflowStep = "config";
     notify("已丢弃本次生成结果");
   }
@@ -189,6 +186,7 @@ export function createAuthoringStore({
     state.generationError = "";
     state.generationStage = "";
     state.generationProgress = 0;
+    state.publishQualityFailures = [];
     notify("已进入重新生成模式");
   }
 
@@ -200,83 +198,22 @@ export function createAuthoringStore({
       });
       await refresh();
       if (reviewed && authoringQuestions.value.length > 0 && authoringPendingReviewCount.value === 0) {
-        state.activeWorkflowStep = "save";
-        notify("题目已全部审核通过，请保存试卷");
+        state.activeWorkflowStep = "publish";
+        notify("题目已全部审核通过，可以发布试卷");
       } else {
         state.activeWorkflowStep = "review";
         notify(reviewed ? "题目已审核通过" : "已取消审核通过");
       }
+      return true;
     } catch (error) {
       notify(`审核操作失败：${error.message}`);
-    }
-  }
-
-  async function qualityCheck(options = {}) {
-    try {
-      if (state.generatedDraft?.questions?.length) {
-        const saved = await saveGeneratedContent(state.generatedDraft, { silent: true });
-        if (!saved) return null;
-      }
-      if (!authoringQuestions.value.length) {
-        notify("请先生成并保存试卷内容");
-        state.activeWorkflowStep = "config";
-        return null;
-      }
-      const result = await request("/api/quality/check", { method: "POST", body: JSON.stringify({}) });
-      await refresh();
-      state.authoringNewDraftActive = state.authoringNewDraftActive || (!state.authoringPaperId && questions.value.length > 0);
-      const failureCount = result.failures?.length || 0;
-      if (failureCount > 0) {
-        state.activeWorkflowStep = "quality";
-        if (!options.auto) notify(`质量复检发现 ${failureCount} 个问题，请先自动修复`);
-        return result;
-      }
-      state.activeWorkflowStep = "quality";
-      notify("质量复检通过，稍后进入人工审核");
-      await pause(1200);
-      state.activeWorkflowStep = "review";
-      return result;
-    } catch (error) {
-      notify(`质量复检失败：${error.message}`);
-      return null;
-    }
-  }
-
-  async function repairQuality() {
-    try {
-      const result = await request("/api/quality/repair", { method: "POST", body: JSON.stringify({}) });
-      await refresh();
-      const remaining = result.checks?.failures?.length || 0;
-      state.activeWorkflowStep = remaining > 0 ? "quality" : "review";
-      notify(remaining > 0 ? `自动修复完成：剩余 ${remaining} 个问题` : "自动修复完成，进入人工审核");
-    } catch (error) {
-      notify(`自动修复失败：${error.message}`);
-    }
-  }
-
-  async function savePaper() {
-    try {
-      await request("/api/papers/build", {
-        method: "POST",
-        body: JSON.stringify({ name: state.dashboard?.generationTask?.paperName }),
-      });
-      await refresh();
-      state.activeWorkflowStep = "publish";
-      const savedPaperId = state.dashboard?.paper?.id || state.selectedPaperId;
-      if (savedPaperId) {
-        state.authoringPaperId = savedPaperId;
-        state.editingPaperId = savedPaperId;
-        location.hash = formatRouteHash("authoring", { paperid: savedPaperId });
-      }
-      state.selectedPaperId = savedPaperId || state.selectedPaperId;
-      if (state.selectedPaperId) await selectPaper(state.selectedPaperId);
-      notify("试卷已保存");
-    } catch (error) {
-      notify(`保存试卷失败：${error.message}`);
+      return false;
     }
   }
 
   async function publishPaper() {
+    state.publishing = true;
+    state.publishQualityFailures = [];
     try {
       await request("/api/papers/publish", { method: "POST", body: JSON.stringify({}) });
       await refresh();
@@ -286,7 +223,16 @@ export function createAuthoringStore({
       notify("试卷已发布");
       go("papers");
     } catch (error) {
-      notify(`发布失败：${error.message}`);
+      const failures = Array.isArray(error.payload?.failures) ? error.payload.failures : [];
+      if (failures.length) {
+        state.publishQualityFailures = failures;
+        state.activeWorkflowStep = "publish";
+        notify(`发布已终止：发现 ${failures.length} 个问题，请修改后重新发布`);
+      } else {
+        notify(`发布失败：${error.message}`);
+      }
+    } finally {
+      state.publishing = false;
     }
   }
 
@@ -308,6 +254,7 @@ export function createAuthoringStore({
       score: Number(question.score || 1),
       difficulty: question.difficulty || "中",
       explanation: question.explanation || "",
+      rubricText: Array.isArray(question.rubric) ? question.rubric.join("\n") : "",
     };
     mountIcons();
   }
@@ -332,12 +279,14 @@ export function createAuthoringStore({
         score: clampNumber(form.score, 1, 200, 1),
         difficulty: form.difficulty,
         explanation: String(form.explanation || "").trim(),
+        rubric: ["简答", "论述"].includes(form.type) ? splitList(form.rubricText) : undefined,
         status: "待确认",
         quality: 88,
       };
       await request(`/api/questions/${form.id}`, { method: "PATCH", body: JSON.stringify(payload) });
       closeQuestionEditor();
       await refresh();
+      state.publishQualityFailures = [];
       state.activeWorkflowStep = "review";
       notify("题目已更新，请重新审核");
     } catch (error) {
@@ -368,6 +317,7 @@ export function createAuthoringStore({
     }
     if (form.type === "多选" && !form.answerMultiple?.length) errors.answerMultiple = "请至少选择一个答案";
     if (!["单选", "多选", "判断"].includes(form.type) && !String(form.answerText || "").trim()) errors.answerText = "请输入答案";
+    if (["简答", "论述"].includes(form.type) && !String(form.rubricText || "").trim()) errors.rubricText = "请输入评分规则";
     return errors;
   }
 
@@ -402,12 +352,9 @@ export function createAuthoringStore({
     generateDraft,
     openQuestionEditor,
     publishPaper,
-    qualityCheck,
     regenerate,
-    repairQuality,
     reviewQuestion,
     saveDraft,
-    savePaper,
     saveQuestionEdit,
     setWorkflowStep,
   };
@@ -415,6 +362,15 @@ export function createAuthoringStore({
 
 function pause(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function generationStageForProgress(progress, stage = "") {
+  if (stage === "生成失败") return "生成失败";
+  if (progress >= 100) return "试卷已生成，等待确认";
+  if (progress >= 82) return "正在整理并校验题目";
+  if (progress >= 28) return "AI 正在生成题目";
+  if (progress >= 12) return "正在提交生成任务";
+  return "正在准备命题参数";
 }
 
 function formatGenerationError(message) {

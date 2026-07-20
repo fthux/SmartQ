@@ -32,10 +32,6 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
       const result = await request("/api/admin/me", { headers: adminAuthHeaders() });
       state.admin.user = result.admin;
       syncProfileForm();
-      if (result.admin.mustChangePassword) {
-        state.loading = false;
-        go("profile");
-      }
     } catch (error) {
       handleAdminAuthError(error);
     }
@@ -64,15 +60,9 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
       localStorage.setItem("smartqAdminToken", result.token);
       if (state.admin.rememberUsername) localStorage.setItem("smartqAdminUsername", username);
       else localStorage.removeItem("smartqAdminUsername");
-      if (result.admin.mustChangePassword) {
-        state.loading = false;
-        notify("首次登录，请先修改初始密码");
-        go("profile");
-      } else {
-        notify("运营控制台登录成功");
-        if (!canAccessRoute(state.route)) go("papers");
-        await refresh();
-      }
+      notify("运营控制台登录成功");
+      if (!canAccessRoute(state.route)) go("papers");
+      await refresh();
     } catch (error) {
       state.admin.error = error.message || "登录失败";
       notify(`登录失败：${state.admin.error}`);
@@ -187,10 +177,6 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
       state.password.newPassword = "";
       state.password.confirmPassword = "";
       notify("登录密码已更新");
-      if (!result.admin.mustChangePassword) {
-        go("papers");
-        await refresh();
-      }
     } catch (error) {
       state.password.error = error.message || "密码修改失败";
     } finally {

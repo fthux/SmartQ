@@ -5,25 +5,18 @@ import { logItem } from "../lib/audit.js";
 const scrypt = promisify(scryptCallback);
 const passwordKeyLength = 64;
 
-export const adminRoleDefinitions = {
-  admin: {
-    label: "管理员",
-    permissions: ["authoring", "papers", "users"],
-  },
-  author: {
-    label: "内容运营",
-    permissions: ["authoring", "papers"],
-  },
-};
-
 export async function initializeAdminUsers(state) {
-  const before = JSON.stringify({ users: state.adminUsers || [], profiles: state.adminProfiles || null });
+  const before = JSON.stringify({
+    users: state.adminUsers || [],
+    profiles: state.adminProfiles || null,
+    sessions: state.adminSessions || {},
+  });
   const profiles = state.adminProfiles && typeof state.adminProfiles === "object" ? state.adminProfiles : {};
   let users = normalizeStoredUsers(state.adminUsers);
 
   if (!users.length) {
     const accounts = loadBootstrapAccounts();
-    users = await Promise.all(accounts.map(async (account, index) => {
+    users = await Promise.all(accounts.map(async (account) => {
       const profile = profiles[account.username] || {};
       const now = new Date().toISOString();
       return {
@@ -32,9 +25,7 @@ export async function initializeAdminUsers(state) {
         passwordHash: await hashAdminPassword(account.password),
         displayName: normalizeDisplayName(profile.displayName, account.username),
         avatar: String(profile.avatar || ""),
-        role: normalizeRole(account.role, index === 0 ? "admin" : "author"),
         status: "active",
-        mustChangePassword: account.mustChangePassword,
         authVersion: 1,
         createdAt: now,
         updatedAt: now,
@@ -55,26 +46,15 @@ export async function initializeAdminUsers(state) {
     });
   }
 
-  if (!users.some((user) => user.role === "admin" && user.status === "active")) {
-    users[0] = { ...users[0], role: "admin", status: "active", authVersion: users[0].authVersion + 1 };
+  if (users.length && !users.some((user) => user.status === "active")) {
+    users[0] = { ...users[0], status: "active", authVersion: users[0].authVersion + 1 };
   }
 
   state.adminUsers = users;
+  state.adminSessions = normalizeStoredSessions(state.adminSessions);
   delete state.adminProfiles;
-  const after = JSON.stringify({ users: state.adminUsers, profiles: null });
+  const after = JSON.stringify({ users: state.adminUsers, profiles: null, sessions: state.adminSessions });
   return before !== after;
-}
-
-export function permissionsForAdminRole(role) {
-  return [...(adminRoleDefinitions[role]?.permissions || adminRoleDefinitions.author.permissions)];
-}
-
-export function adminRoleOptions() {
-  return Object.entries(adminRoleDefinitions).map(([value, item]) => ({
-    value,
-    label: item.label,
-    permissions: [...item.permissions],
-  }));
 }
 
 export function findAdminUser(state, identity = "") {
@@ -90,11 +70,7 @@ export function publicAdminUser(user = {}, session = {}) {
     username: user.username || "",
     displayName: user.displayName || user.username || "",
     avatar: user.avatar || "",
-    role: user.role || "author",
-    roleLabel: adminRoleDefinitions[user.role]?.label || adminRoleDefinitions.author.label,
-    permissions: permissionsForAdminRole(user.role),
     status: user.status || "disabled",
-    mustChangePassword: Boolean(user.mustChangePassword),
     createdAt: user.createdAt || null,
     updatedAt: user.updatedAt || null,
     lastLoginAt: user.lastLoginAt || null,
@@ -105,14 +81,12 @@ export function publicAdminUser(user = {}, session = {}) {
 
 export function listAdminUsers(state, query = {}) {
   const search = String(query.search || "").trim().toLowerCase();
-  const role = String(query.role || "").trim();
   const status = String(query.status || "").trim();
   const page = clampInteger(query.page, 1, 100000, 1);
   const pageSize = clampInteger(query.pageSize, 1, 100, 20);
   const filtered = (state.adminUsers || [])
     .filter((user) => {
       if (search && ![user.username, user.displayName].join(" ").toLowerCase().includes(search)) return false;
-      if (role && user.role !== role) return false;
       if (status && user.status !== status) return false;
       return true;
     })
@@ -123,7 +97,6 @@ export function listAdminUsers(state, query = {}) {
     total: filtered.length,
     page,
     pageSize,
-    roles: adminRoleOptions(),
   };
 }
 
@@ -131,7 +104,6 @@ export async function createAdminUser(state, actorSession = {}, body = {}) {
   const username = String(body.username || "").trim();
   const displayName = normalizeDisplayName(body.displayName, username);
   const password = String(body.password || "");
-  const role = String(body.role || "author");
   const usernameError = validateUsername(username);
   if (usernameError) return errorResult(usernameError);
   if ((state.adminUsers || []).some((user) => user.username.toLowerCase() === username.toLowerCase())) {
@@ -141,7 +113,6 @@ export async function createAdminUser(state, actorSession = {}, body = {}) {
   if (displayNameError) return errorResult(displayNameError);
   const passwordError = validatePassword(password);
   if (passwordError) return errorResult(passwordError);
-  if (!adminRoleDefinitions[role]) return errorResult("请选择有效角色");
 
   const now = new Date().toISOString();
   const user = {
@@ -150,9 +121,7 @@ export async function createAdminUser(state, actorSession = {}, body = {}) {
     passwordHash: await hashAdminPassword(password),
     displayName,
     avatar: "",
-    role,
     status: "active",
-    mustChangePassword: true,
     authVersion: 1,
     createdAt: now,
     updatedAt: now,
@@ -169,32 +138,24 @@ export function updateAdminUser(state, actorSession = {}, userId = "", body = {}
   const target = findAdminUser(state, userId);
   if (!target) return errorResult("用户不存在", 404);
   const nextDisplayName = body.displayName === undefined ? target.displayName : normalizeDisplayName(body.displayName, "");
-  const nextRole = body.role === undefined ? target.role : String(body.role || "");
   const nextStatus = body.status === undefined ? target.status : String(body.status || "");
   const displayNameError = validateDisplayName(nextDisplayName);
   if (displayNameError) return errorResult(displayNameError);
-  if (!adminRoleDefinitions[nextRole]) return errorResult("请选择有效角色");
   if (!["active", "disabled"].includes(nextStatus)) return errorResult("请选择有效用户状态");
 
-  const changesAuthority = nextRole !== target.role || nextStatus !== target.status;
-  if (target.id === actorSession.userId && changesAuthority) {
-    return errorResult("不能修改自己的角色或停用自己的账号", 409);
-  }
-  if (target.role === "admin" && target.status === "active" && (nextRole !== "admin" || nextStatus !== "active")) {
-    const activeAdmins = (state.adminUsers || []).filter((user) => user.role === "admin" && user.status === "active");
-    if (activeAdmins.length <= 1) return errorResult("必须至少保留一个有效管理员", 409);
+  const changesStatus = nextStatus !== target.status;
+  if (target.id === actorSession.userId && changesStatus) {
+    return errorResult("不能停用自己的账号", 409);
   }
 
   target.displayName = nextDisplayName;
-  target.role = nextRole;
   target.status = nextStatus;
   target.updatedAt = new Date().toISOString();
-  if (changesAuthority) {
+  if (changesStatus) {
     target.authVersion += 1;
     revokeAdminUserSessions(state, target.id);
   }
   pushAudit(state, "admin-user-update", `${actorSession.username} 更新用户 ${target.username}`, actorSession, target, {
-    role: target.role,
     status: target.status,
   });
   return { user: publicAdminUser(target) };
@@ -210,7 +171,6 @@ export async function resetAdminUserPassword(state, actorSession = {}, userId = 
   target.passwordHash = await hashAdminPassword(password);
   target.passwordChangedAt = new Date().toISOString();
   target.updatedAt = target.passwordChangedAt;
-  target.mustChangePassword = true;
   target.authVersion += 1;
   const revokedSessions = revokeAdminUserSessions(state, target.id);
   pushAudit(state, "admin-user-password-reset", `${actorSession.username} 重置用户 ${target.username} 的密码`, actorSession, target, {
@@ -232,7 +192,6 @@ export async function changeAdminPassword(state, session = {}, token = "", body 
   user.passwordHash = await hashAdminPassword(newPassword);
   user.passwordChangedAt = new Date().toISOString();
   user.updatedAt = user.passwordChangedAt;
-  user.mustChangePassword = false;
   user.authVersion += 1;
   const revokedSessions = revokeAdminUserSessions(state, user.id, token);
   const currentSession = state.adminSessions?.[token];
@@ -289,6 +248,18 @@ function normalizeStoredUsers(input) {
   });
 }
 
+function normalizeStoredSessions(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  return Object.fromEntries(Object.entries(input).map(([token, session]) => {
+    const source = session && typeof session === "object" ? session : {};
+    const normalized = {};
+    for (const key of ["id", "userId", "username", "authVersion", "createdAt", "expiresAt", "lastSeenAt"]) {
+      if (source[key] !== undefined) normalized[key] = source[key];
+    }
+    return [token, normalized];
+  }));
+}
+
 function normalizeStoredUser(item = {}) {
   const username = String(item.username || "").trim();
   const passwordHash = String(item.passwordHash || "");
@@ -300,9 +271,7 @@ function normalizeStoredUser(item = {}) {
     passwordHash,
     displayName: normalizeDisplayName(item.displayName, username),
     avatar: String(item.avatar || ""),
-    role: normalizeRole(item.role, "author"),
     status: item.status === "disabled" ? "disabled" : "active",
-    mustChangePassword: Boolean(item.mustChangePassword),
     authVersion: Math.max(1, Number(item.authVersion || 1)),
     createdAt: item.createdAt || now,
     updatedAt: item.updatedAt || item.createdAt || now,
@@ -314,15 +283,10 @@ function normalizeStoredUser(item = {}) {
 
 function loadBootstrapAccounts() {
   const configured = parseBootstrapAccounts(process.env.SMARTQ_ADMIN_ACCOUNTS);
-  if (configured.length) return configured.map((account) => ({ ...account, mustChangePassword: false }));
+  if (configured.length) return configured;
   const username = String(process.env.SMARTQ_ADMIN_USER || "admin").trim() || "admin";
   const password = String(process.env.SMARTQ_ADMIN_PASSWORD || "123456");
-  return [{
-    username,
-    password,
-    role: normalizeRole(process.env.SMARTQ_ADMIN_ROLE, "admin"),
-    mustChangePassword: username === "admin" && password === "123456",
-  }];
+  return [{ username, password }];
 }
 
 function parseBootstrapAccounts(raw = "") {
@@ -333,15 +297,10 @@ function parseBootstrapAccounts(raw = "") {
     return (Array.isArray(rows) ? rows : []).map((item) => ({
       username: String(item?.username || "").trim(),
       password: String(item?.password || ""),
-      role: normalizeRole(item?.role, "author"),
     })).filter((item) => item.username && item.password);
   } catch {
     return [];
   }
-}
-
-function normalizeRole(value, fallback) {
-  return adminRoleDefinitions[value] ? value : fallback;
 }
 
 function normalizeDisplayName(value, fallback) {

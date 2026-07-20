@@ -62,11 +62,11 @@ function formatTextLength(value) {
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <el-card shadow="never"><div class="text-xl font-black">{{ state.materialManagement.total }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">当前筛选</div></el-card>
-      <el-card shadow="never"><div class="text-xl font-black text-leaf">{{ state.materialManagement.items.filter((item) => item.status === 'ready').length }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">当前页可用</div></el-card>
-      <el-card shadow="never"><div class="text-xl font-black text-iris">{{ state.materialManagement.items.reduce((sum, item) => sum + Number(item.paperUsageCount || 0), 0) }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">当前页试卷引用</div></el-card>
-      <el-card shadow="never"><div class="text-xl font-black text-ocean">{{ state.materialManagement.items.reduce((sum, item) => sum + Number(item.revisionCount || 0), 0) }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">当前页版本</div></el-card>
+    <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight">{{ state.materialManagement.total }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前筛选</div></el-card>
+      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-leaf">{{ state.materialManagement.items.filter((item) => item.status === 'ready').length }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前页可用</div></el-card>
+      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-iris">{{ state.materialManagement.items.reduce((sum, item) => sum + Number(item.paperUsageCount || 0), 0) }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前页试卷引用</div></el-card>
+      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-ocean">{{ state.materialManagement.items.reduce((sum, item) => sum + Number(item.revisionCount || 0), 0) }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前页版本</div></el-card>
     </div>
 
     <el-card shadow="never" class="material-list-card">
@@ -195,6 +195,10 @@ function formatTextLength(value) {
 </template>
 
 <style scoped>
+.compact-stat-card :deep(.el-card__body) {
+  padding: 10px 12px;
+}
+
 .material-list-card :deep(.el-card__body) {
   padding: 16px;
 }

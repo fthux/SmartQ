@@ -1,4 +1,6 @@
 import { request } from "../core/api-client.js";
+import { ElMessageBox } from "element-plus";
+import "element-plus/theme-chalk/el-message-box.css";
 import {
   buildEditedOptions,
   clampNumber,
@@ -167,8 +169,23 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
 
   async function runQuestionBankAction(row, action) {
     const management = state.questionBankManagement;
-    management.actionId = row.id;
+    const archiving = action === "archive";
+    const actionLabel = archiving ? "归档" : "恢复";
+    const stem = String(row?.stem || row?.id || "该题目").trim();
+    const displayStem = stem.length > 60 ? `${stem.slice(0, 60)}...` : stem;
     try {
+      await ElMessageBox.confirm(
+        archiving
+          ? `确认归档题目“${displayStem}”？归档后不会影响历史试卷，但不能再用于新的组卷。`
+          : `确认恢复题目“${displayStem}”？恢复后该题目将重新进入可用题库。`,
+        `确认${actionLabel}`,
+        {
+          confirmButtonText: `确认${actionLabel}`,
+          cancelButtonText: "取消",
+          type: archiving ? "warning" : "info",
+        },
+      );
+      management.actionId = row.id;
       await request(`/api/question-bank/${encodeURIComponent(row.id)}/${action}`, {
         method: "POST",
         body: JSON.stringify({}),
@@ -177,16 +194,17 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
       await loadQuestionBankCategories();
       notify(action === "archive" ? "题目已归档，历史试卷不受影响" : "题目已恢复");
     } catch (error) {
-      notify(`${action === "archive" ? "归档" : "恢复"}失败：${error.message}`);
+      if (error === "cancel" || error === "close") return;
+      notify(`${actionLabel}失败：${error.message || error}`);
     } finally {
       management.actionId = null;
     }
   }
 
   async function addCurrentQuestionsToBank() {
-    const reviewed = authoringQuestions.value.filter((item) => item.status === "已校验");
-    if (!reviewed.length) {
-      notify("当前试卷暂无已审核通过的题目");
+    const currentQuestions = authoringQuestions.value;
+    if (!currentQuestions.length) {
+      notify("当前试卷暂无可入库题目");
       return;
     }
     const management = state.questionBankManagement;
@@ -194,7 +212,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     try {
       const result = await request("/api/question-bank/import", {
         method: "POST",
-        body: JSON.stringify({ questionIds: reviewed.map((item) => item.id) }),
+        body: JSON.stringify({ questionIds: currentQuestions.map((item) => item.id) }),
       });
       notify(importResultMessage(result));
       if (state.route === "question-bank") await loadQuestionBank();

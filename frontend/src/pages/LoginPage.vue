@@ -70,7 +70,7 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
           <div class="max-w-md text-ink dark:text-slate-100">
             <div class="text-2xl font-medium">欢迎来到 <span class="font-black">SmartQ</span></div>
             <div class="mt-4 h-px w-80 max-w-full bg-leaf/35"></div>
-            <p class="mt-6 text-base font-semibold leading-7 text-slate-600 dark:text-slate-300">面向 AI 命题、题目审核与试卷管理的一体化控制台，让内容生产流程清晰、稳定、可追踪。</p>
+            <p class="mt-6 text-base font-semibold leading-7 text-slate-600 dark:text-slate-300">面向 AI 命题、题目编辑与试卷管理的一体化控制台，让内容生产流程清晰、稳定、可追踪。</p>
             <el-tag class="mt-7" type="success" effect="plain" size="large">Secure console</el-tag>
           </div>
         </div>

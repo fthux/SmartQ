@@ -100,11 +100,11 @@ function formatAnswer(question) {
       </el-card>
 
       <div class="min-w-0 space-y-4">
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <el-card shadow="never"><div class="text-xl font-black">{{ state.questionBankManagement.total }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">当前筛选</div></el-card>
-          <el-card shadow="never"><div class="text-xl font-black text-leaf">{{ state.questionBankManagement.items.length }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">当前页题目</div></el-card>
-          <el-card shadow="never"><div class="text-xl font-black text-iris">{{ state.questionBankManagement.categoryCounts.unclassified }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">待归类题目</div></el-card>
-          <el-card shadow="never"><div class="text-xl font-black text-ocean">{{ state.questionBankManagement.categoryCounts.multi }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">多分类题目</div></el-card>
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight">{{ state.questionBankManagement.total }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前筛选</div></el-card>
+          <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-leaf">{{ state.questionBankManagement.items.length }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前页题目</div></el-card>
+          <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-iris">{{ state.questionBankManagement.categoryCounts.unclassified }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">待归类题目</div></el-card>
+          <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-ocean">{{ state.questionBankManagement.categoryCounts.multi }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">多分类题目</div></el-card>
         </div>
 
         <el-card shadow="never" class="question-bank-list-card">
@@ -235,6 +235,7 @@ function formatAnswer(question) {
 </template>
 
 <style scoped>
+.compact-stat-card :deep(.el-card__body) { padding: 10px 12px; }
 .question-bank-list-card :deep(.el-card__body) { padding: 16px; }
 .category-sidebar { display: none; }
 .category-sidebar :deep(.el-card__body) { padding: 14px 10px; }

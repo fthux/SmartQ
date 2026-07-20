@@ -1,4 +1,5 @@
 import { request } from "../core/api-client.js";
+import { ElMessageBox } from "element-plus";
 
 export function createMaterialsStore({ state, notify, go }) {
   async function loadMaterials() {
@@ -167,13 +168,30 @@ export function createMaterialsStore({ state, notify, go }) {
   }
 
   async function runMaterialAction(row, action) {
-    state.materialManagement.actionId = row.id;
+    const archiving = action === "archive";
+    const restoring = action === "restore";
+    const actionLabel = archiving ? "归档" : restoring ? "恢复" : "重新解析";
     try {
+      if (archiving || restoring) {
+        await ElMessageBox.confirm(
+          archiving
+            ? `确认归档资料“${row.name}”？归档后不会影响历史试卷，但不能再用于新的出题任务。`
+            : `确认恢复资料“${row.name}”？恢复后该资料将重新进入可选的出题资料列表。`,
+          `确认${actionLabel}`,
+          {
+            confirmButtonText: `确认${actionLabel}`,
+            cancelButtonText: "取消",
+            type: archiving ? "warning" : "info",
+          },
+        );
+      }
+      state.materialManagement.actionId = row.id;
       await request(`/api/materials/${encodeURIComponent(row.id)}/${action}`, { method: "POST", body: JSON.stringify({}) });
       notify({ archive: "资料已归档", restore: "资料已恢复", reparse: "资料已重新解析" }[action] || "资料状态已更新");
       await Promise.all([loadMaterials(), loadMaterialOptions()]);
     } catch (error) {
-      notify(`操作失败：${error.message}`);
+      if (error === "cancel" || error === "close") return;
+      notify(`${actionLabel}失败：${error.message || error}`);
     } finally {
       state.materialManagement.actionId = null;
     }

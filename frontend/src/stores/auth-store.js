@@ -234,6 +234,32 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
     }
   }
 
+  async function restoreDefaultAdminAvatar() {
+    if (!state.admin.user?.avatar || state.profile.uploadingAvatar || state.profile.resettingAvatar) return;
+    state.profile.error = "";
+    state.profile.resettingAvatar = true;
+    try {
+      const result = await request("/api/admin/profile/avatar", { method: "DELETE" });
+      state.admin.user = result.admin;
+      releaseProfilePreview();
+      state.profile.avatarFile = null;
+      state.profile.avatarPreview = result.admin.avatar || "";
+      ElNotification.success({
+        title: "恢复成功",
+        message: "已恢复默认头像",
+      });
+    } catch (error) {
+      state.profile.error = error.message || "默认头像恢复失败";
+      ElNotification.error({
+        title: "恢复失败",
+        message: state.profile.error,
+      });
+    } finally {
+      state.profile.resettingAvatar = false;
+      mountIcons();
+    }
+  }
+
   function adminAuthHeaders() {
     return state.admin.token ? { authorization: `Bearer ${state.admin.token}` } : {};
   }
@@ -246,6 +272,7 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
     loginAdmin,
     logoutAdmin,
     openAdminProfile,
+    restoreDefaultAdminAvatar,
     runAdminAccountMenuItem,
     saveAdminProfile,
     selectAdminAvatar,

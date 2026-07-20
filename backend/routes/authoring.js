@@ -1,4 +1,4 @@
-import { repairQuestions, validateQuestions } from "../lib/ai.js";
+import { repairQuestions, transformQuestionWithAi, validateQuestions } from "../lib/ai.js";
 import { logItem } from "../lib/audit.js";
 import { readJson, sendJson } from "../lib/http.js";
 import { updateState } from "../lib/runtime-store.js";
@@ -30,6 +30,7 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
     const body = await readJson(req);
     const questions = Array.isArray(body.questions) ? body.questions : [];
     const spec = body.spec && typeof body.spec === "object" ? body.spec : {};
+    const paperId = String(body.paperId || "");
     if (!questions.length) {
       sendJson(res, 400, { error: "没有可保存的试卷内容" });
       return true;
@@ -40,6 +41,9 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
     }
     const checks = validateQuestions(questions);
     await updateState((current) => {
+      const activePaper = paperId && current.paper?.id === paperId
+        ? current.paper
+        : paperId ? (current.papers || []).find((item) => item.id === paperId) : null;
       current.questions = questions.map((item, index) => ({
         ...item,
         id: item.id || `q-${String(index + 1).padStart(3, "0")}`,
@@ -48,12 +52,12 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
       }));
       current.generationTask = spec;
       current.paper = {
-        id: null,
-        name: "",
-        status: null,
+        id: activePaper?.id || null,
+        name: activePaper?.name || spec.paperName || "",
+        status: activePaper?.id ? "草稿" : null,
         publishedAt: null,
-        questionIds: [],
-        buildSpec: null,
+        questionIds: activePaper?.id ? current.questions.map((item) => item.id) : [],
+        buildSpec: activePaper?.buildSpec || null,
         sourcePlanSnapshot: spec.sourcePlan || null,
         categoryId: String(spec.categoryId || ""),
         categorySnapshot: categorySnapshotForId(current, spec.categoryId),
@@ -70,6 +74,31 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
     return true;
   }
 
+  if (req.method === "POST" && url.pathname.startsWith("/api/questions/") && url.pathname.endsWith("/ai-transform")) {
+    const id = decodeURIComponent(url.pathname.split("/").at(-2) || "");
+    const question = state.questions.find((item) => item.id === id);
+    if (!question) {
+      sendJson(res, 404, { error: "Question Not Found" });
+      return true;
+    }
+    const body = await readJson(req);
+    try {
+      const result = await transformQuestionWithAi(question, {
+        categoryId: state.generationTask?.categoryId || state.paper?.categoryId || "",
+        categoryName: state.paper?.categorySnapshot?.path || state.paper?.categorySnapshot?.name || "",
+        direction: state.generationTask?.direction || "",
+        requirements: state.generationTask?.requirements || "",
+      }, body);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, error.statusCode || 500, {
+        error: error.message || "AI 题目修改失败",
+        failures: error.failures || undefined,
+      });
+    }
+    return true;
+  }
+
   if (req.method === "PATCH" && url.pathname.startsWith("/api/questions/")) {
     const id = url.pathname.split("/").pop();
     const body = await readJson(req);
@@ -77,12 +106,8 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
       const target = current.questions.find((item) => item.id === id);
       if (!target) return null;
       const before = JSON.stringify(target);
-      const nextQuestion = { ...target, ...body };
-      if (nextQuestion.status === "已校验") {
-        const checks = validateQuestions([nextQuestion]);
-        if (checks.failures.length) return { error: "题目结构未通过校验，不能审核通过", failures: checks.failures };
-      }
-      Object.assign(target, body);
+      const { aiTransformMeta, ...updates } = body;
+      Object.assign(target, updates);
       if (questionContentChanged(before, target)) {
         target.origin = { ...(target.origin || { type: "ai", materialRefs: [] }), edited: true };
         const inPaper = (current.paper.questionIds || []).includes(id);
@@ -94,7 +119,9 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
           current.auditLog.push(logItem("question-bank-update", `未入卷题目 ${id} 内容已更新`));
         }
       }
-      current.auditLog.push(logItem("question-update", `题目 ${id} 更新为 ${target.status || "已更新"}`));
+      current.auditLog.push(logItem(aiTransformMeta ? "question-ai-update" : "question-update", `题目 ${id} 已更新`, {
+        operation: aiTransformMeta?.operation || "manual",
+      }));
       return target;
     });
     if (!question) sendJson(res, 404, { error: "Question Not Found" });

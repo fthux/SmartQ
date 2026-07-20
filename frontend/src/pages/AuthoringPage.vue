@@ -29,8 +29,6 @@ const {
   aiQuestionCount,
   paperTypeConfig,
   authoringQuestions,
-  authoringReviewedCount,
-  authoringPendingReviewCount,
   setWorkflowStep,
   generateDraft,
   regenerate,
@@ -41,7 +39,7 @@ const {
   changeAuthoringCategory,
   removeSelectedQuestionBankItem,
   addCurrentQuestionsToBank,
-  reviewQuestion,
+  saveCurrentPaper,
   publishPaper,
   openMaterialSelector,
   removeSelectedMaterial,
@@ -51,9 +49,8 @@ const {
   workflowStatusText,
 } = useSmartQ();
 
-const reviewSearch = ref("");
-const reviewStatus = ref("all");
-const reviewType = ref("all");
+const editSearch = ref("");
+const editType = ref("all");
 const selectedQuestionId = ref("");
 const materialSearch = ref("");
 const categoryLeafOptions = computed(() => state.questionBankManagement.categories.filter((item) => item.status === "active" && item.isLeaf));
@@ -62,12 +59,6 @@ const selectedCategoryPath = computed(() => {
   const category = state.questionBankManagement.categories.find((item) => item.id === id);
   return category?.path?.map((item) => item.name).join(" / ") || "未选择";
 });
-
-const reviewStatusOptions = [
-  { label: "全部", value: "all" },
-  { label: "待审核", value: "pending" },
-  { label: "已通过", value: "reviewed" },
-];
 
 const currentStep = computed(() => workflowSteps.value.find((item) => item.key === state.activeWorkflowStep) || workflowSteps.value[0]);
 const activeQuestions = computed(() => state.generatedDraft?.questions?.length ? state.generatedDraft.questions : authoringQuestions.value);
@@ -120,16 +111,13 @@ const typeDistribution = computed(() => paperTypeConfig.map((item) => {
   const configuredCount = Number(state.spec[item.countKey] || 0);
   return { ...item, count: activeQuestions.value.length ? actualCount : configuredCount };
 }).filter((item) => item.count > 0));
-const filteredReviewQuestions = computed(() => {
-  const search = reviewSearch.value.trim().toLowerCase();
+const filteredEditQuestions = computed(() => {
+  const search = editSearch.value.trim().toLowerCase();
   return authoringQuestions.value.filter((question) => {
-    const matchesStatus = reviewStatus.value === "all"
-      || (reviewStatus.value === "pending" && question.status !== "已校验")
-      || (reviewStatus.value === "reviewed" && question.status === "已校验");
-    const matchesType = reviewType.value === "all" || question.type === reviewType.value;
+    const matchesType = editType.value === "all" || question.type === editType.value;
     const knowledge = Array.isArray(question.knowledge) ? question.knowledge.join(" ") : String(question.knowledge || "");
     const matchesSearch = !search || `${question.id || ""} ${question.stem || ""} ${knowledge}`.toLowerCase().includes(search);
-    return matchesStatus && matchesType && matchesSearch;
+    return matchesType && matchesSearch;
   });
 });
 const selectedQuestion = computed(() => activeQuestions.value.find((item) => item.id === selectedQuestionId.value) || activeQuestions.value[0] || null);
@@ -140,15 +128,9 @@ watch(activeQuestions, (questions) => {
     return;
   }
   if (!questions.some((item) => item.id === selectedQuestionId.value)) {
-    selectedQuestionId.value = questions.find((item) => item.status !== "已校验")?.id || questions[0].id;
+    selectedQuestionId.value = questions[0].id;
   }
 }, { immediate: true });
-
-watch(() => state.activeWorkflowStep, (step) => {
-  if (step !== "review") return;
-  const nextPending = authoringQuestions.value.find((item) => item.status !== "已校验");
-  if (nextPending) selectedQuestionId.value = nextPending.id;
-});
 
 function workflowButtonType(step) {
   if (step.status === "done") return "success";
@@ -164,10 +146,6 @@ function workflowTagType(step) {
 
 function questionTagType(type) {
   return { 单选: "primary", 多选: "success", 判断: "warning", 填空: "info", 简答: "danger", 论述: "danger" }[type] || "info";
-}
-
-function questionStatusTagType(status) {
-  return status === "已校验" ? "success" : "warning";
 }
 
 function publishIssueFieldLabel(field) {
@@ -202,15 +180,8 @@ function selectQuestion(question) {
   selectedQuestionId.value = question?.id || "";
 }
 
-function reviewRowClass({ row }) {
+function editRowClass({ row }) {
   return row.id === selectedQuestionId.value ? "is-selected-question" : "";
-}
-
-async function reviewAndSelectNext(question) {
-  const success = await reviewQuestion(question, true);
-  if (!success) return;
-  const next = authoringQuestions.value.find((item) => item.id !== question.id && item.status !== "已校验");
-  if (next) selectedQuestionId.value = next.id;
 }
 
 function editPublishIssue(issue) {
@@ -455,39 +426,36 @@ function editPublishIssue(issue) {
           </section>
         </el-form>
 
-        <section v-else-if="visibleWorkflowStep === 'review'" class="workbench-section">
+        <section v-else-if="visibleWorkflowStep === 'edit'" class="workbench-section">
           <div class="section-heading">
             <div>
-              <div class="text-sm font-black">人工审核</div>
-              <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{{ authoringReviewedCount }}/{{ authoringQuestions.length }} 已通过 · 题库 {{ overviewQuestionSources.bank }} · 资料 {{ overviewQuestionSources.material }} · AI {{ overviewQuestionSources.ai }}</div>
+              <div class="text-sm font-black">试卷编辑</div>
+              <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{{ authoringQuestions.length }} 道题 · 题库 {{ overviewQuestionSources.bank }} · 资料 {{ overviewQuestionSources.material }} · AI {{ overviewQuestionSources.ai }}</div>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2">
-              <el-button type="success" plain :loading="state.questionBankManagement.importingCurrent" :disabled="!authoringReviewedCount" @click="addCurrentQuestionsToBank">已校验题目入库</el-button>
-              <el-progress class="review-progress" :percentage="authoringQuestions.length ? Math.round(authoringReviewedCount / authoringQuestions.length * 100) : 0" :stroke-width="8" />
+              <el-button type="success" plain :loading="state.questionBankManagement.importingCurrent" :disabled="!authoringQuestions.length" @click="addCurrentQuestionsToBank">当前题目入库</el-button>
             </div>
           </div>
 
-          <div class="review-toolbar mt-3">
-            <el-input v-model="reviewSearch" clearable :prefix-icon="Search" placeholder="搜索题干、编号或知识点" />
-            <el-segmented v-model="reviewStatus" :options="reviewStatusOptions" aria-label="审核状态筛选" />
-            <el-select v-model="reviewType" aria-label="题型筛选">
+          <div class="edit-toolbar mt-3">
+            <el-input v-model="editSearch" clearable :prefix-icon="Search" placeholder="搜索题干、编号或知识点" />
+            <el-select v-model="editType" aria-label="题型筛选">
               <el-option label="全部题型" value="all" />
               <el-option v-for="item in paperTypeConfig" :key="item.type" :label="item.type" :value="item.type" />
             </el-select>
           </div>
 
           <el-table
-            :data="filteredReviewQuestions"
-            class="review-table mt-3"
+            :data="filteredEditQuestions"
+            class="edit-table mt-3"
             max-height="560"
             size="small"
             highlight-current-row
-            :row-class-name="reviewRowClass"
+            :row-class-name="editRowClass"
             empty-text="暂无匹配题目"
             @row-click="selectQuestion"
           >
             <el-table-column type="index" label="#" width="52" />
-            <el-table-column label="状态" width="88"><template #default="{ row }"><el-tag :type="questionStatusTagType(row.status)" size="small">{{ row.status === '已校验' ? '已通过' : '待审核' }}</el-tag></template></el-table-column>
             <el-table-column label="题型" width="82"><template #default="{ row }"><el-tag :type="questionTagType(row.type)" size="small" effect="plain">{{ row.type }}</el-tag></template></el-table-column>
             <el-table-column label="来源" min-width="150" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.origin?.type === 'material' ? 'success' : row.origin?.type === 'question-bank' ? 'primary' : 'info'" size="small" effect="plain">{{ questionSourceLabel(row) }}</el-tag></template></el-table-column>
             <el-table-column prop="stem" label="题干" min-width="260" show-overflow-tooltip />
@@ -495,11 +463,9 @@ function editPublishIssue(issue) {
             <el-table-column label="答案" min-width="100" show-overflow-tooltip><template #default="{ row }">{{ formatAnswer(row) }}</template></el-table-column>
             <el-table-column prop="score" label="分值" width="64" align="right" />
             <el-table-column prop="quality" label="质量" width="64" align="right" />
-            <el-table-column label="操作" fixed="right" width="208">
+            <el-table-column label="操作" fixed="right" width="88">
               <template #default="{ row }">
                 <el-button link type="primary" :icon="Edit" @click.stop="openQuestionEditor(row)">编辑</el-button>
-                <el-button v-if="row.status !== '已校验'" link type="success" :icon="Check" @click.stop="reviewAndSelectNext(row)">通过并继续</el-button>
-                <el-button v-else link type="warning" @click.stop="reviewQuestion(row, false)">取消审核</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -518,7 +484,7 @@ function editPublishIssue(issue) {
             <div><span>试卷名称</span><strong>{{ overviewPaperName }}</strong></div>
             <div><span>试卷总分</span><strong>{{ paper.score || overviewTotalScore }} 分</strong></div>
             <div><span>题目数量</span><strong>{{ paper.questionCount || authoringQuestions.length }} 题</strong></div>
-            <div><span>审核状态</span><strong :class="authoringPendingReviewCount ? 'text-coral' : 'text-leaf'">{{ authoringPendingReviewCount ? `${authoringPendingReviewCount} 题待审核` : '全部通过' }}</strong></div>
+            <div><span>发布检查</span><strong class="text-ocean">发布时自动执行</strong></div>
             <div><span>题库题</span><strong>{{ overviewQuestionSources.bank }} 题</strong></div>
             <div><span>资料题</span><strong>{{ overviewQuestionSources.material }} 题</strong></div>
             <div><span>AI 独立题</span><strong>{{ overviewQuestionSources.ai }} 题</strong></div>
@@ -527,7 +493,7 @@ function editPublishIssue(issue) {
           <div v-if="state.publishQualityFailures.length" class="mt-4">
             <el-alert
               :title="`发布已终止，共发现 ${state.publishQualityFailures.length} 个问题`"
-              description="请逐项修改并重新审核对应题目，然后再次发布。"
+              description="请逐项修改对应题目，然后再次发布。"
               type="error"
               :closable="false"
               show-icon
@@ -550,7 +516,7 @@ function editPublishIssue(issue) {
         <div class="summary-sticky">
           <div class="flex items-center justify-between gap-3">
             <h2 class="text-sm font-black">试卷概览</h2>
-            <el-tag :type="authoringPendingReviewCount ? 'warning' : 'success'" size="small" effect="plain">{{ authoringPendingReviewCount ? `${authoringPendingReviewCount} 待审核` : '状态正常' }}</el-tag>
+            <el-tag type="success" size="small" effect="plain">可编辑</el-tag>
           </div>
 
           <div class="summary-metrics mt-3">
@@ -566,7 +532,7 @@ function editPublishIssue(issue) {
             <div><dt>知识点</dt><dd>{{ overviewKnowledge }}</dd></div>
             <div><dt>题目来源</dt><dd>{{ sourcePlanLabel(activeSourcePlan) }}</dd></div>
             <div v-if="activeSourceMaterials.length"><dt>使用资料</dt><dd>{{ activeSourceMaterials.map((item) => `${item.name} v${item.version}`).join('、') }}</dd></div>
-            <div><dt>审核进度</dt><dd>{{ authoringReviewedCount }}/{{ authoringQuestions.length || overviewQuestionCount }}</dd></div>
+            <div><dt>编辑状态</dt><dd>{{ authoringQuestions.length || overviewQuestionCount }} 道题已保存</dd></div>
           </dl>
 
           <div v-if="typeDistribution.length" class="mt-4 border-t border-slate-200 pt-4 dark:border-night-border">
@@ -607,7 +573,7 @@ function editPublishIssue(issue) {
                 <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">{{ ref.excerpt }}</p>
               </div>
             </div>
-            <el-button v-if="visibleWorkflowStep === 'review'" class="mt-3 w-full" :icon="Edit" @click="openQuestionEditor(selectedQuestion)">编辑当前题目</el-button>
+            <el-button v-if="visibleWorkflowStep === 'edit'" class="mt-3 w-full" :icon="Edit" @click="openQuestionEditor(selectedQuestion)">编辑当前题目</el-button>
           </div>
         </div>
       </aside>
@@ -643,7 +609,7 @@ function editPublishIssue(issue) {
         <div class="mt-1 truncate text-[11px] font-semibold text-slate-500 dark:text-slate-400">
           <template v-if="visibleWorkflowStep === 'config' && state.generatedDraft?.questions?.length">生成结果等待确认</template>
           <template v-else-if="visibleWorkflowStep === 'config'">{{ totalQuestionCount }} 题 = 题库 {{ questionBankQuestionCount }} + 资料 {{ materialQuestionCount }} + AI {{ aiQuestionCount }}</template>
-          <template v-else-if="visibleWorkflowStep === 'review'">{{ authoringPendingReviewCount ? `还有 ${authoringPendingReviewCount} 题待审核` : '题目已全部审核通过' }}</template>
+          <template v-else-if="visibleWorkflowStep === 'edit'">可继续编辑题目，或保存后进入发布</template>
           <template v-else>{{ state.publishQualityFailures.length ? `请先修正 ${state.publishQualityFailures.length} 个发布问题` : '发布时将自动保存并执行完整检查' }}</template>
         </div>
       </div>
@@ -651,10 +617,13 @@ function editPublishIssue(issue) {
         <template v-if="visibleWorkflowStep === 'config'">
           <el-button v-if="formLocked && !state.generating" :icon="RefreshRight" @click="regenerate">重新生成</el-button>
           <el-button v-if="state.generatedDraft?.questions?.length" :icon="Delete" :disabled="state.saving" @click="discardDraft">丢弃</el-button>
-          <el-button v-if="state.generatedDraft?.questions?.length" type="primary" :icon="Check" :loading="state.saving" @click="saveDraft">确认并审核</el-button>
+          <el-button v-if="state.generatedDraft?.questions?.length" type="primary" :icon="Check" :loading="state.saving" @click="saveDraft">确认并保存</el-button>
           <el-button v-else-if="!formLocked" type="primary" :icon="MagicStick" :loading="state.generating" @click="generateDraft">生成并组合试卷</el-button>
         </template>
-        <el-button v-else-if="visibleWorkflowStep === 'review' && !authoringPendingReviewCount" type="primary" :icon="Promotion" @click="setWorkflowStep('publish')">进入发布</el-button>
+        <template v-else-if="visibleWorkflowStep === 'edit'">
+          <el-button :loading="state.saving" @click="saveCurrentPaper">保存试卷</el-button>
+          <el-button type="primary" :icon="Promotion" @click="setWorkflowStep('publish')">进入发布</el-button>
+        </template>
         <el-button v-else-if="visibleWorkflowStep === 'publish'" type="primary" :icon="Promotion" :loading="state.publishing" @click="publishPaper">发布试卷</el-button>
       </div>
     </footer>
@@ -928,18 +897,14 @@ function editPublishIssue(issue) {
   font-weight: 700;
 }
 
-.review-toolbar {
+.edit-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto 132px;
+  grid-template-columns: minmax(220px, 1fr) 132px;
   gap: 10px;
   align-items: center;
 }
 
-.review-progress {
-  width: min(220px, 38vw);
-}
-
-.review-table :deep(.is-selected-question td.el-table__cell) {
+.edit-table :deep(.is-selected-question td.el-table__cell) {
   background: var(--el-color-primary-light-9) !important;
 }
 
@@ -1024,12 +989,8 @@ function editPublishIssue(issue) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .review-toolbar {
+  .edit-toolbar {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .review-progress {
-    width: 132px;
   }
 
   .paper-summary-grid {

@@ -6,6 +6,7 @@ import {
   logoutAdmin,
   maxAdminAvatarBytes,
   publicAdminSession,
+  resetAdminAvatar,
   updateAdminAvatar,
   updateAdminProfile,
 } from "../services/auth-service.js";
@@ -47,6 +48,15 @@ export async function handleAdminRoutes(req, res, url, state, auth, token) {
     const result = await updateState((current) => {
       const currentAuth = authenticateAdmin(current, token);
       return currentAuth.error ? currentAuth : updateAdminAvatar(current, currentAuth.session, buffer, mimeType);
+    });
+    sendJson(res, result.statusCode || (result.error ? 400 : 200), result);
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/api/admin/profile/avatar") {
+    const result = await updateState((current) => {
+      const currentAuth = authenticateAdmin(current, token);
+      return currentAuth.error ? currentAuth : resetAdminAvatar(current, currentAuth.session);
     });
     sendJson(res, result.statusCode || (result.error ? 400 : 200), result);
     return true;

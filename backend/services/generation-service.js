@@ -50,7 +50,7 @@ async function runGenerationJob(job, spec) {
       status: "done",
       progress: 100,
       stage: "试卷已生成，等待确认",
-      result: { ...result, saved: false, message: "试卷已组合完成，确认后进入人工审核。" },
+      result: { ...result, saved: false, message: "试卷已组合完成，确认后保存并进入试卷编辑。" },
     });
   } catch (error) {
     updateGenerationJob(job, {

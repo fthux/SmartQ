@@ -54,6 +54,7 @@ export function createAppStore() {
         error: "",
         saving: false,
         uploadingAvatar: false,
+        resettingAvatar: false,
       },
       password: {
         currentPassword: "",
@@ -203,6 +204,17 @@ export function createAppStore() {
       editingQuestion: null,
       questionEditForm: null,
       questionEditErrors: {},
+      questionAi: {
+        loading: false,
+        operation: "",
+        customPrompt: "",
+        candidate: null,
+        changedFields: [],
+        warnings: [],
+        error: "",
+        previousForm: null,
+        appliedOperation: "",
+      },
       editingPaperId: null,
       authoringPaperId: currentAuthoringPaperId(),
       authoringNewDraftActive: false,
@@ -237,10 +249,6 @@ export function createAppStore() {
       if (isEditingPaper.value) return authoringPaperReady.value ? questions.value : [];
       return state.authoringNewDraftActive ? questions.value : [];
     });
-    const reviewedCount = computed(() => questions.value.filter((item) => item.status === "已校验").length);
-    const pendingReviewCount = computed(() => Math.max(0, questions.value.length - reviewedCount.value));
-    const authoringReviewedCount = computed(() => authoringQuestions.value.filter((item) => item.status === "已校验").length);
-    const authoringPendingReviewCount = computed(() => Math.max(0, authoringQuestions.value.length - authoringReviewedCount.value));
     const draftReady = computed(() => Boolean(state.generatedDraft?.questions?.length || authoringQuestions.value.length));
     const formLocked = computed(() => state.generating || (draftReady.value && !state.regeneratingDraft));
     const totalQuestionCount = computed(() => paperTypeConfig.reduce((sum, item) => sum + numberValue(state.spec[item.countKey]), 0));
@@ -266,29 +274,30 @@ export function createAppStore() {
       const hasActiveAuthoring = hasPersistedQuestions && authoringPaperReady.value;
       const configDone = (hasUnsavedDraft || hasActiveAuthoring) && !state.regeneratingDraft;
       const published = hasActiveAuthoring && paper.value.status === "已发布" && (!isEditingPaper.value || paper.value.id === state.authoringPaperId);
-      const publishReady = hasActiveAuthoring && authoringPendingReviewCount.value === 0;
+      const publishReady = hasActiveAuthoring;
+      const currentStep = state.activeWorkflowStep;
       return [
         {
           key: "config",
           title: "命题配置",
           meta: configDone ? "试卷内容已生成" : "填写考卷、方向、题型",
-          status: configDone ? "done" : "active",
+          status: currentStep === "config" ? "active" : configDone ? "done" : "pending",
           action: configDone ? "查看配置" : "填写参数",
           clickable: true,
         },
         {
-          key: "review",
-          title: "人工审核",
-          meta: hasActiveAuthoring ? `${authoringReviewedCount.value}/${authoringQuestions.value.length} 已通过` : "等待生成试卷",
-          status: hasActiveAuthoring && authoringPendingReviewCount.value === 0 ? "done" : hasActiveAuthoring ? "active" : "pending",
-          action: "审核题目",
+          key: "edit",
+          title: "试卷编辑",
+          meta: hasActiveAuthoring ? `${authoringQuestions.value.length} 道题可编辑` : "等待生成试卷",
+          status: !hasActiveAuthoring ? "pending" : currentStep === "edit" ? "active" : currentStep === "publish" ? "done" : "pending",
+          action: "编辑题目",
           clickable: hasActiveAuthoring,
         },
         {
           key: "publish",
           title: "发布试卷",
-          meta: published ? "已发布" : publishReady ? "审核完成，可发布" : "等待审核完成",
-          status: published ? "done" : publishReady ? "active" : "pending",
+          meta: published ? "已发布" : publishReady ? "发布时自动检查" : "等待保存试卷",
+          status: published ? "done" : publishReady && currentStep === "publish" ? "active" : "pending",
           action: published ? "已发布" : "发布试卷",
           clickable: published || publishReady,
         },
@@ -459,10 +468,16 @@ export function createAppStore() {
       openQuestionEditor,
       publishPaper,
       regenerate,
-      reviewQuestion,
+      applyQuestionAiCandidate,
+      discardQuestionAiCandidate,
+      moveQuestionOption,
+      moveSingleCorrectAnswer,
+      runQuestionAiTransform,
+      saveCurrentPaper,
       saveDraft,
       saveQuestionEdit,
       setWorkflowStep,
+      undoQuestionAiChange,
     } = createAuthoringStore({
       state,
       refresh: (...args) => refresh(...args),
@@ -470,7 +485,6 @@ export function createAppStore() {
       formLocked,
       workflowSteps,
       authoringQuestions,
-      authoringPendingReviewCount,
       computedSpecTotalScore,
       go: (...args) => go(...args),
     });
@@ -527,6 +541,8 @@ export function createAppStore() {
             state.spec = freshSpec();
           }
           state.activeWorkflowStep = "config";
+        } else {
+          state.activeWorkflowStep = "edit";
         }
       }
       if (state.selectedPaperId) clearSelectedPaper();
@@ -571,6 +587,7 @@ export function createAppStore() {
         }
         state.authoringPaperId = currentAuthoringPaperId();
         state.editingPaperId = state.route === "authoring" && state.authoringPaperId ? state.authoringPaperId : null;
+        if (state.editingPaperId) state.activeWorkflowStep = "edit";
         if (state.selectedPaperId) clearSelectedPaper();
         if (state.route === "question-bank") {
           loadQuestionBankCategories();
@@ -592,6 +609,7 @@ export function createAppStore() {
         if (event.key === "Escape" && state.selectedPaperId) clearSelectedPaper();
       });
       initializeLayout();
+      if (state.route === "authoring" && state.authoringPaperId) state.activeWorkflowStep = "edit";
       await loadAdminSession();
       await refresh();
       await loadQuestionBankCategories();
@@ -618,8 +636,6 @@ export function createAppStore() {
       themeOptions,
       questions,
       authoringQuestions,
-      authoringReviewedCount,
-      authoringPendingReviewCount,
       paper,
       papers,
       publishedPapers,
@@ -630,8 +646,6 @@ export function createAppStore() {
       currentPaperPage,
       paperPageStart,
       paperPageEnd,
-      reviewedCount,
-      pendingReviewCount,
       draftReady,
       formLocked,
       totalQuestionCount,
@@ -720,7 +734,7 @@ export function createAppStore() {
       saveDraft,
       discardDraft,
       regenerate,
-      reviewQuestion,
+      saveCurrentPaper,
       publishPaper,
       activatePaper,
       selectPaper,
@@ -733,6 +747,12 @@ export function createAppStore() {
       editPaper,
       openQuestionEditor,
       closeQuestionEditor,
+      runQuestionAiTransform,
+      applyQuestionAiCandidate,
+      discardQuestionAiCandidate,
+      undoQuestionAiChange,
+      moveQuestionOption,
+      moveSingleCorrectAnswer,
       saveQuestionEdit,
       toastClass,
       toastIcon,

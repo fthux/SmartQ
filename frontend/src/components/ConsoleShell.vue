@@ -3,6 +3,7 @@ import {
   ArrowDown,
   Check,
   Collection,
+  Expand,
   Files,
   FolderOpened,
   Fold,
@@ -12,7 +13,7 @@ import {
   Management,
   Monitor,
   Moon,
-  Rank,
+  ScaleToOriginal,
   Sunny,
   SwitchButton,
   User,
@@ -70,7 +71,10 @@ function handleThemePreference(theme) {
 
 <template>
   <div class="min-h-screen transition-[grid-template-columns] duration-200 lg:grid" :class="state.ui.sidebarCollapsed ? 'lg:grid-cols-[72px_minmax(0,1fr)]' : 'lg:grid-cols-[232px_minmax(0,1fr)]'">
-    <aside class="app-sidebar hidden border-r border-slate-200 bg-white lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col dark:border-night-border dark:bg-night-sidebar">
+    <aside
+      class="app-sidebar hidden bg-white lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col dark:bg-night-sidebar"
+      :class="state.ui.sidebarCollapsed ? '' : 'border-r border-slate-200 dark:border-night-border'"
+    >
       <div class="flex h-14 items-center px-3" :class="state.ui.sidebarCollapsed ? 'justify-center' : ''">
         <el-button text class="brand-button min-w-0" title="SmartQ" @click="go('papers')">
           <span class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-emerald-50 p-1.5 shadow-sm dark:bg-white">
@@ -101,7 +105,13 @@ function handleThemePreference(theme) {
       <header class="sticky top-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-3 backdrop-blur sm:px-4 lg:px-5 dark:border-night-border dark:bg-night-surface/95">
         <div class="flex min-w-0 items-center gap-2">
           <el-tooltip :content="state.ui.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'">
-            <el-button class="hidden lg:inline-flex" :icon="state.ui.sidebarCollapsed ? Rank : Fold" circle aria-label="切换侧边栏" @click="toggleSidebar" />
+            <el-button
+              class="hidden lg:inline-flex"
+              :icon="state.ui.sidebarCollapsed ? Expand : Fold"
+              circle
+              :aria-label="state.ui.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+              @click="toggleSidebar"
+            />
           </el-tooltip>
           <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-primary text-emerald-950 lg:hidden">
             <el-icon><component :is="iconMap[currentNavItem.icon]" /></el-icon>
@@ -114,7 +124,12 @@ function handleThemePreference(theme) {
 
         <div class="flex shrink-0 items-center gap-1.5">
           <el-tooltip :content="state.ui.isFullscreen ? '退出全屏' : '全屏展示'">
-            <el-button :icon="state.ui.isFullscreen ? Rank : FullScreen" circle aria-label="切换全屏" @click="toggleFullscreen" />
+            <el-button
+              :icon="state.ui.isFullscreen ? ScaleToOriginal : FullScreen"
+              circle
+              :aria-label="state.ui.isFullscreen ? '退出全屏' : '全屏展示'"
+              @click="toggleFullscreen"
+            />
           </el-tooltip>
 
           <div class="theme-control" data-theme-control>
@@ -147,7 +162,7 @@ function handleThemePreference(theme) {
           <el-dropdown trigger="click" @command="handleAdminCommand">
             <el-button text class="account-button h-10">
               <el-avatar :size="32" shape="square" :src="state.admin.user?.avatar || publicUrl('/assets/default_avatar.jpg')" class="bg-primary text-xs font-black text-emerald-950">{{ adminDisplayName.slice(0, 1).toUpperCase() }}</el-avatar>
-              <span class="hidden max-w-28 truncate text-xs font-black sm:block">{{ adminDisplayName }}</span>
+              <span class="ml-2 hidden max-w-28 truncate text-xs font-black sm:block">{{ adminDisplayName }}</span>
               <el-icon class="hidden text-slate-400 sm:inline-flex"><ArrowDown /></el-icon>
             </el-button>
             <template #dropdown>

@@ -14,7 +14,7 @@ export async function handlePaperRoutes(req, res, url, state) {
       const categorySnapshot = categorySnapshotForId(current, categoryId);
       const saved = saveFormalPaper(current.questions, {
         ...current.paper,
-        id: `paper-${Date.now()}`,
+        id: current.paper.id || `paper-${Date.now()}`,
         name: body.name || current.generationTask?.paperName || current.paper.name || "未命名试卷",
         sourcePlanSnapshot: current.generationTask?.sourcePlan || current.paper.sourcePlanSnapshot || null,
         categoryId,
@@ -71,8 +71,6 @@ export async function handlePaperRoutes(req, res, url, state) {
           checks: { ...checks, failures },
         };
       }
-      const pending = paperQuestions.filter((item) => item.status !== "已校验").length;
-      if (pending) return { error: `试卷内还有 ${pending} 道题待审核`, pending };
       if (!hasSavedPaper) {
         const saved = saveFormalPaper(paperQuestions, {
           ...current.paper,

@@ -146,10 +146,6 @@ export async function importQuestionsToBank(body = {}, actor = "") {
     const questions = selectedIds.size ? sourceQuestions.filter((item) => selectedIds.has(String(item.id))) : sourceQuestions;
     const result = { created: 0, reused: 0, skipped: 0, conflicts: [], items: [] };
     for (const question of questions) {
-      if (question.status !== "已校验" && paper?.status !== "已发布") {
-        result.skipped += 1;
-        continue;
-      }
       const hash = questionContentHash(question);
       const linked = question.origin?.bankQuestionId
         ? findQuestionBankItem(state, question.origin.bankQuestionId)

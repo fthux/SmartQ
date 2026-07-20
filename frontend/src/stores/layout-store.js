@@ -55,19 +55,23 @@ export function createLayoutStore({ state, mountIcons }) {
     const viewportHeight = window.innerHeight;
     const originX = Number(options.origin?.x);
     const originY = Number(options.origin?.y);
-    const defaultX = nextDark ? viewportWidth : 0;
-    const defaultY = nextDark ? 0 : viewportHeight;
-    const x = Math.min(Math.max(Number.isFinite(originX) ? originX : defaultX, 0), viewportWidth);
-    const y = Math.min(Math.max(Number.isFinite(originY) ? originY : defaultY, 0), viewportHeight);
-    const endRadius = Math.hypot(
-      Math.max(x, viewportWidth - x),
-      Math.max(y, viewportHeight - y),
-    );
+    const hasExplicitOrigin = Number.isFinite(originX) && Number.isFinite(originY);
+    const x = hasExplicitOrigin ? Math.min(Math.max(originX, 0), viewportWidth) : 0;
+    const y = hasExplicitOrigin ? Math.min(Math.max(originY, 0), viewportHeight) : 0;
+    const transitionOrigin = hasExplicitOrigin
+      ? `${x}px ${y}px`
+      : nextDark ? "100% 0%" : "0% 100%";
+    const endRadius = hasExplicitOrigin
+      ? Math.hypot(
+        Math.max(x, viewportWidth - x),
+        Math.max(y, viewportHeight - y),
+      )
+      : Math.hypot(viewportWidth, viewportHeight);
     const transition = document.startViewTransition(apply);
     transition.ready
       .then(() => {
         root.animate(
-          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${endRadius}px at ${x}px ${y}px)`] },
+          { clipPath: [`circle(0px at ${transitionOrigin})`, `circle(${endRadius}px at ${transitionOrigin})`] },
           {
             duration: 500,
             easing: "ease-in-out",

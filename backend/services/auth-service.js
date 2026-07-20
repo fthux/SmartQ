@@ -130,6 +130,15 @@ export function updateAdminAvatar(state, session = {}, buffer, mimeType = "") {
   return { admin: publicAdminSession(session, user) };
 }
 
+export function resetAdminAvatar(state, session = {}) {
+  const user = findAdminUser(state, session.userId || session.username);
+  if (!user) return { error: "用户不存在", statusCode: 404 };
+  user.avatar = "";
+  user.updatedAt = new Date().toISOString();
+  state.auditLog.push(logItem("admin-avatar-reset", `${session.username} 恢复默认头像`));
+  return { admin: publicAdminSession(session, user) };
+}
+
 export function authToken(req, url) {
   const header = String(req.headers.authorization || "");
   if (header.startsWith("Bearer ")) return header.slice(7).trim();

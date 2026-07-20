@@ -104,6 +104,230 @@ export async function generateQuestions(spec = {}, options = {}) {
   };
 }
 
+export async function transformQuestionWithAi(question = {}, context = {}, input = {}) {
+  const operation = ["regenerate", "distractors", "custom"].includes(input.operation) ? input.operation : "";
+  if (!operation) throw badRequestError("不支持的 AI 题目操作");
+  const draft = normalizeTransformDraft(question, input.draft);
+  if (operation === "distractors" && !["单选", "多选"].includes(draft.type)) {
+    throw badRequestError("只有单选题和多选题可以重新生成迷惑项");
+  }
+  const customPrompt = cleanText(input.prompt, "").slice(0, 2000);
+  if (operation === "custom" && !customPrompt) throw badRequestError("请输入自定义提示词");
+  const config = aiConfig();
+  let candidate;
+
+  if (operation === "distractors") {
+    const wrongCount = draft.options.length - normalizeAnswer(draft.answer, draft.type).length;
+    const payload = config.mockMode
+      ? { distractors: buildMockDistractors(draft, wrongCount) }
+      : await requestAiTransformPayload(config, buildDistractorPrompt(draft, wrongCount), "迷惑项生成");
+    candidate = applyGeneratedDistractors(draft, payload?.distractors, wrongCount);
+  } else {
+    const payload = config.mockMode
+      ? { question: buildMockTransformedQuestion(draft, context, operation, customPrompt) }
+      : await requestAiTransformPayload(config, buildQuestionTransformPrompt(draft, context, operation, customPrompt), "题目修改");
+    const generated = payload?.question || (Array.isArray(payload?.questions) ? payload.questions[0] : null) || payload;
+    candidate = normalizeTransformedQuestion(generated, draft);
+  }
+
+  candidate.origin = transformedQuestionOrigin(draft.origin, operation, customPrompt, config);
+  const checks = validateQuestions([candidate]);
+  if (checks.failures.length) {
+    const error = new Error(checks.failures[0].message || "AI 返回的题目结构不完整");
+    error.statusCode = 502;
+    error.failures = checks.failures;
+    throw error;
+  }
+  const changedFields = transformChangedFields(draft, candidate);
+  return {
+    operation,
+    candidate,
+    changedFields,
+    warnings: transformWarnings(draft.origin, operation),
+    source: config.mockMode ? "mock" : "provider",
+  };
+}
+
+function normalizeTransformDraft(question = {}, draft = {}) {
+  const type = normalizeQuestionType(question.type || draft.type, "单选");
+  const source = { ...question, ...draft, type };
+  return {
+    id: String(question.id || draft.id || ""),
+    type,
+    stem: cleanText(source.stem, ""),
+    options: normalizeOptions(source.options),
+    answer: normalizeAnswer(source.answer, type),
+    score: clampNumber(question.score ?? draft.score, 1, 200, 1),
+    difficulty: normalizeDifficulty(source.difficulty),
+    knowledge: normalizeList(question.knowledge).length ? normalizeList(question.knowledge) : ["综合能力"],
+    explanation: cleanText(source.explanation, ""),
+    rubric: Array.isArray(source.rubric) ? source.rubric.map((item) => cleanText(item, "")).filter(Boolean) : [],
+    quality: clampNumber(source.quality, 70, 100, 88),
+    status: question.status || source.status || "待确认",
+    origin: question.origin && typeof question.origin === "object" ? structuredClone(question.origin) : { type: "ai", materialRefs: [] },
+  };
+}
+
+function buildQuestionTransformPrompt(question, context, operation, customPrompt) {
+  const sourceRules = question.origin?.type === "material"
+    ? [
+      "只能依据原题保存的资料引用修改或重新生成，不得引入引用之外的事实。",
+      `资料引用：${JSON.stringify(question.origin.materialRefs || [])}`,
+    ]
+    : question.origin?.type === "question-bank"
+      ? ["以原题库题为命题参考，但必须生成新的题目内容，不得修改题库原记录。"]
+      : ["按当前试卷的分类、方向和知识点生成独立题目。"];
+  return [
+    "你是严谨的考试题目编辑器。只允许输出 JSON，不允许输出 Markdown。",
+    "输出格式必须是 {\"question\":{\"type\":\"\",\"stem\":\"\",\"options\":[],\"answer\":\"\",\"difficulty\":\"\",\"explanation\":\"\",\"rubric\":[],\"quality\":90}}。",
+    `操作：${operation === "regenerate" ? "重新生成一道同题型、同来源约束的新题" : "按照用户提示修改当前题目"}`,
+    `当前试卷分类：${context.categoryName || context.categoryId || "未设置"}`,
+    `当前试卷方向：${context.direction || "未设置"}`,
+    `当前试卷要求：${context.requirements || "无"}`,
+    `当前题目：${JSON.stringify(question)}`,
+    ...sourceRules,
+    ...(operation === "custom" ? [`用户提示：${customPrompt}`] : []),
+    "必须保持题型和分值不变。选择题答案必须对应有效选项；多选答案必须是数组；主观题必须包含可执行评分规则。",
+  ].join("\n");
+}
+
+function buildDistractorPrompt(question, wrongCount) {
+  const answers = Array.isArray(question.answer) ? question.answer : [question.answer];
+  const correctOptions = answers.map((letter) => ({ letter, text: question.options[letter.charCodeAt(0) - 65] }));
+  return [
+    "你是考试选择题选项设计专家。只允许输出 JSON，不允许输出 Markdown。",
+    `输出格式必须是 {\"distractors\":[${Array.from({ length: wrongCount }, () => "\"错误选项\"").join(",")}]}`,
+    `题型：${question.type}`,
+    `题干：${question.stem}`,
+    `正确选项：${JSON.stringify(correctOptions)}`,
+    `需要生成 ${wrongCount} 个迷惑项。`,
+    "迷惑项必须有干扰性但明确错误；不得与正确选项、其他迷惑项重复；不要修改或复述正确答案。",
+  ].join("\n");
+}
+
+async function requestAiTransformPayload(config, prompt, label) {
+  if (!config.apiKey) throw new Error("OPENAI_API_KEY 或 SKYISLAND_API_KEY 未配置，无法使用真实 AI 编辑题目");
+  if (!config.baseUrl) throw new Error("OPENAI_BASE_URL 未配置，无法使用真实 AI 编辑题目");
+  let response;
+  try {
+    const request = buildAiRequest(config, prompt);
+    response = await fetch(request.url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${config.apiKey}` },
+      body: JSON.stringify(request.body),
+    });
+  } catch (error) {
+    const detail = [error.cause?.code, error.cause?.message].filter(Boolean).join(" · ");
+    const wrapped = new Error(`${label}服务连接失败${detail ? `：${detail}` : ""}`);
+    wrapped.statusCode = 502;
+    throw wrapped;
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    const error = new Error(`${label}请求失败：${response.status}${text ? ` ${text.slice(0, 180)}` : ""}`);
+    error.statusCode = 502;
+    throw error;
+  }
+  return parseAiJson(extractMessageContent(await response.json()));
+}
+
+function buildMockTransformedQuestion(question, context, operation, customPrompt) {
+  if (operation === "custom") {
+    return {
+      ...question,
+      stem: `${question.stem}（已按要求优化）`,
+      explanation: `${question.explanation || "题目解析"}；已结合“${customPrompt.slice(0, 40)}”完成调整。`,
+      quality: Math.max(90, question.quality),
+    };
+  }
+  const spec = {
+    direction: context.direction || "当前试卷方向",
+    difficulty: question.difficulty,
+    knowledge: question.knowledge,
+  };
+  return buildMockQuestion({
+    id: question.id,
+    index: Date.now() % 97,
+    type: question.type,
+    score: question.score,
+    knowledge: question.knowledge[0] || "综合能力",
+    spec,
+  });
+}
+
+function buildMockDistractors(question, count) {
+  return Array.from({ length: count }, (_, index) => `${question.stem.slice(0, 24)}的常见误解 ${index + 1}`);
+}
+
+function applyGeneratedDistractors(question, value, wrongCount) {
+  const answers = new Set(Array.isArray(question.answer) ? question.answer : [question.answer]);
+  const correctTexts = new Set([...answers].map((letter) => question.options[letter.charCodeAt(0) - 65]));
+  const distractors = [...new Set((Array.isArray(value) ? value : []).map((item) => cleanText(item, "")).filter(Boolean))]
+    .filter((item) => !correctTexts.has(item));
+  if (distractors.length < wrongCount) {
+    const error = new Error(`AI 返回的迷惑项数量不足：需要 ${wrongCount} 个，实际 ${distractors.length} 个`);
+    error.statusCode = 502;
+    throw error;
+  }
+  let cursor = 0;
+  const options = question.options.map((option, index) => {
+    const letter = String.fromCharCode(65 + index);
+    return answers.has(letter) ? option : distractors[cursor++];
+  });
+  return { ...question, options, quality: Math.max(88, question.quality) };
+}
+
+function normalizeTransformedQuestion(value = {}, original) {
+  const type = original.type;
+  return {
+    ...original,
+    type,
+    stem: cleanText(value.stem, original.stem),
+    options: ["单选", "多选"].includes(type) ? normalizeOptions(value.options) : type === "判断" ? ["正确", "错误"] : [],
+    answer: normalizeAnswer(value.answer ?? original.answer, type),
+    score: original.score,
+    difficulty: normalizeDifficulty(value.difficulty || original.difficulty),
+    knowledge: original.knowledge,
+    explanation: cleanText(value.explanation, original.explanation),
+    rubric: ["简答", "论述"].includes(type)
+      ? (Array.isArray(value.rubric) ? value.rubric.map((item) => cleanText(item, "")).filter(Boolean) : original.rubric)
+      : [],
+    quality: clampNumber(value.quality, 70, 100, 88),
+  };
+}
+
+function transformedQuestionOrigin(origin = {}, operation, prompt, config) {
+  const history = Array.isArray(origin.aiTransforms) ? origin.aiTransforms : [];
+  return {
+    ...origin,
+    edited: true,
+    aiTransformed: true,
+    aiTransforms: [...history, {
+      operation,
+      model: config.mockMode ? "mock" : config.model,
+      promptSummary: operation === "custom" ? prompt.slice(0, 120) : "",
+      createdAt: new Date().toISOString(),
+    }].slice(-10),
+  };
+}
+
+function transformChangedFields(before, after) {
+  return ["stem", "options", "answer", "difficulty", "explanation", "rubric"]
+    .filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]));
+}
+
+function transformWarnings(origin = {}, operation) {
+  if (origin.type === "question-bank" && operation === "regenerate") return ["生成结果为题库衍生题，不会修改题库原题"];
+  if (origin.type === "material") return ["生成结果继续使用原资料版本和引用片段"];
+  return [];
+}
+
+function badRequestError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+
 async function generateUniqueQuestionBatch(spec, config, batch, existingQuestions = []) {
   if (!spec.count) return { source: config.mockMode ? "mock" : "provider", questions: [] };
   const accepted = [];
@@ -514,36 +738,28 @@ function emptyPaper(meta = {}) {
 }
 
 export function saveFormalPaper(sourceQuestions = questions, meta = {}) {
-  const eligible = sourceQuestions.filter((item) => item.status === "已校验");
-  const pending = sourceQuestions.length - eligible.length;
-  if (!eligible.length) {
+  const savedQuestions = Array.isArray(sourceQuestions) ? sourceQuestions : [];
+  if (!savedQuestions.length) {
     return {
-      error: "没有已审核题目可保存为试卷",
-      eligibleCount: eligible.length,
-      pending,
+      error: "当前没有可保存的题目",
+      eligibleCount: 0,
+      pending: 0,
     };
   }
-  if (pending > 0) {
-    return {
-      error: `还有 ${pending} 道题待审核，请审核完成后再保存试卷`,
-      eligibleCount: eligible.length,
-      pending,
-    };
-  }
-  const score = eligible.reduce((sum, item) => sum + Number(item.score || 0), 0);
+  const score = savedQuestions.reduce((sum, item) => sum + Number(item.score || 0), 0);
   const buildSpec = {
     targetScore: score,
-    source: "saved-reviewed-questions",
-    eligibleCount: eligible.length,
+    source: "saved-questions",
+    eligibleCount: savedQuestions.length,
     savedAt: new Date().toISOString(),
     sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
   };
-  return buildPaper(sourceQuestions, {
+  return buildPaper(savedQuestions, {
     ...meta,
     id: meta.id || "paper-a",
     name: meta.name || "A 卷",
     status: "草稿",
-    questionIds: eligible.map((item) => item.id),
+    questionIds: savedQuestions.map((item) => item.id),
     buildSpec,
     sourcePlanSnapshot: buildSpec.sourcePlanSnapshot,
   });

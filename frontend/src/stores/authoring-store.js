@@ -16,7 +16,6 @@ export function createAuthoringStore({
   formLocked,
   workflowSteps,
   authoringQuestions,
-  authoringPendingReviewCount,
   computedSpecTotalScore,
   go,
 }) {
@@ -102,7 +101,7 @@ export function createAuthoringStore({
       }
       setGenerationProgress(100, "试卷已生成，等待确认");
       state.publishQualityFailures = [];
-      notify("试卷已生成预览，刷新页面不会保留；确认后进入人工审核");
+      notify("试卷已生成预览，确认后将保存并进入试卷编辑");
     } catch (error) {
       stopGenerationProgress();
       state.generatedDraft = previousGeneratedDraft;
@@ -140,17 +139,31 @@ export function createAuthoringStore({
     try {
       const result = await request("/api/ai/save-question-draft", {
         method: "POST",
-        body: JSON.stringify({ questions: generated.questions, spec: generated.spec }),
+        body: JSON.stringify({
+          questions: generated.questions,
+          spec: generated.spec,
+          paperId: state.authoringPaperId || state.dashboard?.paper?.id || "",
+        }),
+      });
+      const builtPaper = await request("/api/papers/build", {
+        method: "POST",
+        body: JSON.stringify({
+          name: generated.spec?.paperName || state.spec.paperName,
+          categoryId: generated.spec?.categoryId || state.spec.categoryId,
+        }),
       });
       state.generatedDraft = null;
       state.regeneratingDraft = false;
+      state.authoringPaperId = builtPaper.id;
+      state.editingPaperId = builtPaper.id;
       await refresh();
-      state.authoringNewDraftActive = !state.authoringPaperId;
+      state.authoringNewDraftActive = false;
       syncSpecFromActiveDraft();
       state.publishQualityFailures = [];
-      state.activeWorkflowStep = "review";
-      if (!options.silent) notify("试卷内容已进入人工审核");
-      return result;
+      state.activeWorkflowStep = "edit";
+      go("authoring", { paperid: builtPaper.id });
+      if (!options.silent) notify("试卷已保存，可以继续编辑或发布");
+      return { ...result, paper: builtPaper };
     } finally {
       state.saving = false;
     }
@@ -215,24 +228,33 @@ export function createAuthoringStore({
     notify("已进入重新生成模式");
   }
 
-  async function reviewQuestion(question, reviewed) {
+  async function saveCurrentPaper(options = {}) {
+    if (!authoringQuestions.value.length) {
+      if (!options.silent) notify("当前试卷没有可保存的题目");
+      return null;
+    }
+    state.saving = true;
     try {
-      await request(`/api/questions/${question.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: reviewed ? "已校验" : "待确认" }),
+      const builtPaper = await request("/api/papers/build", {
+        method: "POST",
+        body: JSON.stringify({
+          name: state.dashboard?.generationTask?.paperName || state.spec.paperName,
+          categoryId: state.dashboard?.generationTask?.categoryId || state.spec.categoryId,
+        }),
       });
+      state.authoringPaperId = builtPaper.id;
+      state.editingPaperId = builtPaper.id;
+      state.authoringNewDraftActive = false;
       await refresh();
-      if (reviewed && authoringQuestions.value.length > 0 && authoringPendingReviewCount.value === 0) {
-        state.activeWorkflowStep = "publish";
-        notify("题目已全部审核通过，可以发布试卷");
-      } else {
-        state.activeWorkflowStep = "review";
-        notify(reviewed ? "题目已审核通过" : "已取消审核通过");
-      }
-      return true;
+      go("authoring", { paperid: builtPaper.id });
+      state.activeWorkflowStep = options.nextStep || "edit";
+      if (!options.silent) notify("试卷已保存");
+      return builtPaper;
     } catch (error) {
-      notify(`审核操作失败：${error.message}`);
-      return false;
+      if (!options.silent) notify(`保存试卷失败：${error.message}`);
+      return null;
+    } finally {
+      state.saving = false;
     }
   }
 
@@ -262,25 +284,10 @@ export function createAuthoringStore({
   }
 
   function openQuestionEditor(question) {
-    const options = normalizeEditorOptions(question.options, question.type);
     state.editingQuestion = question;
     state.questionEditErrors = {};
-    state.questionEditForm = {
-      id: question.id,
-      type: question.type,
-      stem: question.stem || "",
-      optionA: options[0] || "",
-      optionB: options[1] || "",
-      optionC: options[2] || "",
-      optionD: options[3] || "",
-      answerSingle: Array.isArray(question.answer) ? question.answer[0] || "A" : String(question.answer || "A"),
-      answerMultiple: Array.isArray(question.answer) ? [...question.answer] : String(question.answer || "").split(/[,，、\s]+/).filter(Boolean),
-      answerText: Array.isArray(question.answer) ? question.answer.join("、") : String(question.answer ?? ""),
-      score: Number(question.score || 1),
-      difficulty: question.difficulty || "中",
-      explanation: question.explanation || "",
-      rubricText: Array.isArray(question.rubric) ? question.rubric.join("\n") : "",
-    };
+    state.questionEditForm = editorFormFromQuestion(question);
+    resetQuestionAiState();
     mountIcons();
   }
 
@@ -288,6 +295,87 @@ export function createAuthoringStore({
     state.editingQuestion = null;
     state.questionEditForm = null;
     state.questionEditErrors = {};
+    resetQuestionAiState();
+  }
+
+  async function runQuestionAiTransform(operation) {
+    const form = state.questionEditForm;
+    if (!form?.id || state.questionAi.loading) return;
+    if (operation === "custom" && !String(state.questionAi.customPrompt || "").trim()) {
+      state.questionAi.error = "请输入希望 AI 如何修改这道题";
+      return;
+    }
+    state.questionAi.loading = true;
+    state.questionAi.operation = operation;
+    state.questionAi.candidate = null;
+    state.questionAi.changedFields = [];
+    state.questionAi.warnings = [];
+    state.questionAi.error = "";
+    try {
+      const result = await request(`/api/questions/${form.id}/ai-transform`, {
+        method: "POST",
+        body: JSON.stringify({
+          operation,
+          prompt: operation === "custom" ? String(state.questionAi.customPrompt || "").trim() : "",
+          draft: questionFromEditorForm(form, state.editingQuestion),
+        }),
+      });
+      state.questionAi.candidate = result.candidate;
+      state.questionAi.changedFields = result.changedFields || [];
+      state.questionAi.warnings = result.warnings || [];
+    } catch (error) {
+      state.questionAi.error = error.message || "AI 题目修改失败";
+    } finally {
+      state.questionAi.loading = false;
+    }
+  }
+
+  function applyQuestionAiCandidate() {
+    const candidate = state.questionAi.candidate;
+    if (!candidate || !state.questionEditForm) return;
+    state.questionAi.previousForm = cloneValue(state.questionEditForm);
+    state.questionEditForm = editorFormFromQuestion({
+      ...candidate,
+      id: state.questionEditForm.id,
+    });
+    state.questionAi.appliedOperation = state.questionAi.operation;
+    state.questionAi.candidate = null;
+    state.questionAi.changedFields = [];
+    state.questionAi.error = "";
+    state.questionEditErrors = {};
+    notify("AI 修改已应用到编辑区，保存题目后生效");
+  }
+
+  function discardQuestionAiCandidate() {
+    state.questionAi.candidate = null;
+    state.questionAi.changedFields = [];
+    state.questionAi.warnings = [];
+    state.questionAi.error = "";
+  }
+
+  function undoQuestionAiChange() {
+    if (!state.questionAi.previousForm) return;
+    state.questionEditForm = cloneValue(state.questionAi.previousForm);
+    state.questionAi.previousForm = null;
+    state.questionAi.appliedOperation = "";
+    state.questionEditErrors = {};
+    notify("已撤销本次 AI 修改");
+  }
+
+  function moveQuestionOption(index, offset) {
+    const form = state.questionEditForm;
+    const target = index + offset;
+    if (!form || !["单选", "多选"].includes(form.type) || target < 0 || target > 3) return;
+    swapQuestionOptions(form, index, target);
+  }
+
+  function moveSingleCorrectAnswer(targetLetter) {
+    const form = state.questionEditForm;
+    if (!form || form.type !== "单选") return;
+    const currentIndex = optionIndex(form.answerSingle);
+    const targetIndex = optionIndex(targetLetter);
+    if (currentIndex < 0 || targetIndex < 0 || currentIndex === targetIndex) return;
+    swapQuestionOptions(form, currentIndex, targetIndex);
   }
 
   async function saveQuestionEdit() {
@@ -305,18 +393,46 @@ export function createAuthoringStore({
         difficulty: form.difficulty,
         explanation: String(form.explanation || "").trim(),
         rubric: ["简答", "论述"].includes(form.type) ? splitList(form.rubricText) : undefined,
-        status: "待确认",
-        quality: 88,
+        quality: clampNumber(form.quality, 70, 100, state.editingQuestion?.quality || 88),
+        origin: form.origin ? cloneValue(form.origin) : undefined,
+        aiTransformMeta: state.questionAi.appliedOperation ? { operation: state.questionAi.appliedOperation } : undefined,
       };
       await request(`/api/questions/${form.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+      state.publishQualityFailures = state.publishQualityFailures.filter((item) => item.questionId !== form.id);
       closeQuestionEditor();
       await refresh();
-      state.publishQualityFailures = [];
-      state.activeWorkflowStep = "review";
-      notify("题目已更新，请重新审核");
+      state.activeWorkflowStep = "edit";
+      notify("题目已保存");
     } catch (error) {
       notify(`题目保存失败：${error.message}`);
     }
+  }
+
+  function resetQuestionAiState() {
+    Object.assign(state.questionAi, {
+      loading: false,
+      operation: "",
+      customPrompt: "",
+      candidate: null,
+      changedFields: [],
+      warnings: [],
+      error: "",
+      previousForm: null,
+      appliedOperation: "",
+    });
+  }
+
+  function swapQuestionOptions(form, leftIndex, rightIndex) {
+    const leftKey = `option${optionLetter(leftIndex)}`;
+    const rightKey = `option${optionLetter(rightIndex)}`;
+    [form[leftKey], form[rightKey]] = [form[rightKey], form[leftKey]];
+    const remap = (letter) => {
+      if (letter === optionLetter(leftIndex)) return optionLetter(rightIndex);
+      if (letter === optionLetter(rightIndex)) return optionLetter(leftIndex);
+      return letter;
+    };
+    if (form.type === "单选") form.answerSingle = remap(form.answerSingle);
+    if (form.type === "多选") form.answerMultiple = [...new Set((form.answerMultiple || []).map(remap))].sort();
   }
 
   function validateSpecForm() {
@@ -407,17 +523,75 @@ export function createAuthoringStore({
   }
 
   return {
+    applyQuestionAiCandidate,
     closeQuestionEditor,
+    discardQuestionAiCandidate,
     discardDraft,
     generateDraft,
+    moveQuestionOption,
+    moveSingleCorrectAnswer,
     openQuestionEditor,
     publishPaper,
     regenerate,
-    reviewQuestion,
+    runQuestionAiTransform,
+    saveCurrentPaper,
     saveDraft,
     saveQuestionEdit,
     setWorkflowStep,
+    undoQuestionAiChange,
   };
+}
+
+function editorFormFromQuestion(question = {}) {
+  const options = normalizeEditorOptions(question.options, question.type);
+  return {
+    id: question.id,
+    type: question.type,
+    stem: question.stem || "",
+    optionA: options[0] || "",
+    optionB: options[1] || "",
+    optionC: options[2] || "",
+    optionD: options[3] || "",
+    answerSingle: Array.isArray(question.answer) ? question.answer[0] || "A" : String(question.answer || "A"),
+    answerMultiple: Array.isArray(question.answer) ? [...question.answer] : String(question.answer || "").split(/[,，、\s]+/).filter(Boolean),
+    answerText: Array.isArray(question.answer) ? question.answer.join("、") : String(question.answer ?? ""),
+    score: Number(question.score || 1),
+    difficulty: question.difficulty || "中",
+    explanation: question.explanation || "",
+    rubricText: Array.isArray(question.rubric) ? question.rubric.join("\n") : "",
+    quality: Number(question.quality || 88),
+    origin: question.origin ? cloneValue(question.origin) : { type: "ai", materialRefs: [] },
+  };
+}
+
+function questionFromEditorForm(form, original = {}) {
+  return {
+    id: form.id,
+    type: form.type,
+    stem: String(form.stem || "").trim(),
+    options: buildEditedOptions(form),
+    answer: normalizeEditedAnswer(form),
+    score: clampNumber(form.score, 1, 200, 1),
+    difficulty: form.difficulty,
+    knowledge: Array.isArray(original.knowledge) ? [...original.knowledge] : splitList(original.knowledge),
+    explanation: String(form.explanation || "").trim(),
+    rubric: ["简答", "论述"].includes(form.type) ? splitList(form.rubricText) : [],
+    quality: clampNumber(form.quality, 70, 100, original.quality || 88),
+    origin: form.origin ? cloneValue(form.origin) : cloneValue(original.origin || { type: "ai", materialRefs: [] }),
+  };
+}
+
+function optionLetter(index) {
+  return String.fromCharCode(65 + index);
+}
+
+function optionIndex(letter) {
+  const index = String(letter || "").toUpperCase().charCodeAt(0) - 65;
+  return index >= 0 && index < 4 ? index : -1;
+}
+
+function cloneValue(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
 function pause(ms) {
@@ -426,6 +600,12 @@ function pause(ms) {
 
 function generationStageForProgress(progress, stage = "") {
   if (stage === "生成失败") return "生成失败";
+  if (/连接出题服务|AI正在生成试卷/.test(stage)) {
+    if (progress >= 82) return "正在整理并校验题目";
+    if (progress >= 55) return "正在生成后半部分题目";
+    if (progress >= 28) return "AI 正在生成题目内容";
+    return "正在连接出题服务";
+  }
   if (stage) return stage;
   if (progress >= 100) return "试卷已生成，等待确认";
   if (progress >= 82) return "正在整理并校验题目";

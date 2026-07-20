@@ -1,8 +1,8 @@
 <script setup>
-import { Upload } from "@element-plus/icons-vue";
+import { RefreshLeft, Upload } from "@element-plus/icons-vue";
 import { useSmartQ } from "../stores/context.js";
 
-const { state, adminDisplayName, saveAdminProfile, selectAdminAvatar, changeAdminPassword, go, publicUrl } = useSmartQ();
+const { state, adminDisplayName, saveAdminProfile, selectAdminAvatar, restoreDefaultAdminAvatar, changeAdminPassword, go, publicUrl } = useSmartQ();
 
 const maxAdminDisplayNameLength = 32;
 
@@ -26,10 +26,20 @@ function updateAdminDisplayName(value) {
             <el-avatar :size="96" shape="square" :src="state.profile.avatarPreview || publicUrl('/assets/default_avatar.jpg')" class="bg-primary text-2xl font-black text-emerald-950">
               {{ adminDisplayName.slice(0, 1).toUpperCase() }}
             </el-avatar>
-            <div>
-              <el-upload :auto-upload="false" :show-file-list="false" accept="image/png,image/jpeg,image/webp" :on-change="selectAdminAvatar">
-                <el-button :icon="Upload" :loading="state.profile.uploadingAvatar">上传头像</el-button>
-              </el-upload>
+            <div class="min-w-0">
+              <div class="flex flex-wrap gap-2">
+                <el-upload :auto-upload="false" :show-file-list="false" accept="image/png,image/jpeg,image/webp" :on-change="selectAdminAvatar" :disabled="state.profile.resettingAvatar">
+                  <el-button :icon="Upload" :loading="state.profile.uploadingAvatar" :disabled="state.profile.resettingAvatar">上传头像</el-button>
+                </el-upload>
+                <el-button
+                  :icon="RefreshLeft"
+                  :loading="state.profile.resettingAvatar"
+                  :disabled="!state.admin.user?.avatar || state.profile.uploadingAvatar"
+                  @click="restoreDefaultAdminAvatar"
+                >
+                  恢复默认头像
+                </el-button>
+              </div>
               <div class="mt-2 text-[11px] font-semibold leading-5 text-slate-400">PNG / JPG / WebP · 正方形 · ≤ 100KB</div>
             </div>
           </div>
@@ -50,7 +60,7 @@ function updateAdminDisplayName(value) {
           </el-form-item>
           <div class="mt-6 flex items-center justify-end gap-2 border-t border-slate-200 pt-4 dark:border-night-border">
             <el-button @click="go('papers')">取消</el-button>
-            <el-button type="primary" native-type="submit" :loading="state.profile.saving" :disabled="state.profile.uploadingAvatar">保存资料</el-button>
+            <el-button type="primary" native-type="submit" :loading="state.profile.saving" :disabled="state.profile.uploadingAvatar || state.profile.resettingAvatar">保存资料</el-button>
           </div>
         </div>
       </div>

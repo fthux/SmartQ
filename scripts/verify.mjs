@@ -103,7 +103,7 @@ try {
   assert(frontend.includes("<el-switch") && frontend.includes("active-action-icon") && frontend.includes("inactive-action-icon"), "header uses the Element Plus style sun and moon theme switch");
   assert(frontend.includes("document.startViewTransition") && frontend.includes("Math.hypot") && frontend.includes("clipPath"), "theme switch reveals the new theme with a viewport-filling circle");
   assert(frontend.includes("::view-transition-new(root)") && frontend.includes("prefers-reduced-motion: reduce"), "theme reveal targets the new root view and respects reduced motion");
-  assert(frontend.includes("const defaultX = nextDark ? viewportWidth : 0") && frontend.includes("const defaultY = nextDark ? 0 : viewportHeight"), "dark theme reveals from the top-right and light theme reveals from the bottom-left");
+  assert(frontend.includes('nextDark ? "100% 0%" : "0% 100%"') && frontend.includes("circle(0px at ${transitionOrigin})"), "theme reveal anchors its first frame to the transition layer's top-right or bottom-left corner");
   assert(frontend.includes('@command="handleThemePreference"') && frontend.includes("setTheme(theme, { animate: true })"), "theme preference menu reuses the circular reveal with the fixed corner origin");
   assert(frontend.includes("--el-bg-color: #171a21") && frontend.includes("--el-border-color-lighter: #2a303b"), "Element Plus dark theme uses the neutral charcoal palette");
   assert(frontend.includes("html.dark") && frontend.includes("dark:bg-night-surface"), "theme switching updates Element Plus and application surfaces");
@@ -126,6 +126,7 @@ try {
   assert(!frontend.includes(retiredInitialPasswordFlag) && !/首次登录.*修改.*密码|初始密码/.test(frontend), "frontend removes the initial-password change policy and UI");
   assert(!backend.includes(retiredInitialPasswordFlag) && !backend.includes("请先修改初始密码"), "backend removes the initial-password field and API gate");
   assert(frontend.includes("await uploadAdminAvatar(file)") && frontend.includes("用户头像已更新"), "valid avatar selection uploads immediately");
+  assert(frontend.includes("restoreDefaultAdminAvatar") && frontend.includes('method: "DELETE"') && frontend.includes("恢复默认头像"), "profile page can remove a custom avatar and return to the default avatar");
   assert(frontend.includes("100 * 1024") && frontend.includes("width !== dimensions.height"), "avatar selection enforces 100KB square images");
   assert(frontend.includes('window.scrollTo({ top: 0, left: 0, behavior: "auto" });'), "frontend resets scroll on module switches");
   assert(frontend.includes("出题制卷") && frontend.includes("已出卷子"), "frontend keeps authoring and paper UI");
@@ -143,16 +144,26 @@ try {
   assert(frontend.includes("generationStageForProgress") && !frontend.includes("连接 AI 出题服务"), "generation progress uses stable progress-based stage text");
   assert(frontend.includes("publishQualityFailures") && frontend.includes("发布已终止") && frontend.includes("editPublishIssue"), "publish failures stay visible and link to question editing");
   assert(frontend.includes("data-authoring-workbench") && frontend.includes("data-authoring-summary") && frontend.includes("data-authoring-action-bar"), "authoring uses the dense workbench, summary, and action bar layout");
-  assert(frontend.includes("data-question-type-matrix") && frontend.includes("typeMatrixRows") && frontend.includes("通过并继续"), "authoring keeps the compact type matrix and next-question review flow");
+  assert(frontend.includes("data-question-type-matrix") && frontend.includes("typeMatrixRows") && frontend.includes("试卷编辑"), "authoring keeps the compact type matrix and direct question editing flow");
+  assert(frontend.includes('key: "edit"') && !/人工审核|待审核|通过并继续|取消审核|确认并审核/.test(frontend), "authoring removes per-question review controls and wording");
+  assert(frontend.includes("同源重新生成") && frontend.includes("重新生成迷惑项") && frontend.includes("自定义 AI 修改") && frontend.includes("应用修改"), "question editor exposes AI regeneration, distractor, custom prompt, and candidate application controls");
+  assert(frontend.includes("moveQuestionOption") && frontend.includes("moveSingleCorrectAnswer") && frontend.includes("undoQuestionAiChange"), "question editor supports answer-safe option movement and AI undo");
   assert(frontend.includes('paperPageSize: 20') && frontend.includes('aria-label="试卷状态筛选"'), "paper management uses the Element Plus list controls");
   assert(frontend.includes('aria-label="试卷详情抽屉"') && frontend.includes("paperDetailMode"), "paper details open in the responsive drawer");
-  assert(frontend.includes('size="min(1080px, 100vw)"') && !frontend.includes("row.status === '已发布'\" link type=\"primary\" :icon=\"View\""), "draft and published papers share edit, preview, and delete actions in the wider drawer flow");
+  assert(
+    frontend.includes('size="min(1080px, 100vw)"')
+      && frontend.includes('<el-button link type="primary" :icon="Edit" @click="editPaper(row)">编辑</el-button>')
+      && frontend.includes('<el-button link :icon="View" @click="selectPaper(row.id)">预览</el-button>')
+      && !frontend.includes("state.selectedPaperDetail.status !== '已发布'"),
+    "draft and published papers share edit, preview, and delete actions in the wider drawer flow",
+  );
   assert((frontend.match(/if \(state\.selectedPaperId\) clearSelectedPaper\(\);/g) || []).length >= 2, "route changes close an open paper detail drawer");
   assert(frontend.includes("出题资料管理") && frontend.includes("/api/materials/upload") && frontend.includes("data-question-source-plan"), "frontend exposes material management and source allocation");
-  assert(frontend.includes("questionBankQuestionCount") && frontend.includes("自动补齐剩余题型和数量") && frontend.includes("资料依据"), "authoring config and review expose unified source allocation and traceability");
+  assert(frontend.includes("questionBankQuestionCount") && frontend.includes("自动补齐剩余题型和数量") && frontend.includes("资料依据"), "authoring config and editing expose unified source allocation and traceability");
   assert(frontend.includes("题库管理") && frontend.includes("data-question-bank-page") && frontend.includes("从题库选择题目"), "frontend exposes question bank management and paper selection");
+  assert(frontend.includes("确认归档") && frontend.includes("确认恢复") && frontend.includes("ElMessageBox.confirm"), "question bank archive and restore require explicit confirmation");
   assert(frontend.includes("未分类") && frontend.includes("多分类题目") && frontend.includes("批量设置分类"), "question bank frontend exposes category tree and bulk classification");
-  assert(frontend.includes("已校验题目入库") && frontend.includes("整卷入库") && frontend.includes("加入题库"), "review and paper detail surfaces can explicitly add questions to the bank");
+  assert(frontend.includes("当前题目入库") && frontend.includes("整卷入库") && frontend.includes("加入题库"), "editing and paper detail surfaces can explicitly add questions to the bank");
   assert(backend.includes("questionContentHash") && backend.includes("questionBankUsageMap") && backend.includes("resolveGenerationQuestionBank"), "backend implements question deduplication, usage relations, and unified bank-question generation");
   assert(backend.includes("questionBankCategories") && backend.includes("validateActiveLeafCategories") && backend.includes("categorySnapshotForId"), "backend implements hierarchical bank categories and paper category snapshots");
 
@@ -160,6 +171,8 @@ try {
   assert(blockedDashboard.error.includes("运营控制台"), "dashboard requires admin login");
   const blockedProfile = await putJson("/api/admin/profile", { displayName: "unauthorized" }, { expectedStatus: 401 });
   assert(blockedProfile.error.includes("运营控制台"), "profile updates require admin login");
+  const blockedAvatarReset = await requestJson("/api/admin/profile/avatar", { method: "DELETE", expectedStatus: 401 });
+  assert(blockedAvatarReset.error.includes("运营控制台"), "avatar reset requires admin login");
   const blockedUsers = await getJson("/api/admin/users", { expectedStatus: 401 });
   assert(blockedUsers.error.includes("运营控制台"), "user management requires login");
   const oversizedLogin = await postJson("/api/admin/login", { username: "x".repeat(140 * 1024), password: "x" }, { expectedStatus: 413 });
@@ -194,6 +207,12 @@ try {
   let persistedRuntime = JSON.parse(await readFile(runtimeFile, "utf8"));
   const persistedAdmin = persistedRuntime.adminUsers?.find((user) => user.username === "verify-admin");
   assert(persistedAdmin?.avatar === updatedAvatar.admin.avatar, "avatar is persisted on the unified admin user record");
+  const resetAvatar = await requestJson("/api/admin/profile/avatar", { method: "DELETE", headers: adminHeaders });
+  assert(resetAvatar.admin.avatar === "", "custom avatar can be reset to the default avatar");
+  const resetProfile = await getJson("/api/admin/me", { headers: adminHeaders });
+  assert(resetProfile.admin.avatar === "", "default avatar state persists across session reads");
+  persistedRuntime = JSON.parse(await readFile(runtimeFile, "utf8"));
+  assert(persistedRuntime.adminUsers?.find((user) => user.username === "verify-admin")?.avatar === "", "avatar reset is persisted on the unified admin user record");
   assert(persistedRuntime.adminUsers.every((user) => user.passwordHash.startsWith("scrypt$") && !("password" in user)), "runtime users contain password hashes without plaintext passwords");
   assert(persistedRuntime.adminUsers.every((user) => !("role" in user)), "runtime users no longer persist role fields");
   assert(persistedRuntime.adminUsers.every((user) => !(retiredInitialPasswordFlag in user)), "runtime users no longer persist the retired password-policy field");
@@ -434,19 +453,50 @@ try {
 
   const quality = await postJson("/api/quality/check", {}, { headers: contentUserHeaders });
   assert(Array.isArray(quality.failures) && Number.isFinite(quality.schemaPassRate), "quality check remains available");
-  const blockedBuild = await postJson("/api/papers/build", {}, { headers: contentUserHeaders, expectedStatus: 409 });
-  assert(blockedBuild.eligibleCount === 0, "paper build requires manual review");
+  const builtDraft = await postJson("/api/papers/build", {}, { headers: contentUserHeaders });
+  assert(builtDraft.status === "草稿" && builtDraft.questionCount === 4, "paper build saves all valid questions without manual review");
+  const builtDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
+  assert(builtDashboard.questions.every((question) => question.status === "待确认"), "building a paper does not require or fabricate review status");
 
-  await Promise.all(draftDashboard.questions.map((question) => patchJson(`/api/questions/${question.id}`, { status: "已校验" }, { headers: contentUserHeaders })));
+  const transformBefore = builtDashboard.questions.find((question) => question.origin?.type === "material") || builtDashboard.questions[0];
+  const transformStateBefore = JSON.stringify(transformBefore);
+  const regenerated = await postJson(`/api/questions/${transformBefore.id}/ai-transform`, {
+    operation: "regenerate",
+    draft: transformBefore,
+  }, { headers: contentUserHeaders });
+  assert(regenerated.operation === "regenerate" && regenerated.candidate.type === transformBefore.type && regenerated.candidate.origin.aiTransformed === true, "same-source AI regeneration returns a validated candidate");
+  if (transformBefore.origin?.type === "material") {
+    assert(JSON.stringify(regenerated.candidate.origin.materialRefs) === JSON.stringify(transformBefore.origin.materialRefs), "material regeneration preserves the original evidence references");
+  }
+
+  const choiceQuestion = builtDashboard.questions.find((question) => ["单选", "多选"].includes(question.type));
+  const correctLetters = Array.isArray(choiceQuestion.answer) ? choiceQuestion.answer : [choiceQuestion.answer];
+  const correctOptions = Object.fromEntries(correctLetters.map((letter) => [letter, choiceQuestion.options[letter.charCodeAt(0) - 65]]));
+  const distractors = await postJson(`/api/questions/${choiceQuestion.id}/ai-transform`, {
+    operation: "distractors",
+    draft: choiceQuestion,
+  }, { headers: contentUserHeaders });
+  assert(JSON.stringify(distractors.candidate.answer) === JSON.stringify(choiceQuestion.answer), "distractor regeneration preserves the correct answer letters");
+  assert(correctLetters.every((letter) => distractors.candidate.options[letter.charCodeAt(0) - 65] === correctOptions[letter]), "distractor regeneration preserves correct option contents and positions");
+
+  const customTransform = await postJson(`/api/questions/${transformBefore.id}/ai-transform`, {
+    operation: "custom",
+    prompt: "缩短题干并补充更清晰的解析",
+    draft: transformBefore,
+  }, { headers: contentUserHeaders });
+  assert(customTransform.candidate.stem.includes("已按要求优化") && customTransform.changedFields.length > 0, "custom AI prompt returns an explicit change candidate");
+  const transformDashboardAfter = await getJson("/api/dashboard", { headers: contentUserHeaders });
+  assert(JSON.stringify(transformDashboardAfter.questions.find((question) => question.id === transformBefore.id)) === transformStateBefore, "AI candidate requests do not mutate the persisted question");
+
   const invalidQuestion = draftDashboard.questions[0];
-  await patchJson(`/api/questions/${invalidQuestion.id}`, { score: 0, status: "待确认" }, { headers: contentUserHeaders });
+  await patchJson(`/api/questions/${invalidQuestion.id}`, { score: 0 }, { headers: contentUserHeaders });
   const blockedPublish = await postJson("/api/papers/publish", {}, { headers: contentUserHeaders, expectedStatus: 409 });
   assert(blockedPublish.failures.some((failure) => failure.questionId === invalidQuestion.id && failure.field === "score"), "publish runs validation and returns actionable question failures");
   const blockedPublishDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
   assert(blockedPublishDashboard.paper.status !== "已发布", "failed publish keeps the paper unpublished");
-  await patchJson(`/api/questions/${invalidQuestion.id}`, { score: generated.questions[0].score, status: "已校验" }, { headers: contentUserHeaders });
+  await patchJson(`/api/questions/${invalidQuestion.id}`, { score: generated.questions[0].score }, { headers: contentUserHeaders });
   const published = await postJson("/api/papers/publish", {}, { headers: contentUserHeaders });
-  assert(published.status === "已发布" && published.questionCount === 4 && published.score === 10, "publish automatically saves and publishes reviewed questions");
+  assert(published.status === "已发布" && published.questionCount === 4 && published.score === 10, "publish automatically validates and publishes valid unreviewed questions");
   const paper = published;
   const paperDetail = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
   assert(paperDetail.questions.length === 4 && paperDetail.status === "已发布", "paper detail returns the published snapshot");
@@ -474,8 +524,6 @@ try {
 
   const secondSpec = { ...generated.spec, categoryId: backendCategory.id, paperName: "核心能力测评 B 卷" };
   await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: secondSpec }, { headers: contentUserHeaders });
-  const secondDraft = await getJson("/api/dashboard", { headers: contentUserHeaders });
-  await Promise.all(secondDraft.questions.map((question) => patchJson(`/api/questions/${question.id}`, { status: "已校验" }, { headers: contentUserHeaders })));
   const paperB = await postJson("/api/papers/publish", {}, { headers: contentUserHeaders });
   assert(paperB.id !== paper.id && paperB.status === "已发布", "a second paper with the same questions is saved independently");
   const importedPaperB = await postJson("/api/question-bank/import", { paperId: paperB.id }, { headers: contentUserHeaders });
@@ -501,6 +549,14 @@ try {
 
   const importedIntoPaper = await postJson("/api/authoring/questions/import", { questionBankIds: [manualBankQuestion.id] }, { headers: contentUserHeaders });
   assert(importedIntoPaper.added === 1 && importedIntoPaper.questions[0].origin.bankQuestionId === manualBankQuestion.id, "reviewed bank question can be copied into the current paper with version reference");
+  const bankOriginalBeforeTransform = await getJson(`/api/question-bank/${manualBankQuestion.id}`, { headers: contentUserHeaders });
+  const bankDerivedCandidate = await postJson(`/api/questions/${importedIntoPaper.questions[0].id}/ai-transform`, {
+    operation: "regenerate",
+    draft: importedIntoPaper.questions[0],
+  }, { headers: contentUserHeaders });
+  assert(bankDerivedCandidate.candidate.origin.type === "question-bank" && bankDerivedCandidate.warnings.some((warning) => warning.includes("不会修改题库原题")), "question-bank regeneration returns a derived candidate with provenance warning");
+  const bankOriginalAfterTransform = await getJson(`/api/question-bank/${manualBankQuestion.id}`, { headers: contentUserHeaders });
+  assert(bankOriginalAfterTransform.version === bankOriginalBeforeTransform.version && bankOriginalAfterTransform.stem === bankOriginalBeforeTransform.stem, "AI transformation never mutates the question-bank original");
   const paperBAfterImport = await getJson(`/api/papers/${paperB.id}`, { headers: contentUserHeaders });
   assert(paperBAfterImport.status === "草稿" && paperBAfterImport.questions.some((question) => question.origin?.bankQuestionId === manualBankQuestion.id), "adding a bank question creates a draft paper snapshot without changing the bank item");
   const repeatedPaperImport = await postJson("/api/authoring/questions/import", { questionBankIds: [manualBankQuestion.id] }, { headers: contentUserHeaders });

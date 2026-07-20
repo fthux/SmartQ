@@ -5,6 +5,7 @@ import tls from "node:tls";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exam } from "../data/store.js";
+import { normalizeQuestionBankRecord } from "./question-utils.js";
 import { initializeAdminUsers } from "../services/admin-user-service.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -440,6 +441,7 @@ function defaultState() {
       sourcePlanSnapshot: null,
     },
     papers: [],
+    questionBank: [],
     sourceMaterials: [],
     generationTask: null,
     adminSessions: {},
@@ -475,6 +477,7 @@ function normalizeState(input) {
     questions: hasDiscardableAuthoringDraft ? [] : (Array.isArray(input.questions) ? input.questions : []),
     paper: hasDiscardableAuthoringDraft ? { ...normalizedPaper, questionIds: [], buildSpec: null, sourcePlanSnapshot: null } : normalizedPaper,
     papers: Array.isArray(input.papers) ? input.papers.map(normalizePaperSnapshot).filter(Boolean) : [],
+    questionBank: Array.isArray(input.questionBank) ? input.questionBank.map(normalizeQuestionBankRecord).filter(Boolean) : [],
     sourceMaterials: Array.isArray(input.sourceMaterials) ? input.sourceMaterials.map(normalizeSourceMaterial).filter(Boolean) : [],
     generationTask: hasDiscardableAuthoringDraft ? null : (input.generationTask || null),
     adminSessions: input.adminSessions && typeof input.adminSessions === "object" ? input.adminSessions : {},

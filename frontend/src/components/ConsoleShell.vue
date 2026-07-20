@@ -3,6 +3,7 @@ import { nextTick, ref } from "vue";
 import {
   ArrowDown,
   Check,
+  Collection,
   Files,
   FolderOpened,
   Fold,
@@ -20,6 +21,7 @@ import {
 import AuthoringPage from "../pages/AuthoringPage.vue";
 import MaterialsPage from "../pages/MaterialsPage.vue";
 import PapersPage from "../pages/PapersPage.vue";
+import QuestionBankPage from "../pages/QuestionBankPage.vue";
 import ProfilePage from "../pages/ProfilePage.vue";
 import UsersPage from "../pages/UsersPage.vue";
 import PaperDetailDrawer from "./PaperDetailDrawer.vue";
@@ -45,6 +47,7 @@ const {
 const iconMap = {
   files: Files,
   sparkles: MagicStick,
+  collection: Collection,
   folder: FolderOpened,
   "user-round": User,
   users: Management,
@@ -98,7 +101,7 @@ async function handleThemePreference(theme) {
         :default-active="state.route"
         :collapse="state.ui.sidebarCollapsed"
         aria-label="管理功能导航"
-        @select="go"
+        @select="(index) => go(index)"
       >
         <el-menu-item v-for="item in visibleNavItems" :key="item.key" :index="item.key">
           <el-icon><component :is="iconMap[item.icon]" /></el-icon>
@@ -192,6 +195,7 @@ async function handleThemePreference(theme) {
         <div v-else data-admin-route-content>
           <AuthoringPage v-if="state.route === 'authoring'" />
           <PapersPage v-if="state.route === 'papers'" />
+          <QuestionBankPage v-if="state.route === 'question-bank'" />
           <MaterialsPage v-if="state.route === 'materials'" />
           <UsersPage v-if="state.route === 'users'" />
           <ProfilePage v-if="state.route === 'profile'" />

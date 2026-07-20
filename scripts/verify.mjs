@@ -59,6 +59,7 @@ try {
     "frontend/src/App.vue",
     "frontend/src/components/ConsoleShell.vue",
     "frontend/src/components/PaperDetailDrawer.vue",
+    "frontend/src/components/QuestionBankPicker.vue",
     "frontend/src/components/QuestionEditorDialog.vue",
     "frontend/src/core/public-path.js",
     "frontend/src/core/router.js",
@@ -67,12 +68,14 @@ try {
     "frontend/src/pages/MaterialsPage.vue",
     "frontend/src/pages/PapersPage.vue",
     "frontend/src/pages/ProfilePage.vue",
+    "frontend/src/pages/QuestionBankPage.vue",
     "frontend/src/pages/UsersPage.vue",
     "frontend/src/stores/app-store.js",
     "frontend/src/stores/authoring-store.js",
     "frontend/src/stores/auth-store.js",
     "frontend/src/stores/layout-store.js",
     "frontend/src/stores/materials-store.js",
+    "frontend/src/stores/question-bank-store.js",
     "frontend/src/stores/users-store.js",
     "frontend/src/styles/index.css",
   ];
@@ -81,7 +84,9 @@ try {
   const backendFiles = [
     "backend/routes/index.js",
     "backend/routes/materials.js",
+    "backend/routes/question-bank.js",
     "backend/services/material-service.js",
+    "backend/services/question-bank-service.js",
     "backend/services/admin-user-service.js",
     "backend/services/auth-service.js",
   ];
@@ -119,8 +124,9 @@ try {
   assert(frontend.includes('window.scrollTo({ top: 0, left: 0, behavior: "auto" });'), "frontend resets scroll on module switches");
   assert(frontend.includes("出题制卷") && frontend.includes("已出卷子"), "frontend keeps authoring and paper UI");
   assert(frontend.indexOf('{ key: "papers"') < frontend.indexOf('{ key: "authoring"'), "paper management is the first navigation item");
-  assert(frontend.includes('return ["authoring", "papers", "materials", "users", "profile"].includes(route) ? route : "papers";'), "papers is the default route and content-management routes are routable");
+  assert(frontend.includes('return ["authoring", "papers", "question-bank", "materials", "users", "profile"].includes(route) ? route : "papers";'), "papers is the default route and content-management routes are routable");
   assert(frontend.includes('if (route === "papers") return "";'), "papers uses the root URL");
+  assert(frontend.includes('@select="(index) => go(index)"'), "desktop navigation passes only the selected route key");
   assert(!/控制台首页|数据维护|运营会话|审计日志|自动备份历史/.test(frontend), "frontend removes the console homepage and maintenance UI");
   assert(!/参与者管理|试卷分配|监考工作台|阅卷分析|考生系统/.test(frontend), "frontend removes retired navigation and pages");
   assert(!/#\/candidate|\/api\/candidate\/|\/api\/participants|\/api\/assignments|\/api\/proctor|\/api\/grading|\/api\/analysis/.test(frontend), "frontend removes retired routes and API calls");
@@ -134,8 +140,12 @@ try {
   assert(frontend.includes("data-question-type-matrix") && frontend.includes("typeMatrixRows") && frontend.includes("通过并继续"), "authoring keeps the compact type matrix and next-question review flow");
   assert(frontend.includes('paperPageSize: 20') && frontend.includes('aria-label="试卷状态筛选"'), "paper management uses the Element Plus list controls");
   assert(frontend.includes('aria-label="试卷详情抽屉"') && frontend.includes("paperDetailMode"), "paper details open in the responsive drawer");
+  assert((frontend.match(/if \(state\.selectedPaperId\) clearSelectedPaper\(\);/g) || []).length >= 2, "route changes close an open paper detail drawer");
   assert(frontend.includes("出题资料管理") && frontend.includes("/api/materials/upload") && frontend.includes("data-question-source-plan"), "frontend exposes material management and source allocation");
   assert(frontend.includes("materialQuestionCount") && frontend.includes("AI 独立题数量") && frontend.includes("资料依据"), "authoring config and review expose mixed-source traceability");
+  assert(frontend.includes("题库管理") && frontend.includes("data-question-bank-page") && frontend.includes("从题库选择题目"), "frontend exposes question bank management and paper selection");
+  assert(frontend.includes("已校验题目入库") && frontend.includes("整卷入库") && frontend.includes("加入题库"), "review and paper detail surfaces can explicitly add questions to the bank");
+  assert(backend.includes("questionContentHash") && backend.includes("questionBankUsageMap") && backend.includes("importQuestionBankIntoAuthoring"), "backend implements question deduplication, usage relations, and paper imports");
 
   const blockedDashboard = await getJson("/api/dashboard", { expectedStatus: 401 });
   assert(blockedDashboard.error.includes("运营控制台"), "dashboard requires admin login");
@@ -267,6 +277,48 @@ try {
   assert(freshDashboard.questions.length === 0 && freshDashboard.papers.length === 0, "fresh dashboard starts without content");
   assert(!("participants" in freshDashboard) && !("sessions" in freshDashboard) && !("analysis" in freshDashboard), "dashboard omits retired domain payloads");
 
+  const manualBankQuestion = await postJson("/api/question-bank", {
+    type: "判断",
+    stem: "题库中的题目加入试卷后，修改题库会自动覆盖已经发布的试卷。",
+    answer: "错误",
+    defaultScore: 2,
+    difficulty: "中",
+    knowledge: ["题库管理"],
+    tags: ["快照"],
+    explanation: "试卷保存独立题目快照。",
+    status: "已校验",
+  }, { headers: contentUserHeaders, expectedStatus: 201 });
+  assert(manualBankQuestion.status === "已校验" && manualBankQuestion.version === 1, "manual reviewed question can be created in the bank");
+  await postJson("/api/question-bank", {
+    type: "判断",
+    stem: "题库中的题目加入试卷后，修改题库会自动覆盖已经发布的试卷。",
+    answer: "错误",
+    defaultScore: 20,
+    difficulty: "难",
+    status: "已校验",
+  }, { headers: contentUserHeaders, expectedStatus: 409 });
+  await postJson("/api/question-bank", {
+    type: "判断",
+    stem: "题库中的题目加入试卷后，修改题库会自动覆盖已经发布的试卷。",
+    answer: "正确",
+    defaultScore: 2,
+    difficulty: "中",
+    status: "已校验",
+  }, { headers: contentUserHeaders, expectedStatus: 409 });
+  const bankList = await getJson("/api/question-bank?status=已校验&page=1&pageSize=20", { headers: contentUserHeaders });
+  assert(bankList.total === 1 && bankList.items[0].id === manualBankQuestion.id, "question bank list supports reviewed status filtering");
+  const updatedBankQuestion = await patchJson(`/api/question-bank/${manualBankQuestion.id}`, {
+    stem: "题库中的题目加入试卷后，修改题库不会自动覆盖已经发布的试卷。",
+    answer: "正确",
+  }, { headers: contentUserHeaders });
+  assert(updatedBankQuestion.version === 2, "question content changes increment the bank version");
+  const updatedBankDetail = await getJson(`/api/question-bank/${manualBankQuestion.id}`, { headers: contentUserHeaders });
+  assert(updatedBankDetail.revisions.length === 2, "question bank keeps version history");
+  const archivedBankQuestion = await postJson(`/api/question-bank/${manualBankQuestion.id}/archive`, {}, { headers: contentUserHeaders });
+  assert(archivedBankQuestion.status === "已归档", "question bank item can be archived");
+  const restoredBankQuestion = await postJson(`/api/question-bank/${manualBankQuestion.id}/restore`, {}, { headers: contentUserHeaders });
+  assert(restoredBankQuestion.status === "已校验", "restoring a reviewed question preserves its review status");
+
   const materialOne = await postJson("/api/materials", {
     name: "JavaScript 基础规范",
     description: "用于验证资料题生成",
@@ -349,8 +401,34 @@ try {
   const activated = await postJson(`/api/papers/${paper.id}/activate`, {}, { headers: contentUserHeaders });
   assert(activated.id === paper.id, "paper can be activated as current");
 
+  const importedPaperA = await postJson("/api/question-bank/import", { paperId: paper.id }, { headers: contentUserHeaders });
+  assert(importedPaperA.created === 4 && importedPaperA.reused === 0, "first paper import creates unique bank questions");
+  const bankAfterPaperA = await getJson("/api/question-bank?page=1&pageSize=20", { headers: contentUserHeaders });
+  assert(bankAfterPaperA.total === 5, "manual and paper questions coexist in the bank");
+
+  const secondSpec = { ...generated.spec, paperName: "核心能力测评 B 卷" };
+  await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: secondSpec }, { headers: contentUserHeaders });
+  const secondDraft = await getJson("/api/dashboard", { headers: contentUserHeaders });
+  await Promise.all(secondDraft.questions.map((question) => patchJson(`/api/questions/${question.id}`, { status: "已校验" }, { headers: contentUserHeaders })));
+  const paperB = await postJson("/api/papers/publish", {}, { headers: contentUserHeaders });
+  assert(paperB.id !== paper.id && paperB.status === "已发布", "a second paper with the same questions is saved independently");
+  const importedPaperB = await postJson("/api/question-bank/import", { paperId: paperB.id }, { headers: contentUserHeaders });
+  assert(importedPaperB.created === 0 && importedPaperB.reused === 4, "same questions from paper B reuse paper A bank records");
+  const bankAfterPaperB = await getJson("/api/question-bank?page=1&pageSize=20", { headers: contentUserHeaders });
+  assert(bankAfterPaperB.total === 5, "paper B duplicate import does not create extra bank records");
+  const sharedBankQuestion = bankAfterPaperB.items.find((item) => item.id !== manualBankQuestion.id);
+  const sharedDetail = await getJson(`/api/question-bank/${sharedBankQuestion.id}`, { headers: contentUserHeaders });
+  assert(sharedDetail.usages.some((item) => item.paperId === paper.id) && sharedDetail.usages.some((item) => item.paperId === paperB.id), "one bank question records both A and B paper sources");
+
+  const importedIntoPaper = await postJson("/api/authoring/questions/import", { questionBankIds: [manualBankQuestion.id] }, { headers: contentUserHeaders });
+  assert(importedIntoPaper.added === 1 && importedIntoPaper.questions[0].origin.bankQuestionId === manualBankQuestion.id, "reviewed bank question can be copied into the current paper with version reference");
+  const paperBAfterImport = await getJson(`/api/papers/${paperB.id}`, { headers: contentUserHeaders });
+  assert(paperBAfterImport.status === "草稿" && paperBAfterImport.questions.some((question) => question.origin?.bankQuestionId === manualBankQuestion.id), "adding a bank question creates a draft paper snapshot without changing the bank item");
+  const repeatedPaperImport = await postJson("/api/authoring/questions/import", { questionBankIds: [manualBankQuestion.id] }, { headers: contentUserHeaders });
+  assert(repeatedPaperImport.added === 0 && repeatedPaperImport.skipped === 1, "adding the same bank question twice to a paper is skipped");
+
   const dashboard = await getJson("/api/dashboard", { headers: adminHeaders });
-  assert(dashboard.stats.questions === 4 && dashboard.stats.papers === 1 && dashboard.stats.published === 1, "dashboard exposes reduced content statistics");
+  assert(dashboard.stats.questions === 5 && dashboard.stats.papers === 2 && dashboard.stats.published === 1, "dashboard reflects question-bank additions without duplicating papers");
   console.log("SmartQ verification passed");
 } catch (error) {
   console.error(error.stack || error.message || error);

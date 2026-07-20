@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import {
   Check,
+  Collection,
   Delete,
   DocumentChecked,
   Edit,
@@ -34,6 +35,8 @@ const {
   discardDraft,
   saveDraft,
   openQuestionEditor,
+  openQuestionBankPicker,
+  addCurrentQuestionsToBank,
   reviewQuestion,
   publishPaper,
   openMaterialSelector,
@@ -87,6 +90,11 @@ const overviewTotalScore = computed(() => {
   if (activeQuestions.value.length) return activeQuestions.value.reduce((sum, item) => sum + Number(item.score || 0), 0);
   return computedSpecTotalScore.value;
 });
+const overviewQuestionSources = computed(() => ({
+  bank: activeQuestions.value.filter((item) => item.origin?.type === "question-bank").length,
+  material: activeQuestions.value.filter((item) => item.origin?.type === "material").length,
+  ai: activeQuestions.value.filter((item) => !["question-bank", "material"].includes(item.origin?.type)).length,
+}));
 const overviewPaperName = computed(() => activePaper.value.name || activeSpec.value?.paperName || state.spec.paperName || "未命名试卷");
 const overviewKnowledge = computed(() => {
   const value = activeSpec.value?.knowledge;
@@ -178,13 +186,14 @@ function questionKnowledge(question) {
 }
 
 function questionSourceLabel(question) {
+  if (question?.origin?.type === "question-bank") return `题库 · ${question.origin.bankQuestionId || "已入库"}`;
   if (question?.origin?.type !== "material") return "AI 独立";
   const names = [...new Set((question.origin.materialRefs || []).map((item) => item.name).filter(Boolean))];
   return names.join("、") || "资料题";
 }
 
 function sourceModeLabel(mode) {
-  return { "ai-only": "AI 独立生成", mixed: "资料 + AI", "materials-only": "仅资料" }[mode] || "AI 独立生成";
+  return { "ai-only": "AI 独立生成", mixed: "资料 + AI", "materials-only": "仅资料", "question-bank": "题库选题" }[mode] || "AI 独立生成";
 }
 
 function selectQuestion(question) {
@@ -263,7 +272,10 @@ function editPublishIssue(issue) {
                   {{ formLocked ? '当前参数已锁定' : state.regeneratingDraft ? '重新生成模式' : '待生成' }}
                 </div>
               </div>
-              <el-tag :type="formLocked ? 'info' : 'success'" effect="plain">{{ state.spec.difficulty || '中' }}等难度</el-tag>
+              <div class="flex flex-wrap items-center gap-2">
+                <el-button :icon="Collection" :disabled="state.generating" @click="openQuestionBankPicker">从题库选题</el-button>
+                <el-tag :type="formLocked ? 'info' : 'success'" effect="plain">{{ state.spec.difficulty || '中' }}等难度</el-tag>
+              </div>
             </div>
 
             <div v-if="state.generating || state.generationStage" class="generation-progress">
@@ -395,7 +407,7 @@ function editPublishIssue(issue) {
             <el-table :data="state.generatedDraft.questions" class="mt-3" max-height="430" size="small" highlight-current-row @row-click="selectQuestion">
               <el-table-column type="index" label="#" width="54" />
               <el-table-column label="题型" width="86"><template #default="{ row }"><el-tag :type="questionTagType(row.type)" size="small">{{ row.type }}</el-tag></template></el-table-column>
-              <el-table-column label="来源" min-width="120" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.origin?.type === 'material' ? 'success' : 'info'" size="small" effect="plain">{{ questionSourceLabel(row) }}</el-tag></template></el-table-column>
+              <el-table-column label="来源" min-width="150" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.origin?.type === 'material' ? 'success' : row.origin?.type === 'question-bank' ? 'primary' : 'info'" size="small" effect="plain">{{ questionSourceLabel(row) }}</el-tag></template></el-table-column>
               <el-table-column prop="stem" label="题干" min-width="260" show-overflow-tooltip />
               <el-table-column prop="difficulty" label="难度" width="68" />
               <el-table-column label="答案" min-width="110" show-overflow-tooltip><template #default="{ row }">{{ formatAnswer(row) }}</template></el-table-column>
@@ -410,7 +422,11 @@ function editPublishIssue(issue) {
               <div class="text-sm font-black">人工审核</div>
               <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{{ authoringReviewedCount }}/{{ authoringQuestions.length }} 已通过</div>
             </div>
-            <el-progress class="review-progress" :percentage="authoringQuestions.length ? Math.round(authoringReviewedCount / authoringQuestions.length * 100) : 0" :stroke-width="8" />
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <el-button :icon="Collection" @click="openQuestionBankPicker">从题库选题</el-button>
+              <el-button type="success" plain :loading="state.questionBankManagement.importingCurrent" :disabled="!authoringReviewedCount" @click="addCurrentQuestionsToBank">已校验题目入库</el-button>
+              <el-progress class="review-progress" :percentage="authoringQuestions.length ? Math.round(authoringReviewedCount / authoringQuestions.length * 100) : 0" :stroke-width="8" />
+            </div>
           </div>
 
           <div class="review-toolbar mt-3">
@@ -435,7 +451,7 @@ function editPublishIssue(issue) {
             <el-table-column type="index" label="#" width="52" />
             <el-table-column label="状态" width="88"><template #default="{ row }"><el-tag :type="questionStatusTagType(row.status)" size="small">{{ row.status === '已校验' ? '已通过' : '待审核' }}</el-tag></template></el-table-column>
             <el-table-column label="题型" width="82"><template #default="{ row }"><el-tag :type="questionTagType(row.type)" size="small" effect="plain">{{ row.type }}</el-tag></template></el-table-column>
-            <el-table-column label="来源" min-width="120" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.origin?.type === 'material' ? 'success' : 'info'" size="small" effect="plain">{{ questionSourceLabel(row) }}</el-tag></template></el-table-column>
+            <el-table-column label="来源" min-width="150" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.origin?.type === 'material' ? 'success' : row.origin?.type === 'question-bank' ? 'primary' : 'info'" size="small" effect="plain">{{ questionSourceLabel(row) }}</el-tag></template></el-table-column>
             <el-table-column prop="stem" label="题干" min-width="260" show-overflow-tooltip />
             <el-table-column prop="difficulty" label="难度" width="64" />
             <el-table-column label="答案" min-width="100" show-overflow-tooltip><template #default="{ row }">{{ formatAnswer(row) }}</template></el-table-column>
@@ -465,8 +481,9 @@ function editPublishIssue(issue) {
             <div><span>试卷总分</span><strong>{{ paper.score || overviewTotalScore }} 分</strong></div>
             <div><span>题目数量</span><strong>{{ paper.questionCount || authoringQuestions.length }} 题</strong></div>
             <div><span>审核状态</span><strong :class="authoringPendingReviewCount ? 'text-coral' : 'text-leaf'">{{ authoringPendingReviewCount ? `${authoringPendingReviewCount} 题待审核` : '全部通过' }}</strong></div>
-            <div><span>资料题</span><strong>{{ activeSourcePlan?.materialQuestionCount || 0 }} 题</strong></div>
-            <div><span>AI 独立题</span><strong>{{ activeSourcePlan?.aiQuestionCount ?? overviewQuestionCount }} 题</strong></div>
+            <div><span>题库题</span><strong>{{ overviewQuestionSources.bank }} 题</strong></div>
+            <div><span>资料题</span><strong>{{ overviewQuestionSources.material }} 题</strong></div>
+            <div><span>AI 独立题</span><strong>{{ overviewQuestionSources.ai }} 题</strong></div>
           </div>
 
           <div v-if="state.publishQualityFailures.length" class="mt-4">
@@ -535,7 +552,7 @@ function editPublishIssue(issue) {
             <p class="mt-3 text-sm font-bold leading-6">{{ selectedQuestion.stem }}</p>
             <div class="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">{{ selectedQuestion.difficulty }} · {{ questionKnowledge(selectedQuestion) }}</div>
             <div class="mt-2 flex flex-wrap items-center gap-1">
-              <el-tag :type="selectedQuestion.origin?.type === 'material' ? 'success' : 'info'" size="small" effect="plain">{{ questionSourceLabel(selectedQuestion) }}</el-tag>
+              <el-tag :type="selectedQuestion.origin?.type === 'material' ? 'success' : selectedQuestion.origin?.type === 'question-bank' ? 'primary' : 'info'" size="small" effect="plain">{{ questionSourceLabel(selectedQuestion) }}</el-tag>
               <el-tag v-if="selectedQuestion.origin?.edited" size="small" type="warning" effect="plain">已人工修改</el-tag>
             </div>
             <ol v-if="selectedQuestion.options?.length" class="mt-3 space-y-1 text-xs leading-5">

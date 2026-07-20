@@ -24,6 +24,7 @@ import { createPapersStore } from "./papers-store.js";
 import { createUiStore } from "./ui-store.js";
 import { createLayoutStore } from "./layout-store.js";
 import { createMaterialsStore } from "./materials-store.js";
+import { createQuestionBankStore } from "./question-bank-store.js";
 import { createUsersStore } from "./users-store.js";
 import { computed, onMounted, reactive, watch } from "vue";
 
@@ -109,6 +110,45 @@ export function createAppStore() {
         usages: [],
         returnToAuthoring: false,
       },
+      questionBankManagement: {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        search: "",
+        status: "",
+        type: "",
+        difficulty: "",
+        loading: false,
+        error: "",
+        actionId: null,
+        editorOpen: false,
+        editorMode: "create",
+        editingId: null,
+        form: {},
+        formError: "",
+        saving: false,
+        detailOpen: false,
+        detailLoading: false,
+        detail: null,
+        importingCurrent: false,
+        importingPaperId: null,
+        picker: {
+          open: false,
+          items: [],
+          total: 0,
+          page: 1,
+          pageSize: 10,
+          search: "",
+          status: "已校验",
+          type: "",
+          difficulty: "",
+          loading: false,
+          error: "",
+          selection: [],
+          importing: false,
+        },
+      },
       ui: {
         sidebarCollapsed: localStorage.getItem("smartqSidebarCollapsed") === "1",
         theme: ["system", "light", "dark"].includes(localStorage.getItem("smartqTheme")) ? localStorage.getItem("smartqTheme") : "system",
@@ -152,6 +192,7 @@ export function createAppStore() {
     const navItems = [
       { key: "papers", label: "已出卷子", icon: "files" },
       { key: "authoring", label: "出题制卷", icon: "sparkles" },
+      { key: "question-bank", label: "题库管理", icon: "collection" },
       { key: "materials", label: "出题资料", icon: "folder" },
       { key: "users", label: "用户管理", icon: "users" },
       { key: "profile", label: "个人资料", icon: "user-round", showInNav: false },
@@ -337,6 +378,29 @@ export function createAppStore() {
       toggleMaterialSelection,
     } = createMaterialsStore({ state, notify, go: (...args) => go(...args) });
     const {
+      addCurrentQuestionsToBank,
+      addPaperQuestionsToBank,
+      addSelectedQuestionBankToAuthoring,
+      applyQuestionBankFilters,
+      applyQuestionBankPickerFilters,
+      changeQuestionBankPage,
+      changeQuestionBankPageSize,
+      changeQuestionBankPickerPage,
+      loadQuestionBank,
+      openCreateQuestionBankItem,
+      openEditQuestionBankItem,
+      openQuestionBankDetail,
+      openQuestionBankPicker,
+      runQuestionBankAction,
+      saveQuestionBankItem,
+      setQuestionBankPickerSelection,
+    } = createQuestionBankStore({
+      state,
+      notify,
+      refresh: (...args) => refresh(...args),
+      authoringQuestions,
+    });
+    const {
       activatePaper,
       askDeletePaper,
       changePaperPage,
@@ -430,7 +494,8 @@ export function createAppStore() {
           state.activeWorkflowStep = "config";
         }
       }
-      if (route === "papers") clearSelectedPaper();
+      if (state.selectedPaperId) clearSelectedPaper();
+      if (route === "question-bank") loadQuestionBank();
       if (route === "users") loadAdminUsers();
       if (route === "materials") {
         state.materialManagement.returnToAuthoring = params?.returnTo === "authoring";
@@ -469,7 +534,8 @@ export function createAppStore() {
         }
         state.authoringPaperId = currentAuthoringPaperId();
         state.editingPaperId = state.route === "authoring" && state.authoringPaperId ? state.authoringPaperId : null;
-        if (state.route === "papers") clearSelectedPaper();
+        if (state.selectedPaperId) clearSelectedPaper();
+        if (state.route === "question-bank") loadQuestionBank();
         if (state.route === "users") loadAdminUsers();
         if (state.route === "materials") loadMaterials();
         if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
@@ -489,6 +555,7 @@ export function createAppStore() {
       await loadAdminSession();
       await refresh();
       if (state.route === "users") await loadAdminUsers();
+      if (state.route === "question-bank") await loadQuestionBank();
       if (state.route === "materials") await loadMaterials();
       if (state.route === "authoring") await loadMaterialOptions();
       if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
@@ -544,6 +611,22 @@ export function createAppStore() {
       revokeManagedAdminSessions,
       saveManagedAdminUser,
       setManagedAdminUserStatus,
+      addCurrentQuestionsToBank,
+      addPaperQuestionsToBank,
+      addSelectedQuestionBankToAuthoring,
+      applyQuestionBankFilters,
+      applyQuestionBankPickerFilters,
+      changeQuestionBankPage,
+      changeQuestionBankPageSize,
+      changeQuestionBankPickerPage,
+      loadQuestionBank,
+      openCreateQuestionBankItem,
+      openEditQuestionBankItem,
+      openQuestionBankDetail,
+      openQuestionBankPicker,
+      runQuestionBankAction,
+      saveQuestionBankItem,
+      setQuestionBankPickerSelection,
       applyMaterialFilters,
       changeMaterialPage,
       changeMaterialPageSize,

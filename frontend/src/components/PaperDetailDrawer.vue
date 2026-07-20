@@ -1,11 +1,12 @@
 <script setup>
-import { Edit } from "@element-plus/icons-vue";
+import { Collection, Edit } from "@element-plus/icons-vue";
 import { useSmartQ } from "../stores/context.js";
 
 const {
   state,
   clearSelectedPaper,
   editPaper,
+  addPaperQuestionsToBank,
   displayPaperStatus,
   displayQuestionOptions,
 } = useSmartQ();
@@ -20,6 +21,7 @@ function statusType(status) {
 }
 
 function questionSourceLabel(question) {
+  if (question?.origin?.type === "question-bank") return `题库 · ${question.origin.bankQuestionId || "已入库"}`;
   if (question?.origin?.type !== "material") return "AI 独立";
   return [...new Set((question.origin.materialRefs || []).map((item) => item.name).filter(Boolean))].join("、") || "资料题";
 }
@@ -36,7 +38,10 @@ function questionSourceLabel(question) {
     <template #header>
       <div class="flex min-w-0 items-center justify-between gap-3 pr-3">
         <div class="min-w-0"><div class="text-base font-black">试卷详情</div><div class="mt-0.5 truncate text-xs font-semibold text-slate-500 dark:text-slate-400">{{ state.selectedPaperDetail?.name || '正在加载试卷内容' }}</div></div>
-        <el-button v-if="state.selectedPaperDetail && state.selectedPaperDetail.status !== '已发布'" type="primary" :icon="Edit" @click="editPaper(state.selectedPaperDetail)">编辑</el-button>
+        <div v-if="state.selectedPaperDetail" class="flex shrink-0 gap-2">
+          <el-button :icon="Collection" :loading="state.questionBankManagement.importingPaperId === state.selectedPaperDetail.id" @click="addPaperQuestionsToBank(state.selectedPaperDetail)">整卷入库</el-button>
+          <el-button v-if="state.selectedPaperDetail.status !== '已发布'" type="primary" :icon="Edit" @click="editPaper(state.selectedPaperDetail)">编辑</el-button>
+        </div>
       </div>
     </template>
 
@@ -68,7 +73,7 @@ function questionSourceLabel(question) {
               <div class="hidden sm:block"><el-tag size="small" effect="plain">{{ question.type }}</el-tag></div>
               <div class="min-w-0">
                 <div class="mb-2 sm:hidden"><el-tag size="small" effect="plain">{{ question.type }}</el-tag></div>
-                <div class="mb-2 flex flex-wrap gap-1"><el-tag :type="question.origin?.type === 'material' ? 'success' : 'info'" size="small" effect="plain">{{ questionSourceLabel(question) }}</el-tag><el-tag v-if="question.origin?.edited" size="small" type="warning" effect="plain">已人工修改</el-tag></div>
+                <div class="mb-2 flex flex-wrap items-center gap-1"><el-tag :type="question.origin?.type === 'material' ? 'success' : question.origin?.type === 'question-bank' ? 'primary' : 'info'" size="small" effect="plain">{{ questionSourceLabel(question) }}</el-tag><el-tag v-if="question.origin?.edited" size="small" type="warning" effect="plain">已人工修改</el-tag><el-button link type="success" size="small" :icon="Collection" @click="addPaperQuestionsToBank(state.selectedPaperDetail, [question.id])">加入题库</el-button></div>
                 <div class="text-sm font-semibold leading-6" :class="state.paperDetailMode === 'compact' ? 'line-clamp-2' : ''">{{ question.stem }}</div>
                 <div v-if="state.paperDetailMode === 'full' && ['单选','多选','判断'].includes(question.type)" class="mt-3 grid gap-2 text-xs font-semibold sm:grid-cols-2">
                   <div v-for="(option, optionIndex) in displayQuestionOptions(question)" :key="optionIndex" class="rounded border border-slate-100 bg-slate-50 px-3 py-2 dark:border-night-border dark:bg-night-elevated">{{ String.fromCharCode(65 + optionIndex) }}. {{ option }}</div>

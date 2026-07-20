@@ -3,10 +3,11 @@ import { logItem } from "../lib/audit.js";
 import { readJson, sendJson } from "../lib/http.js";
 import { updateState } from "../lib/runtime-store.js";
 import { getGenerationJob, startGenerationJob } from "../services/generation-service.js";
+import { importQuestionBankIntoAuthoring } from "../services/question-bank-service.js";
 import { questionContentChanged, upsertPaperSnapshot } from "../services/paper-service.js";
 import { buildPaper } from "../lib/ai.js";
 
-export async function handleAuthoringRoutes(req, res, url, state) {
+export async function handleAuthoringRoutes(req, res, url, state, auth) {
   if (req.method === "POST" && url.pathname === "/api/ai/generate-questions") {
     const body = await readJson(req);
     sendJson(res, 202, startGenerationJob(body));
@@ -45,6 +46,12 @@ export async function handleAuthoringRoutes(req, res, url, state) {
       current.auditLog.push(logItem("ai-draft-save", `保存「${spec.paperName || "未命名试卷"}」试卷内容 ${current.questions.length} 道，稳定性 ${checks.stabilityScore}`));
     });
     sendJson(res, 200, { saved: true, questions, spec, checks });
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/authoring/questions/import") {
+    const result = await importQuestionBankIntoAuthoring(await readJson(req), auth?.user?.username || "");
+    sendJson(res, 200, result);
     return true;
   }
 

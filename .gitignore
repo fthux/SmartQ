@@ -1,9 +1,16 @@
 node_modules/
 frontend/dist/
 .env
+.env.local
+.env.*.local
 npm-debug.log*
 .DS_Store
 data/runtime.json
+data/runtime.json.*.tmp
+data/backups/
+data/materials/
 backend/data/runtime.json
+backend/data/runtime.json.*.tmp
 backend/data/backups/
+backend/data/materials/
 .codegraph/

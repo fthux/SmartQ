@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node backend/server.js",
-    "dev": "concurrently -k -n api,web -c blue,green \"node backend/server.js\" \"vite --host 0.0.0.0\"",
+    "dev": "concurrently -k -n api,web -c blue,green \"node --watch backend/server.js\" \"vite --host 0.0.0.0\"",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "check": "node scripts/check.mjs",

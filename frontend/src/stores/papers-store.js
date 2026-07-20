@@ -73,7 +73,7 @@ export function createPapersStore({ state, request, refresh, notify, mountIcons,
     if (state.dashboard?.paper?.id !== item.id) await activatePaper(item.id);
     state.activeWorkflowStep = "review";
     go("authoring", { paperid: item.id });
-    notify("已进入草稿试卷编辑模式");
+    notify("已进入试卷编辑模式");
   }
 
   return {

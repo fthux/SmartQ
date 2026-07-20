@@ -31,8 +31,8 @@ export function createLayoutStore({ state, mountIcons }) {
     mountIcons();
   }
 
-  function toggleTheme(isDark, origin) {
-    setTheme(isDark ? "dark" : "light", { animate: true, origin });
+  function toggleTheme(isDark) {
+    setTheme(isDark ? "dark" : "light", { animate: true });
   }
 
   function applyTheme(options = {}) {
@@ -51,11 +51,17 @@ export function createLayoutStore({ state, mountIcons }) {
       return;
     }
 
-    const x = Math.min(Math.max(Number(options.origin?.x) || window.innerWidth / 2, 0), window.innerWidth);
-    const y = Math.min(Math.max(Number(options.origin?.y) || window.innerHeight / 2, 0), window.innerHeight);
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const originX = Number(options.origin?.x);
+    const originY = Number(options.origin?.y);
+    const defaultX = nextDark ? viewportWidth : 0;
+    const defaultY = nextDark ? 0 : viewportHeight;
+    const x = Math.min(Math.max(Number.isFinite(originX) ? originX : defaultX, 0), viewportWidth);
+    const y = Math.min(Math.max(Number.isFinite(originY) ? originY : defaultY, 0), viewportHeight);
     const endRadius = Math.hypot(
-      Math.max(x, window.innerWidth - x),
-      Math.max(y, window.innerHeight - y),
+      Math.max(x, viewportWidth - x),
+      Math.max(y, viewportHeight - y),
     );
     const transition = document.startViewTransition(apply);
     transition.ready

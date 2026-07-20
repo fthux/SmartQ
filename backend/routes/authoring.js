@@ -6,6 +6,7 @@ import { getGenerationJob, startGenerationJob } from "../services/generation-ser
 import { importQuestionBankIntoAuthoring } from "../services/question-bank-service.js";
 import { questionContentChanged, upsertPaperSnapshot } from "../services/paper-service.js";
 import { buildPaper } from "../lib/ai.js";
+import { activeLeafCategory, categorySnapshotForId } from "../lib/question-bank-categories.js";
 
 export async function handleAuthoringRoutes(req, res, url, state, auth) {
   if (req.method === "POST" && url.pathname === "/api/ai/generate-questions") {
@@ -33,6 +34,10 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
       sendJson(res, 400, { error: "没有可保存的试卷内容" });
       return true;
     }
+    if (!activeLeafCategory(state, spec.categoryId)) {
+      sendJson(res, 400, { error: "请选择有效的叶子分类后再保存试卷内容" });
+      return true;
+    }
     const checks = validateQuestions(questions);
     await updateState((current) => {
       current.questions = questions.map((item, index) => ({
@@ -42,7 +47,17 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
         status: item.status || "待确认",
       }));
       current.generationTask = spec;
-      current.paper = { id: null, name: "", status: null, publishedAt: null, questionIds: [], buildSpec: null, sourcePlanSnapshot: spec.sourcePlan || null };
+      current.paper = {
+        id: null,
+        name: "",
+        status: null,
+        publishedAt: null,
+        questionIds: [],
+        buildSpec: null,
+        sourcePlanSnapshot: spec.sourcePlan || null,
+        categoryId: String(spec.categoryId || ""),
+        categorySnapshot: categorySnapshotForId(current, spec.categoryId),
+      };
       current.auditLog.push(logItem("ai-draft-save", `保存「${spec.paperName || "未命名试卷"}」试卷内容 ${current.questions.length} 道，稳定性 ${checks.stabilityScore}`));
     });
     sendJson(res, 200, { saved: true, questions, spec, checks });

@@ -1,5 +1,6 @@
 <script setup>
 import { Collection, Edit } from "@element-plus/icons-vue";
+import { computed } from "vue";
 import { useSmartQ } from "../stores/context.js";
 
 const {
@@ -15,6 +16,7 @@ const detailModes = [
   { label: "紧凑", value: "compact" },
   { label: "完整", value: "full" },
 ];
+const leafCategoryOptions = computed(() => state.questionBankManagement.categories.filter((item) => item.status === "active" && item.isLeaf));
 
 function statusType(status) {
   return displayPaperStatus(status) === "已发布" ? "success" : "info";
@@ -32,7 +34,7 @@ function questionSourceLabel(question) {
     :model-value="Boolean(state.selectedPaperId)"
     append-to-body
     direction="rtl"
-    size="min(860px, 100vw)"
+    size="min(1080px, 100vw)"
     aria-label="试卷详情抽屉"
     @update:model-value="(value) => !value && clearSelectedPaper()"
   >
@@ -41,7 +43,7 @@ function questionSourceLabel(question) {
         <div class="min-w-0"><div class="text-base font-black">试卷详情</div><div class="mt-0.5 truncate text-xs font-semibold text-slate-500 dark:text-slate-400">{{ state.selectedPaperDetail?.name || '正在加载试卷内容' }}</div></div>
         <div v-if="state.selectedPaperDetail" class="flex shrink-0 gap-2">
           <el-button :icon="Collection" :loading="state.questionBankManagement.importingPaperId === state.selectedPaperDetail.id" @click="addPaperQuestionsToBank(state.selectedPaperDetail)">整卷入库</el-button>
-          <el-button v-if="state.selectedPaperDetail.status !== '已发布'" type="primary" :icon="Edit" @click="editPaper(state.selectedPaperDetail)">编辑</el-button>
+          <el-button type="primary" :icon="Edit" @click="editPaper(state.selectedPaperDetail)">编辑</el-button>
         </div>
       </div>
     </template>
@@ -53,6 +55,14 @@ function questionSourceLabel(question) {
           <el-statistic title="题目" :value="state.selectedPaperDetail.questionCount || 0" />
           <el-statistic title="总分" :value="state.selectedPaperDetail.score || 0" />
           <el-tag :type="statusType(state.selectedPaperDetail.status)">{{ displayPaperStatus(state.selectedPaperDetail.status) }}</el-tag>
+        </div>
+
+        <div class="mt-4 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-4 text-xs font-semibold dark:border-night-border">
+          <span>试卷分类：</span>
+          <el-tag :type="state.selectedPaperDetail.categorySnapshot ? 'primary' : 'warning'" effect="plain">{{ state.selectedPaperDetail.categorySnapshot?.path?.map((item) => item.name).join(' / ') || '未分类' }}</el-tag>
+          <el-select v-if="!state.selectedPaperDetail.categoryId" v-model="state.questionBankManagement.paperImportCategoryId" filterable placeholder="选择历史试卷入库分类" class="min-w-56">
+            <el-option v-for="category in leafCategoryOptions" :key="category.id" :label="category.path.map((item) => item.name).join(' / ')" :value="category.id" />
+          </el-select>
         </div>
 
         <div class="mt-4 flex items-center justify-between gap-3">

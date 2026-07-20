@@ -11,6 +11,8 @@ export function upsertPaperSnapshot(state, paper) {
     questions: paper.questions,
     buildSpec: paper.buildSpec,
     sourcePlanSnapshot: paper.sourcePlanSnapshot || paper.buildSpec?.sourcePlanSnapshot || null,
+    categoryId: String(paper.categoryId || ""),
+    categorySnapshot: paper.categorySnapshot || null,
     publishedAt: paper.publishedAt,
     createdAt: paper.buildSpec?.savedAt || paper.buildSpec?.builtAt || new Date().toISOString(),
   };

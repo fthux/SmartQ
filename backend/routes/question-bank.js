@@ -7,9 +7,42 @@ import {
   setQuestionBankArchived,
   updateQuestionBankItem,
 } from "../services/question-bank-service.js";
+import {
+  bulkUpdateQuestionCategories,
+  createQuestionBankCategory,
+  listQuestionBankCategories,
+  setQuestionBankCategoryArchived,
+  updateQuestionBankCategory,
+} from "../services/question-bank-category-service.js";
 
 export async function handleQuestionBankRoutes(req, res, url, state, auth) {
   const actor = auth?.user?.username || "";
+  if (req.method === "GET" && url.pathname === "/api/question-bank/categories") {
+    sendJson(res, 200, listQuestionBankCategories(state));
+    return true;
+  }
+  if (req.method === "POST" && url.pathname === "/api/question-bank/categories") {
+    sendJson(res, 201, await createQuestionBankCategory(await readJson(req), actor));
+    return true;
+  }
+  if (req.method === "POST" && url.pathname === "/api/question-bank/categories/bulk") {
+    sendJson(res, 200, await bulkUpdateQuestionCategories(await readJson(req), actor));
+    return true;
+  }
+  const categoryActionMatch = url.pathname.match(/^\/api\/question-bank\/categories\/([^/]+)\/(archive|restore)$/);
+  if (req.method === "POST" && categoryActionMatch) {
+    const result = await setQuestionBankCategoryArchived(decodeURIComponent(categoryActionMatch[1]), categoryActionMatch[2] === "archive", actor);
+    if (!result) sendJson(res, 404, { error: "题库分类不存在" });
+    else sendJson(res, 200, result);
+    return true;
+  }
+  const categoryMatch = url.pathname.match(/^\/api\/question-bank\/categories\/([^/]+)$/);
+  if (req.method === "PATCH" && categoryMatch) {
+    const result = await updateQuestionBankCategory(decodeURIComponent(categoryMatch[1]), await readJson(req), actor);
+    if (!result) sendJson(res, 404, { error: "题库分类不存在" });
+    else sendJson(res, 200, result);
+    return true;
+  }
   if (req.method === "GET" && url.pathname === "/api/question-bank") {
     sendJson(res, 200, listQuestionBank(state, Object.fromEntries(url.searchParams.entries())));
     return true;

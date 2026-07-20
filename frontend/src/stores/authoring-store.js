@@ -31,6 +31,7 @@ export function createAuthoringStore({
   function syncSpecFromActiveDraft() {
     const spec = state.generatedDraft?.spec || state.dashboard?.generationTask;
     if (!spec || typeof spec !== "object") return;
+    state.spec.categoryId = String(spec.categoryId || state.dashboard?.paper?.categoryId || state.spec.categoryId || "");
     state.spec.paperName = spec.paperName || state.spec.paperName || "";
     state.spec.direction = spec.direction || state.spec.direction || "";
     state.spec.difficulty = spec.difficulty || state.spec.difficulty || "中";
@@ -322,6 +323,8 @@ export function createAuthoringStore({
     const errors = {};
     if (!String(state.spec.paperName || "").trim()) errors.paperName = "请输入考卷名称";
     if (!String(state.spec.direction || "").trim()) errors.direction = "请输入出题方向";
+    const category = state.questionBankManagement.categories.find((item) => item.id === state.spec.categoryId);
+    if (!category || category.status !== "active" || !category.isLeaf) errors.categoryId = "请选择有效的叶子分类";
     const count = paperTypeConfig.reduce((sum, item) => sum + clampNumber(state.spec[item.countKey], 0, 50, 0), 0);
     if (count <= 0) errors.questionCount = "请至少设置一种题型数量";
     const questionBankIds = Array.isArray(state.spec.questionBankIds) ? state.spec.questionBankIds : [];
@@ -372,6 +375,7 @@ export function createAuthoringStore({
     const typeScores = Object.fromEntries(paperTypeConfig.map((item) => [item.apiKey, clampNumber(state.spec[item.scoreKey], 1, 200, item.defaultScore)]));
     return {
       title: state.dashboard?.exam?.title || "综合能力测评",
+      categoryId: String(state.spec.categoryId || ""),
       paperName: String(state.spec.paperName || "A 卷").trim(),
       direction: String(state.spec.direction || "").trim(),
       difficulty: state.spec.difficulty,

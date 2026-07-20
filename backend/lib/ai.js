@@ -486,6 +486,8 @@ export function buildPaper(sourceQuestions = questions, meta = {}) {
     questionIds: selected.map((item) => item.id),
     buildSpec: meta.buildSpec || { targetScore, source: "preview" },
     sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
+    categoryId: String(meta.categoryId || ""),
+    categorySnapshot: meta.categorySnapshot || null,
     score,
     questionCount: selected.length,
     typeGroups,
@@ -502,6 +504,8 @@ function emptyPaper(meta = {}) {
     questionIds: [],
     buildSpec: meta.buildSpec || null,
     sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
+    categoryId: String(meta.categoryId || ""),
+    categorySnapshot: meta.categorySnapshot || null,
     score: 0,
     questionCount: 0,
     typeGroups: {},
@@ -600,6 +604,7 @@ function normalizeGenerationSpec(spec = {}) {
     knowledge,
     knowledgeInputEmpty: Boolean(spec.knowledgeInputEmpty),
     requirements: cleanText(spec.requirements, ""),
+    categoryId: String(spec.categoryId || ""),
   };
 }
 

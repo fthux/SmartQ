@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
+import { normalizeCategoryIds } from "./question-bank-categories.js";
 
 export const questionTypes = ["单选", "多选", "判断", "填空", "简答", "论述"];
 export const questionDifficulties = ["易", "中", "难", "混合"];
-export const questionBankStatuses = ["待确认", "已校验", "已归档"];
+export const questionBankStatuses = ["已校验", "已归档"];
 
 export function questionContentHash(question = {}) {
   return createHash("sha256").update(JSON.stringify(questionFingerprint(question))).digest("hex");
@@ -23,7 +24,7 @@ export function normalizeQuestionBankRecord(item = {}) {
   if (!item || typeof item !== "object" || !item.id) return null;
   const now = new Date().toISOString();
   const type = cleanQuestionType(item.type);
-  const status = questionBankStatuses.includes(item.status) ? item.status : "待确认";
+  const status = item.status === "已归档" ? "已归档" : "已校验";
   const normalized = {
     id: String(item.id),
     type,
@@ -36,8 +37,9 @@ export function normalizeQuestionBankRecord(item = {}) {
     difficulty: questionDifficulties.includes(item.difficulty) ? item.difficulty : "中",
     knowledge: normalizeStringList(item.knowledge, 20, 80),
     tags: normalizeStringList(item.tags, 20, 40),
+    categoryIds: normalizeCategoryIds(item.categoryIds),
     status,
-    archivedFromStatus: ["待确认", "已校验"].includes(item.archivedFromStatus) ? item.archivedFromStatus : "待确认",
+    archivedFromStatus: "已校验",
     version: Math.max(1, Number(item.version || 1)),
     contentHash: String(item.contentHash || ""),
     origin: normalizeOrigin(item.origin),
@@ -83,7 +85,7 @@ export function questionForValidation(item = {}) {
     score: clampNumber(item.defaultScore ?? item.score, 1, 200, 1),
     difficulty: questionDifficulties.includes(item.difficulty) ? item.difficulty : "中",
     knowledge: normalizeStringList(item.knowledge, 20, 80),
-    status: item.status === "已校验" ? "已校验" : "待确认",
+    status: "已校验",
   };
 }
 

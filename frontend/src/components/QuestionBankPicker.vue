@@ -1,6 +1,6 @@
 <script setup>
 import { Search } from "@element-plus/icons-vue";
-import { nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useSmartQ } from "../stores/context.js";
 
 const {
@@ -14,6 +14,10 @@ const {
 const questionTypes = ["单选", "多选", "判断", "填空", "简答", "论述"];
 const tableRef = ref(null);
 let restoringSelection = false;
+const categoryPath = computed(() => {
+  const category = state.questionBankManagement.categories.find((item) => item.id === state.spec.categoryId);
+  return category?.path?.map((item) => item.name).join(" / ") || "未选择分类";
+});
 
 watch([
   () => state.questionBankManagement.picker.open,
@@ -38,6 +42,7 @@ function handleSelectionChange(rows) {
 
 <template>
   <el-dialog v-model="state.questionBankManagement.picker.open" title="从题库选择题目" width="min(900px, calc(100vw - 24px))" top="4vh" append-to-body destroy-on-close>
+    <el-alert :title="`当前试卷分类：${categoryPath}`" type="info" show-icon :closable="false" class="mb-4" />
     <div class="grid gap-3 border-b border-slate-200 pb-4 md:grid-cols-[minmax(240px,1fr)_140px_130px_auto] dark:border-night-border">
       <el-input v-model="state.questionBankManagement.picker.search" clearable :prefix-icon="Search" placeholder="搜索题干、知识点或编号" @keyup.enter="applyQuestionBankPickerFilters" @clear="applyQuestionBankPickerFilters" />
       <el-select v-model="state.questionBankManagement.picker.type" clearable placeholder="全部题型" @change="applyQuestionBankPickerFilters"><el-option v-for="type in questionTypes" :key="type" :label="type" :value="type" /></el-select>
@@ -50,6 +55,7 @@ function handleSelectionChange(rows) {
       <el-table-column prop="type" label="题型" width="78" />
       <el-table-column prop="stem" label="题干" min-width="320" show-overflow-tooltip />
       <el-table-column prop="difficulty" label="难度" width="68" />
+      <el-table-column label="分类" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ (row.categories || []).map((item) => item.path.map((part) => part.name).join(' / ')).join('、') }}</template></el-table-column>
       <el-table-column label="知识点" min-width="130" show-overflow-tooltip><template #default="{ row }">{{ (row.knowledge || []).join('、') || '未设置' }}</template></el-table-column>
       <el-table-column label="分值" width="68" align="right"><template #default="{ row }">{{ row.defaultScore }}</template></el-table-column>
       <el-table-column label="使用" width="76" align="right"><template #default="{ row }">{{ row.paperUsageCount }} 卷</template></el-table-column>

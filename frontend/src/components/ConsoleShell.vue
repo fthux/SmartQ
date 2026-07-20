@@ -1,5 +1,4 @@
 <script setup>
-import { nextTick, ref } from "vue";
 import {
   ArrowDown,
   Check,
@@ -54,30 +53,18 @@ const iconMap = {
 };
 
 const themeIconMap = { system: Monitor, light: Sunny, dark: Moon };
-const themeControlRef = ref(null);
 
 function handleAdminCommand(key) {
   const item = adminAccountMenuItems.value.find((entry) => entry.key === key);
   runAdminAccountMenuItem(item);
 }
 
-function getThemeOrigin() {
-  const control = themeControlRef.value;
-  const trigger = control?.querySelector?.(".theme-switch") || control;
-  const rect = trigger?.getBoundingClientRect?.();
-  return rect
-    ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-    : undefined;
-}
-
 function handleThemeToggle(isDark) {
-  toggleTheme(isDark, getThemeOrigin());
+  toggleTheme(isDark);
 }
 
-async function handleThemePreference(theme) {
-  const origin = getThemeOrigin();
-  await nextTick();
-  requestAnimationFrame(() => setTheme(theme, { animate: true, origin }));
+function handleThemePreference(theme) {
+  setTheme(theme, { animate: true });
 }
 </script>
 
@@ -130,7 +117,7 @@ async function handleThemePreference(theme) {
             <el-button :icon="state.ui.isFullscreen ? Rank : FullScreen" circle aria-label="切换全屏" @click="toggleFullscreen" />
           </el-tooltip>
 
-          <div ref="themeControlRef" class="theme-control" data-theme-control>
+          <div class="theme-control" data-theme-control>
             <el-tooltip :content="state.ui.isDark ? '切换为浅色主题' : '切换为深色主题'">
               <el-switch
                 class="theme-switch"
@@ -159,7 +146,7 @@ async function handleThemePreference(theme) {
 
           <el-dropdown trigger="click" @command="handleAdminCommand">
             <el-button text class="account-button h-10">
-              <el-avatar :size="32" shape="square" :src="state.admin.user?.avatar || publicUrl('/assets/favicon.svg')" class="bg-primary text-xs font-black text-emerald-950">{{ adminDisplayName.slice(0, 1).toUpperCase() }}</el-avatar>
+              <el-avatar :size="32" shape="square" :src="state.admin.user?.avatar || publicUrl('/assets/default_avatar.jpg')" class="bg-primary text-xs font-black text-emerald-950">{{ adminDisplayName.slice(0, 1).toUpperCase() }}</el-avatar>
               <span class="hidden max-w-28 truncate text-xs font-black sm:block">{{ adminDisplayName }}</span>
               <el-icon class="hidden text-slate-400 sm:inline-flex"><ArrowDown /></el-icon>
             </el-button>

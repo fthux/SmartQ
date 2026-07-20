@@ -38,6 +38,7 @@ const {
   saveDraft,
   openQuestionEditor,
   openQuestionBankPicker,
+  changeAuthoringCategory,
   removeSelectedQuestionBankItem,
   addCurrentQuestionsToBank,
   reviewQuestion,
@@ -55,6 +56,12 @@ const reviewStatus = ref("all");
 const reviewType = ref("all");
 const selectedQuestionId = ref("");
 const materialSearch = ref("");
+const categoryLeafOptions = computed(() => state.questionBankManagement.categories.filter((item) => item.status === "active" && item.isLeaf));
+const selectedCategoryPath = computed(() => {
+  const id = activeSpec.value?.categoryId || state.spec.categoryId;
+  const category = state.questionBankManagement.categories.find((item) => item.id === id);
+  return category?.path?.map((item) => item.name).join(" / ") || "未选择";
+});
 
 const reviewStatusOptions = [
   { label: "全部", value: "all" },
@@ -281,7 +288,12 @@ function editPublishIssue(issue) {
               <el-alert v-if="state.generationError" class="mt-2" :title="state.generationError" type="error" :closable="false" show-icon />
             </div>
 
-            <div class="mt-4 grid gap-x-4 md:grid-cols-2 xl:grid-cols-[1fr_1.2fr_140px]">
+            <div class="mt-4 grid gap-x-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.2fr_140px]">
+              <el-form-item label="试卷分类" :error="state.specFormErrors.categoryId">
+                <el-select :model-value="state.spec.categoryId" :disabled="formLocked" filterable placeholder="选择叶子分类" class="w-full" @change="changeAuthoringCategory">
+                  <el-option v-for="category in categoryLeafOptions" :key="category.id" :label="category.path.map((item) => item.name).join(' / ')" :value="category.id" />
+                </el-select>
+              </el-form-item>
               <el-form-item label="考卷名称" :error="state.specFormErrors.paperName">
                 <el-input v-model="state.spec.paperName" :disabled="formLocked" placeholder="请输入考卷名称" />
               </el-form-item>
@@ -550,6 +562,7 @@ function editPublishIssue(issue) {
 
           <dl class="summary-details mt-4">
             <div><dt>出题方向</dt><dd>{{ activeSpec?.direction || state.spec.direction || '未设置' }}</dd></div>
+            <div><dt>试卷分类</dt><dd>{{ selectedCategoryPath }}</dd></div>
             <div><dt>知识点</dt><dd>{{ overviewKnowledge }}</dd></div>
             <div><dt>题目来源</dt><dd>{{ sourcePlanLabel(activeSourcePlan) }}</dd></div>
             <div v-if="activeSourceMaterials.length"><dt>使用资料</dt><dd>{{ activeSourceMaterials.map((item) => `${item.name} v${item.version}`).join('、') }}</dd></div>

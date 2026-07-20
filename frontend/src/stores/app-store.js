@@ -111,6 +111,25 @@ export function createAppStore() {
         returnToAuthoring: false,
       },
       questionBankManagement: {
+        categories: [],
+        categoryTree: [],
+        categoryCounts: { all: 0, unclassified: 0, multi: 0, archived: 0 },
+        categoriesLoading: false,
+        selectedCategoryId: "all",
+        categoryDrawerOpen: false,
+        selectedRows: [],
+        categoryEditorOpen: false,
+        categoryEditorMode: "create",
+        categoryEditingId: "",
+        categoryForm: { name: "", parentId: "", sortOrder: 0 },
+        categoryFormError: "",
+        categorySaving: false,
+        categoryActionId: "",
+        bulkOpen: false,
+        bulkMode: "add",
+        bulkCategoryIds: [],
+        bulkError: "",
+        bulkSaving: false,
         items: [],
         total: 0,
         page: 1,
@@ -133,6 +152,7 @@ export function createAppStore() {
         detail: null,
         importingCurrent: false,
         importingPaperId: null,
+        paperImportCategoryId: "",
         picker: {
           open: false,
           items: [],
@@ -146,6 +166,7 @@ export function createAppStore() {
           loading: false,
           error: "",
           selection: [],
+          categoryId: "",
           importing: false,
         },
       },
@@ -384,17 +405,27 @@ export function createAppStore() {
       addSelectedQuestionBankToAuthoring,
       applyQuestionBankFilters,
       applyQuestionBankPickerFilters,
+      applyBulkQuestionCategories,
+      changeAuthoringCategory,
       changeQuestionBankPage,
       changeQuestionBankPageSize,
       changeQuestionBankPickerPage,
       loadQuestionBank,
+      loadQuestionBankCategories,
+      openBulkQuestionCategories,
+      openCreateQuestionBankCategory,
       openCreateQuestionBankItem,
+      openEditQuestionBankCategory,
       openEditQuestionBankItem,
       openQuestionBankDetail,
       openQuestionBankPicker,
       removeSelectedQuestionBankItem,
       runQuestionBankAction,
+      runQuestionBankCategoryAction,
+      saveQuestionBankCategory,
       saveQuestionBankItem,
+      selectQuestionBankCategory,
+      setQuestionBankRows,
       setQuestionBankPickerSelection,
     } = createQuestionBankStore({
       state,
@@ -448,20 +479,23 @@ export function createAppStore() {
         state.loading = false;
         return;
       }
+      const token = state.admin.token;
       state.loading = true;
       try {
         const dashboard = await request("/api/dashboard");
+        if (state.admin.token !== token) return;
         state.dashboard = dashboard;
         state.dashboardError = "";
         if (!canAccessRoute(state.route)) go("papers");
         state.paperPage = Math.min(state.paperPage, Math.max(1, Math.ceil((dashboard.papers || []).length / state.paperPageSize) || 1));
       } catch (error) {
+        if (state.admin.token !== token) return;
         console.warn("Dashboard data load failed:", error);
         handleAdminAuthError(error);
         state.dashboardError = error.message || "控制台数据加载失败";
         if (!state.dashboard) notify("控制台数据加载失败：" + state.dashboardError);
       } finally {
-        state.loading = false;
+        if (state.admin.token === token) state.loading = false;
         mountIcons();
       }
     }
@@ -496,7 +530,11 @@ export function createAppStore() {
         }
       }
       if (state.selectedPaperId) clearSelectedPaper();
-      if (route === "question-bank") loadQuestionBank();
+      if (route === "question-bank") {
+        loadQuestionBankCategories();
+        loadQuestionBank();
+      }
+      if (route === "authoring") loadQuestionBankCategories();
       if (route === "users") loadAdminUsers();
       if (route === "materials") {
         state.materialManagement.returnToAuthoring = params?.returnTo === "authoring";
@@ -534,7 +572,10 @@ export function createAppStore() {
         state.authoringPaperId = currentAuthoringPaperId();
         state.editingPaperId = state.route === "authoring" && state.authoringPaperId ? state.authoringPaperId : null;
         if (state.selectedPaperId) clearSelectedPaper();
-        if (state.route === "question-bank") loadQuestionBank();
+        if (state.route === "question-bank") {
+          loadQuestionBankCategories();
+          loadQuestionBank();
+        }
         if (state.route === "users") loadAdminUsers();
         if (state.route === "materials") loadMaterials();
         if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
@@ -553,8 +594,13 @@ export function createAppStore() {
       initializeLayout();
       await loadAdminSession();
       await refresh();
+      await loadQuestionBankCategories();
       if (state.route === "users") await loadAdminUsers();
-      if (state.route === "question-bank") await loadQuestionBank();
+      if (state.route === "question-bank") {
+        await loadQuestionBankCategories();
+        await loadQuestionBank();
+      }
+      if (state.route === "authoring") await loadQuestionBankCategories();
       if (state.route === "materials") await loadMaterials();
       if (state.route === "authoring") await loadMaterialOptions();
       if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
@@ -617,17 +663,27 @@ export function createAppStore() {
       addSelectedQuestionBankToAuthoring,
       applyQuestionBankFilters,
       applyQuestionBankPickerFilters,
+      applyBulkQuestionCategories,
+      changeAuthoringCategory,
       changeQuestionBankPage,
       changeQuestionBankPageSize,
       changeQuestionBankPickerPage,
       loadQuestionBank,
+      loadQuestionBankCategories,
+      openBulkQuestionCategories,
+      openCreateQuestionBankCategory,
       openCreateQuestionBankItem,
+      openEditQuestionBankCategory,
       openEditQuestionBankItem,
       openQuestionBankDetail,
       openQuestionBankPicker,
       removeSelectedQuestionBankItem,
       runQuestionBankAction,
+      runQuestionBankCategoryAction,
+      saveQuestionBankCategory,
       saveQuestionBankItem,
+      selectQuestionBankCategory,
+      setQuestionBankRows,
       setQuestionBankPickerSelection,
       applyMaterialFilters,
       changeMaterialPage,

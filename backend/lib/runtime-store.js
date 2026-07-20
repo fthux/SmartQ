@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exam } from "../data/store.js";
 import { normalizeQuestionBankRecord } from "./question-utils.js";
+import { normalizeCategoryIds, normalizeQuestionBankCategory } from "./question-bank-categories.js";
 import { initializeAdminUsers } from "../services/admin-user-service.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -439,9 +440,12 @@ function defaultState() {
       questionIds: [],
       buildSpec: null,
       sourcePlanSnapshot: null,
+      categoryId: "",
+      categorySnapshot: null,
     },
     papers: [],
     questionBank: [],
+    questionBankCategories: [],
     sourceMaterials: [],
     generationTask: null,
     adminSessions: {},
@@ -467,9 +471,12 @@ function normalizeState(input) {
     questionIds: Array.isArray(input.paper?.questionIds) ? input.paper.questionIds : [],
     buildSpec: input.paper?.buildSpec || null,
     sourcePlanSnapshot: input.paper?.sourcePlanSnapshot || input.paper?.buildSpec?.sourcePlanSnapshot || null,
+    categoryId: String(input.paper?.categoryId || ""),
+    categorySnapshot: normalizeCategorySnapshot(input.paper?.categorySnapshot),
   };
   const hasDiscardableAuthoringDraft = Boolean(input.generationTask && !normalizedPaper.id && !normalizedPaper.status);
   const hasRetiredRuntimeData = retiredRuntimeKeys.some((key) => Object.prototype.hasOwnProperty.call(input, key));
+  const hasPendingQuestionBankItems = Array.isArray(input.questionBank) && input.questionBank.some((item) => item?.status === "待确认");
   const sourceAuditLog = Array.isArray(input.auditLog) ? input.auditLog : [];
   const auditLog = sourceAuditLog.filter((item) => !retiredAuditTypePattern.test(String(item?.type || "")));
   const normalized = {
@@ -478,6 +485,7 @@ function normalizeState(input) {
     paper: hasDiscardableAuthoringDraft ? { ...normalizedPaper, questionIds: [], buildSpec: null, sourcePlanSnapshot: null } : normalizedPaper,
     papers: Array.isArray(input.papers) ? input.papers.map(normalizePaperSnapshot).filter(Boolean) : [],
     questionBank: Array.isArray(input.questionBank) ? input.questionBank.map(normalizeQuestionBankRecord).filter(Boolean) : [],
+    questionBankCategories: Array.isArray(input.questionBankCategories) ? input.questionBankCategories.map(normalizeQuestionBankCategory).filter(Boolean) : [],
     sourceMaterials: Array.isArray(input.sourceMaterials) ? input.sourceMaterials.map(normalizeSourceMaterial).filter(Boolean) : [],
     generationTask: hasDiscardableAuthoringDraft ? null : (input.generationTask || null),
     adminSessions: input.adminSessions && typeof input.adminSessions === "object" ? input.adminSessions : {},
@@ -486,7 +494,11 @@ function normalizeState(input) {
     loginSecurity: normalizeLoginSecurity(input.loginSecurity),
     auditLog,
   };
-  if (hasRetiredRuntimeData || auditLog.length !== sourceAuditLog.length) normalizedStateNeedsSave = true;
+  const knownCategoryIds = new Set(normalized.questionBankCategories.map((item) => item.id));
+  normalized.questionBank.forEach((item) => {
+    item.categoryIds = normalizeCategoryIds(item.categoryIds).filter((id) => knownCategoryIds.has(id));
+  });
+  if (hasRetiredRuntimeData || hasPendingQuestionBankItems || auditLog.length !== sourceAuditLog.length) normalizedStateNeedsSave = true;
   return stripLegacyQuestionSeed(normalized);
 }
 
@@ -588,7 +600,20 @@ function normalizePaperSnapshot(item) {
     questions: Array.isArray(item.questions) ? item.questions : [],
     buildSpec: item.buildSpec || null,
     sourcePlanSnapshot: item.sourcePlanSnapshot || item.buildSpec?.sourcePlanSnapshot || null,
+    categoryId: String(item.categoryId || ""),
+    categorySnapshot: normalizeCategorySnapshot(item.categorySnapshot),
     publishedAt: item.publishedAt || null,
     createdAt: item.createdAt || item.buildSpec?.builtAt || new Date().toISOString(),
+  };
+}
+
+function normalizeCategorySnapshot(value) {
+  if (!value || typeof value !== "object" || !value.id) return null;
+  return {
+    id: String(value.id),
+    name: String(value.name || ""),
+    path: Array.isArray(value.path)
+      ? value.path.map((item) => ({ id: String(item?.id || ""), name: String(item?.name || "") })).filter((item) => item.id)
+      : [],
   };
 }

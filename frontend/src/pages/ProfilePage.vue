@@ -3,6 +3,12 @@ import { Upload } from "@element-plus/icons-vue";
 import { useSmartQ } from "../stores/context.js";
 
 const { state, adminDisplayName, saveAdminProfile, selectAdminAvatar, changeAdminPassword, go, publicUrl } = useSmartQ();
+
+const maxAdminDisplayNameLength = 32;
+
+function updateAdminDisplayName(value) {
+  state.profile.displayName = String(value ?? "").slice(0, maxAdminDisplayNameLength);
+}
 </script>
 
 <template>
@@ -17,7 +23,7 @@ const { state, adminDisplayName, saveAdminProfile, selectAdminAvatar, changeAdmi
         <div class="border-b border-slate-200 pb-6 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-6 dark:border-night-border">
           <div class="text-xs font-black text-slate-500 dark:text-slate-400">用户头像</div>
           <div class="mt-3 flex items-center gap-4 lg:flex-col lg:items-start">
-            <el-avatar :size="96" shape="square" :src="state.profile.avatarPreview || publicUrl('/assets/favicon.svg')" class="bg-primary text-2xl font-black text-emerald-950">
+            <el-avatar :size="96" shape="square" :src="state.profile.avatarPreview || publicUrl('/assets/default_avatar.jpg')" class="bg-primary text-2xl font-black text-emerald-950">
               {{ adminDisplayName.slice(0, 1).toUpperCase() }}
             </el-avatar>
             <div>
@@ -31,7 +37,13 @@ const { state, adminDisplayName, saveAdminProfile, selectAdminAvatar, changeAdmi
 
         <div class="min-w-0">
           <el-form-item label="用户名" :error="state.profile.error">
-            <el-input v-model="state.profile.displayName" maxlength="32" show-word-limit placeholder="请输入用户名" />
+            <el-input
+              :model-value="state.profile.displayName"
+              :maxlength="maxAdminDisplayNameLength"
+              show-word-limit
+              placeholder="请输入用户名"
+              @update:model-value="updateAdminDisplayName"
+            />
           </el-form-item>
           <el-form-item label="登录账号">
             <el-input :model-value="state.admin.user?.username || state.admin.username" disabled />

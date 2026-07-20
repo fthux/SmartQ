@@ -20,6 +20,8 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
       if (model.status) params.set("status", model.status);
       if (model.type) params.set("type", model.type);
       if (model.difficulty) params.set("difficulty", model.difficulty);
+      const categoryId = target === "picker" ? String(state.spec.categoryId || "") : String(management.selectedCategoryId || "all");
+      if (categoryId) params.set("categoryId", categoryId);
       const result = await request(`/api/question-bank?${params}`);
       model.items = result.items || [];
       model.total = Number(result.total || 0);
@@ -28,6 +30,33 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     } finally {
       model.loading = false;
     }
+  }
+
+  async function loadQuestionBankCategories() {
+    const management = state.questionBankManagement;
+    management.categoriesLoading = true;
+    try {
+      const result = await request("/api/question-bank/categories");
+      management.categories = result.items || [];
+      management.categoryTree = result.tree || [];
+      management.categoryCounts = result.counts || { all: 0, unclassified: 0, multi: 0, archived: 0 };
+      if (management.selectedCategoryId && !["all", "unclassified", "multi", "archived"].includes(management.selectedCategoryId)
+        && !management.categories.some((item) => item.id === management.selectedCategoryId)) {
+        management.selectedCategoryId = "all";
+      }
+    } catch (error) {
+      management.error = error.message || "题库分类加载失败";
+    } finally {
+      management.categoriesLoading = false;
+    }
+  }
+
+  function selectQuestionBankCategory(id) {
+    state.questionBankManagement.selectedCategoryId = id || "all";
+    state.questionBankManagement.categoryDrawerOpen = false;
+    state.questionBankManagement.page = 1;
+    state.questionBankManagement.selectedRows = [];
+    loadQuestionBank();
   }
 
   function applyQuestionBankFilters() {
@@ -55,6 +84,8 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
 
   function openCreateQuestionBankItem() {
     resetQuestionBankForm();
+    const selected = state.questionBankManagement.categories.find((item) => item.id === state.questionBankManagement.selectedCategoryId && item.status === "active" && item.isLeaf);
+    if (selected) state.questionBankManagement.form.categoryIds = [selected.id];
     state.questionBankManagement.editorOpen = true;
   }
 
@@ -82,7 +113,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
         difficulty: item.difficulty || "中",
         knowledgeText: (item.knowledge || []).join("，"),
         tagsText: (item.tags || []).join("，"),
-        status: item.status === "已校验" ? "已校验" : "待确认",
+        categoryIds: [...(item.categoryIds || [])],
       };
       management.formError = "";
       management.editorOpen = true;
@@ -110,6 +141,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
       });
       management.editorOpen = false;
       await loadQuestionBank();
+      await loadQuestionBankCategories();
       notify(management.editorMode === "edit" ? "题库题目已更新" : "题库题目已创建");
     } catch (saveError) {
       management.formError = saveError.message;
@@ -142,6 +174,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
         body: JSON.stringify({}),
       });
       await loadQuestionBank();
+      await loadQuestionBankCategories();
       notify(action === "archive" ? "题目已归档，历史试卷不受影响" : "题目已恢复");
     } catch (error) {
       notify(`${action === "archive" ? "归档" : "恢复"}失败：${error.message}`);
@@ -165,6 +198,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
       });
       notify(importResultMessage(result));
       if (state.route === "question-bank") await loadQuestionBank();
+      await loadQuestionBankCategories();
     } catch (error) {
       notify(`题目入库失败：${error.message}`);
     } finally {
@@ -175,14 +209,20 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
   async function addPaperQuestionsToBank(paper, questionIds = []) {
     if (!paper?.id) return;
     const management = state.questionBankManagement;
+    const categoryId = String(paper.categoryId || management.paperImportCategoryId || "");
+    if (!categoryId) {
+      notify("该历史试卷没有分类，请先选择入库分类");
+      return;
+    }
     management.importingPaperId = paper.id;
     try {
       const result = await request("/api/question-bank/import", {
         method: "POST",
-        body: JSON.stringify({ paperId: paper.id, questionIds }),
+        body: JSON.stringify({ paperId: paper.id, questionIds, categoryId }),
       });
       notify(importResultMessage(result));
       if (state.route === "question-bank") await loadQuestionBank();
+      await loadQuestionBankCategories();
     } catch (error) {
       notify(`试卷题目入库失败：${error.message}`);
     } finally {
@@ -191,6 +231,10 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
   }
 
   function openQuestionBankPicker() {
+    if (!state.spec.categoryId) {
+      notify("请先选择试卷分类，再从题库选择题目");
+      return;
+    }
     const picker = state.questionBankManagement.picker;
     picker.open = true;
     picker.page = 1;
@@ -201,7 +245,20 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     });
     picker.selection = [...selectedById.values()];
     picker.status = "已校验";
+    picker.categoryId = state.spec.categoryId;
     loadQuestionBank("picker");
+  }
+
+  function changeAuthoringCategory(categoryId) {
+    const nextId = String(categoryId || "");
+    const hadSelection = (state.spec.questionBankIds || []).length > 0;
+    state.spec.categoryId = nextId;
+    state.spec.questionBankIds = [];
+    state.spec.questionBankItems = [];
+    state.questionBankManagement.picker.selection = [];
+    state.specFormErrors.categoryId = "";
+    state.specFormErrors.questionBankIds = "";
+    if (hadSelection) notify("试卷分类已变更，原先选择的题库题已清空");
   }
 
   function applyQuestionBankPickerFilters() {
@@ -238,23 +295,137 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     state.specFormErrors.questionBankIds = "";
   }
 
+  function setQuestionBankRows(rows) {
+    state.questionBankManagement.selectedRows = Array.isArray(rows) ? rows : [];
+  }
+
+  function openCreateQuestionBankCategory(parentId = "") {
+    const management = state.questionBankManagement;
+    management.categoryEditorMode = "create";
+    management.categoryEditingId = "";
+    management.categoryForm = { name: "", parentId: String(parentId || ""), sortOrder: 0 };
+    management.categoryFormError = "";
+    management.categoryEditorOpen = true;
+  }
+
+  function openEditQuestionBankCategory(category) {
+    const management = state.questionBankManagement;
+    management.categoryEditorMode = "edit";
+    management.categoryEditingId = category.id;
+    management.categoryForm = { name: category.name, parentId: category.parentId || "", sortOrder: Number(category.sortOrder || 0) };
+    management.categoryFormError = "";
+    management.categoryEditorOpen = true;
+  }
+
+  async function saveQuestionBankCategory() {
+    const management = state.questionBankManagement;
+    const name = String(management.categoryForm.name || "").trim();
+    if (!name) {
+      management.categoryFormError = "请输入分类名称";
+      return;
+    }
+    management.categorySaving = true;
+    management.categoryFormError = "";
+    try {
+      const editing = management.categoryEditorMode === "edit";
+      await request(editing ? `/api/question-bank/categories/${encodeURIComponent(management.categoryEditingId)}` : "/api/question-bank/categories", {
+        method: editing ? "PATCH" : "POST",
+        body: JSON.stringify({ ...management.categoryForm, name }),
+      });
+      management.categoryEditorOpen = false;
+      await loadQuestionBankCategories();
+      await loadQuestionBank();
+      notify(editing ? "分类已更新" : "分类已创建");
+    } catch (error) {
+      management.categoryFormError = error.message;
+    } finally {
+      management.categorySaving = false;
+    }
+  }
+
+  async function runQuestionBankCategoryAction(category, action) {
+    const management = state.questionBankManagement;
+    management.categoryActionId = category.id;
+    try {
+      await request(`/api/question-bank/categories/${encodeURIComponent(category.id)}/${action}`, { method: "POST", body: JSON.stringify({}) });
+      await loadQuestionBankCategories();
+      await loadQuestionBank();
+      notify(action === "archive" ? "分类及其子分类已归档" : "分类及其子分类已恢复");
+    } catch (error) {
+      notify(`${action === "archive" ? "归档" : "恢复"}分类失败：${error.message}`);
+    } finally {
+      management.categoryActionId = "";
+    }
+  }
+
+  function openBulkQuestionCategories(mode = "add") {
+    const management = state.questionBankManagement;
+    if (!management.selectedRows.length) {
+      notify("请先选择需要归类的题目");
+      return;
+    }
+    management.bulkMode = mode;
+    management.bulkCategoryIds = [];
+    management.bulkError = "";
+    management.bulkOpen = true;
+  }
+
+  async function applyBulkQuestionCategories() {
+    const management = state.questionBankManagement;
+    if (!management.bulkCategoryIds.length) {
+      management.bulkError = "请选择分类";
+      return;
+    }
+    management.bulkSaving = true;
+    management.bulkError = "";
+    try {
+      const result = await request("/api/question-bank/categories/bulk", {
+        method: "POST",
+        body: JSON.stringify({
+          questionIds: management.selectedRows.map((item) => item.id),
+          categoryIds: management.bulkCategoryIds,
+          mode: management.bulkMode,
+        }),
+      });
+      management.bulkOpen = false;
+      management.selectedRows = [];
+      await loadQuestionBankCategories();
+      await loadQuestionBank();
+      notify(`已更新 ${result.updated || 0} 道题的分类`);
+    } catch (error) {
+      management.bulkError = error.message;
+    } finally {
+      management.bulkSaving = false;
+    }
+  }
+
   return {
     addCurrentQuestionsToBank,
     addPaperQuestionsToBank,
     addSelectedQuestionBankToAuthoring,
+    applyBulkQuestionCategories,
     applyQuestionBankFilters,
     applyQuestionBankPickerFilters,
+    changeAuthoringCategory,
     changeQuestionBankPage,
     changeQuestionBankPageSize,
     changeQuestionBankPickerPage,
     loadQuestionBank,
+    loadQuestionBankCategories,
+    openBulkQuestionCategories,
+    openCreateQuestionBankCategory,
     openCreateQuestionBankItem,
+    openEditQuestionBankCategory,
     openEditQuestionBankItem,
     openQuestionBankDetail,
     openQuestionBankPicker,
     removeSelectedQuestionBankItem,
     runQuestionBankAction,
+    runQuestionBankCategoryAction,
+    saveQuestionBankCategory,
     saveQuestionBankItem,
+    selectQuestionBankCategory,
+    setQuestionBankRows,
     setQuestionBankPickerSelection,
   };
 }
@@ -276,7 +447,7 @@ function emptyQuestionBankForm() {
     difficulty: "中",
     knowledgeText: "",
     tagsText: "",
-    status: "待确认",
+    categoryIds: [],
   };
 }
 
@@ -292,11 +463,12 @@ function questionBankFormPayload(form) {
     difficulty: form.difficulty,
     knowledge: splitList(form.knowledgeText),
     tags: splitList(form.tagsText),
-    status: form.status,
+    categoryIds: [...(form.categoryIds || [])],
   };
 }
 
 function validateQuestionBankForm(form) {
+  if (!Array.isArray(form.categoryIds) || !form.categoryIds.length) return "请选择至少一个题库分类";
   if (!String(form.stem || "").trim()) return "请输入题干";
   if (["单选", "多选"].includes(form.type)) {
     const options = [form.optionA, form.optionB, form.optionC, form.optionD];

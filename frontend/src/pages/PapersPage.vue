@@ -78,13 +78,14 @@ function onPageSizeChange(size) {
         <el-table-column label="状态" width="110">
           <template #default="{ row }"><el-tag :type="statusTagType(row.status)" effect="light">{{ displayPaperStatus(row.status) }}</el-tag></template>
         </el-table-column>
+        <el-table-column label="分类" min-width="170" show-overflow-tooltip><template #default="{ row }">{{ row.categorySnapshot?.path?.map((item) => item.name).join(' / ') || '未分类' }}</template></el-table-column>
         <el-table-column label="题数" prop="questionCount" width="90"><template #default="{ row }">{{ row.questionCount || 0 }} 题</template></el-table-column>
         <el-table-column label="总分" prop="score" width="90"><template #default="{ row }">{{ row.score || 0 }} 分</template></el-table-column>
         <el-table-column label="更新时间" min-width="150"><template #default="{ row }">{{ formatDateTime(row.publishedAt || row.createdAt) }}</template></el-table-column>
-        <el-table-column label="操作" fixed="right" width="160" align="right">
+        <el-table-column label="操作" fixed="right" width="230" align="right">
           <template #default="{ row }">
-            <el-button v-if="row.status === '已发布'" link type="primary" :icon="View" @click="selectPaper(row.id)">查看</el-button>
-            <el-button v-else link type="primary" :icon="Edit" @click="editPaper(row)">编辑</el-button>
+            <el-button link type="primary" :icon="Edit" @click="editPaper(row)">编辑</el-button>
+            <el-button link :icon="View" @click="selectPaper(row.id)">预览</el-button>
             <el-button link type="danger" :icon="Delete" @click="askDeletePaper(row)">删除</el-button>
           </template>
         </el-table-column>

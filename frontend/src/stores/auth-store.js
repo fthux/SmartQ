@@ -1,3 +1,6 @@
+import { ElNotification } from "element-plus";
+import "element-plus/theme-chalk/el-notification.css";
+
 export function createAuthStore({ state, request, notify, refresh, canAccessRoute, go, mountIcons }) {
   function toggleAdminMenu() {
     state.admin.menuOpen = !state.admin.menuOpen;
@@ -53,6 +56,8 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
         skipAuth: true,
         body: JSON.stringify({ username, password }),
       });
+      state.admin.error = "";
+      state.dashboardError = "";
       state.admin.token = result.token;
       state.admin.user = result.admin;
       syncProfileForm();
@@ -128,10 +133,12 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
     state.profile.error = "";
     if (!displayName) {
       state.profile.error = "请输入用户名";
+      notifyProfileSaveError(state.profile.error);
       return;
     }
     if (displayName.length > 32) {
       state.profile.error = "用户名不能超过 32 个字符";
+      notifyProfileSaveError(state.profile.error);
       return;
     }
     state.profile.saving = true;
@@ -143,10 +150,13 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
       state.admin.user = result.admin;
       releaseProfilePreview();
       syncProfileForm();
-      notify("个人资料已保存");
+      ElNotification.success({
+        title: "保存成功",
+        message: "个人资料已保存",
+      });
     } catch (error) {
       state.profile.error = error.message || "个人资料保存失败";
-      notify(`保存失败：${state.profile.error}`);
+      notifyProfileSaveError(state.profile.error);
     } finally {
       state.profile.saving = false;
       mountIcons();
@@ -241,6 +251,13 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
     selectAdminAvatar,
     toggleAdminMenu,
   };
+}
+
+function notifyProfileSaveError(message) {
+  ElNotification.error({
+    title: "保存失败",
+    message,
+  });
 }
 
 function loadImageDimensions(file) {

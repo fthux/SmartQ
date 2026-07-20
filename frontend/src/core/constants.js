@@ -17,6 +17,7 @@ export const paperTypeConfig = [
 ];
 
 export const defaultSpec = {
+  categoryId: "",
   paperName: "",
   direction: "",
   difficulty: "中",

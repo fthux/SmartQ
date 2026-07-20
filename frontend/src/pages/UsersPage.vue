@@ -60,7 +60,7 @@ function statusTagType(status) {
         <el-table-column label="用户" min-width="220">
           <template #default="{ row }">
             <div class="flex min-w-0 items-center gap-3">
-              <el-avatar :size="36" shape="square" :src="row.avatar || publicUrl('/assets/favicon.svg')" class="shrink-0 bg-primary text-xs font-black text-emerald-950">
+              <el-avatar :size="36" shape="square" :src="row.avatar || publicUrl('/assets/default_avatar.jpg')" class="shrink-0 bg-primary text-xs font-black text-emerald-950">
                 {{ (row.displayName || row.username).slice(0, 1).toUpperCase() }}
               </el-avatar>
               <div class="min-w-0">

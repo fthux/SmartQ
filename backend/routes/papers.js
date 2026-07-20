@@ -3,16 +3,22 @@ import { logItem } from "../lib/audit.js";
 import { readJson, sendJson } from "../lib/http.js";
 import { updateState } from "../lib/runtime-store.js";
 import { paperSnapshotDetail, upsertPaperSnapshot } from "../services/paper-service.js";
+import { activeLeafCategory, categorySnapshotForId } from "../lib/question-bank-categories.js";
 
 export async function handlePaperRoutes(req, res, url, state) {
   if (req.method === "POST" && url.pathname === "/api/papers/build") {
     const body = await readJson(req);
     const paper = await updateState((current) => {
+      const categoryId = String(body.categoryId || current.generationTask?.categoryId || current.paper.categoryId || "");
+      if (!activeLeafCategory(current, categoryId)) return { error: "请选择有效的叶子分类后再保存试卷" };
+      const categorySnapshot = categorySnapshotForId(current, categoryId);
       const saved = saveFormalPaper(current.questions, {
         ...current.paper,
         id: `paper-${Date.now()}`,
         name: body.name || current.generationTask?.paperName || current.paper.name || "未命名试卷",
         sourcePlanSnapshot: current.generationTask?.sourcePlan || current.paper.sourcePlanSnapshot || null,
+        categoryId,
+        categorySnapshot,
       });
       if (saved.error) return saved;
       current.paper = {
@@ -24,6 +30,8 @@ export async function handlePaperRoutes(req, res, url, state) {
         buildSpec: saved.buildSpec,
         sourcePlanSnapshot: saved.sourcePlanSnapshot || current.generationTask?.sourcePlan || null,
         publishedAt: null,
+        categoryId,
+        categorySnapshot,
       };
       upsertPaperSnapshot(current, buildPaper(current.questions, current.paper));
       current.auditLog.push(logItem("paper-save", `保存试卷：${saved.name}，${saved.questionCount} 题 / ${saved.score} 分`));
@@ -40,6 +48,9 @@ export async function handlePaperRoutes(req, res, url, state) {
       const ids = new Set(current.paper.questionIds || []);
       const paperQuestions = hasSavedPaper ? current.questions.filter((item) => ids.has(item.id)) : current.questions;
       if (!paperQuestions.length) return { error: "当前试卷没有题目，请先完成出题" };
+      const categoryId = String(current.paper.categoryId || current.generationTask?.categoryId || "");
+      if (!activeLeafCategory(current, categoryId)) return { error: "当前试卷分类不存在、已归档或不是叶子分类，请重新选择" };
+      const categorySnapshot = categorySnapshotForId(current, categoryId);
       const checks = validateQuestions(paperQuestions);
       if (checks.failures.length) {
         const failures = checks.failures.map((failure) => {
@@ -68,6 +79,8 @@ export async function handlePaperRoutes(req, res, url, state) {
           id: `paper-${Date.now()}`,
           name: current.generationTask?.paperName || current.paper.name || "未命名试卷",
           sourcePlanSnapshot: current.generationTask?.sourcePlan || current.paper.sourcePlanSnapshot || null,
+          categoryId,
+          categorySnapshot,
         });
         if (saved.error) return saved;
         current.paper = {
@@ -79,11 +92,15 @@ export async function handlePaperRoutes(req, res, url, state) {
           buildSpec: saved.buildSpec,
           sourcePlanSnapshot: saved.sourcePlanSnapshot || current.generationTask?.sourcePlan || null,
           publishedAt: null,
+          categoryId,
+          categorySnapshot,
         };
         current.auditLog.push(logItem("paper-auto-save", `发布前自动保存试卷：${saved.name}，${saved.questionCount} 题 / ${saved.score} 分`));
       }
       current.paper.status = "已发布";
       current.paper.publishedAt = new Date().toISOString();
+      current.paper.categoryId = categoryId;
+      current.paper.categorySnapshot = categorySnapshot;
       upsertPaperSnapshot(current, buildPaper(current.questions, current.paper));
       current.auditLog.push(logItem("paper-publish", `${current.paper.name} 已发布`));
       return buildPaper(current.questions, current.paper);
@@ -106,6 +123,8 @@ export async function handlePaperRoutes(req, res, url, state) {
         questionIds: target.questionIds || [],
         buildSpec: target.buildSpec || null,
         sourcePlanSnapshot: target.sourcePlanSnapshot || target.buildSpec?.sourcePlanSnapshot || null,
+        categoryId: String(target.categoryId || ""),
+        categorySnapshot: target.categorySnapshot || null,
       };
       const targetQuestions = paperSnapshotDetail(target, current.questions).questions;
       if (targetQuestions.length) {
@@ -138,7 +157,7 @@ export async function handlePaperRoutes(req, res, url, state) {
       if (index < 0) return null;
       const [deleted] = current.papers.splice(index, 1);
       if (current.paper.id === id) {
-        current.paper = { id: null, name: "", status: null, publishedAt: null, questionIds: [], buildSpec: null, sourcePlanSnapshot: null };
+        current.paper = { id: null, name: "", status: null, publishedAt: null, questionIds: [], buildSpec: null, sourcePlanSnapshot: null, categoryId: "", categorySnapshot: null };
         current.questions = [];
         current.generationTask = null;
       }

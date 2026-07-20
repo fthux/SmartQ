@@ -16,7 +16,7 @@ const letters = ["A", "B", "C", "D"];
     <div class="mb-4 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
       <span>保存后题目会回到待确认状态</span>
       <el-tag v-if="state.editingQuestion?.origin?.type === 'material'" size="small" type="success" effect="plain">资料题，保存后标记为已人工修改</el-tag>
-      <el-tag v-else size="small" type="info" effect="plain">AI 独立生成</el-tag>
+      <el-tag v-else size="small" type="info" effect="plain">AI 独立</el-tag>
     </div>
     <el-form v-if="state.questionEditForm" label-position="top" @submit.prevent="saveQuestionEdit">
       <div class="grid gap-x-3 sm:grid-cols-[120px_150px_1fr]">

@@ -156,7 +156,7 @@ function formatTextLength(value) {
       </template>
     </el-dialog>
 
-    <el-drawer v-model="state.materialManagement.detailOpen" size="min(760px, 100vw)" title="出题资料详情">
+    <el-drawer v-model="state.materialManagement.detailOpen" append-to-body size="min(760px, 100vw)" title="出题资料详情">
       <div v-loading="state.materialManagement.detailLoading" class="min-h-64">
         <template v-if="state.materialManagement.detail">
           <div class="flex flex-wrap items-center gap-2">

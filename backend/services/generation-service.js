@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { generateQuestions } from "../lib/ai.js";
 import { loadState } from "../lib/runtime-store.js";
 import { resolveGenerationMaterials } from "./material-service.js";
+import { resolveGenerationQuestionBank } from "./question-bank-service.js";
 
 const generationJobs = new Map();
 const generationJobTtlMs = 30 * 60 * 1000;
@@ -13,7 +14,7 @@ export function startGenerationJob(spec = {}) {
     id: `gen-${Date.now()}-${randomBytes(4).toString("hex")}`,
     status: "running",
     progress: 8,
-    stage: "AI 出题任务已创建",
+    stage: "正在准备题目来源",
     createdAt: now,
     updatedAt: now,
     result: null,
@@ -31,14 +32,17 @@ export function getGenerationJob(id) {
 }
 
 async function runGenerationJob(job, spec) {
-  updateGenerationJob(job, { progress: 36, stage: "AI 正在生成题目" });
+  updateGenerationJob(job, { progress: 18, stage: "正在检查题库题" });
   try {
     const state = await loadState();
+    const questionBank = resolveGenerationQuestionBank(state, spec?.sourcePlan, spec);
     const requestedMaterialCount = Number(spec?.sourcePlan?.materialQuestionCount || 0);
-    const materialSources = requestedMaterialCount > 0 || spec?.sourcePlan?.mode === "materials-only"
+    const materialSources = requestedMaterialCount > 0 || (spec?.sourcePlan?.mode === "materials-only" && !Array.isArray(spec?.sourcePlan?.questionBankIds))
       ? await resolveGenerationMaterials(state, spec.sourcePlan, spec)
       : [];
     const result = await generateQuestions(spec, {
+      questionBankQuestions: questionBank.questions,
+      questionBankItems: questionBank.items,
       materialSources,
       onProgress: (progress, stage) => updateGenerationJob(job, { progress, stage }),
     });
@@ -46,7 +50,7 @@ async function runGenerationJob(job, spec) {
       status: "done",
       progress: 100,
       stage: "试卷已生成，等待确认",
-      result: { ...result, saved: false, message: "试卷已生成，保存后才会进入草稿试卷列表。" },
+      result: { ...result, saved: false, message: "试卷已组合完成，确认后进入人工审核。" },
     });
   } catch (error) {
     updateGenerationJob(job, {

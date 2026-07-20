@@ -37,7 +37,24 @@ export function createAuthoringStore({
     state.spec.knowledge = spec.knowledgeInputEmpty ? "" : Array.isArray(spec.knowledge) ? spec.knowledge.join("，") : state.spec.knowledge || "";
     state.spec.requirements = spec.requirements || state.spec.requirements || "";
     const sourcePlan = spec.sourcePlan || {};
+    const legacyQuestionBankItems = authoringQuestions.value
+      .filter((item) => item.origin?.type === "question-bank" && item.origin?.bankQuestionId)
+      .map((item) => ({
+        id: item.origin.bankQuestionId,
+        type: item.type,
+        stem: item.stem,
+        version: item.origin.bankVersion || 1,
+      }));
+    const sourceQuestionBankItems = Array.isArray(sourcePlan.questionBankItems) && sourcePlan.questionBankItems.length
+      ? sourcePlan.questionBankItems
+      : legacyQuestionBankItems;
     state.spec.sourceMode = ["ai-only", "mixed", "materials-only"].includes(sourcePlan.mode) ? sourcePlan.mode : "ai-only";
+    state.spec.questionBankIds = Array.isArray(sourcePlan.questionBankIds) && sourcePlan.questionBankIds.length
+      ? [...sourcePlan.questionBankIds]
+      : sourceQuestionBankItems.map((item) => item.id).filter(Boolean);
+    state.spec.questionBankItems = sourceQuestionBankItems.length
+      ? sourceQuestionBankItems.map((item) => ({ ...item }))
+      : state.spec.questionBankIds.map((id) => ({ id }));
     state.spec.materialIds = Array.isArray(sourcePlan.materialIds)
       ? [...sourcePlan.materialIds]
       : Array.isArray(sourcePlan.materials) ? sourcePlan.materials.map((item) => item.id).filter(Boolean) : [];
@@ -307,9 +324,21 @@ export function createAuthoringStore({
     if (!String(state.spec.direction || "").trim()) errors.direction = "请输入出题方向";
     const count = paperTypeConfig.reduce((sum, item) => sum + clampNumber(state.spec[item.countKey], 0, 50, 0), 0);
     if (count <= 0) errors.questionCount = "请至少设置一种题型数量";
-    const materialCount = state.spec.sourceMode === "materials-only" ? count : clampNumber(state.spec.materialQuestionCount, 0, count, 0);
-    if (state.spec.sourceMode !== "ai-only" && !(state.spec.materialIds || []).length) errors.materialIds = "请选择至少一份出题资料";
-    if (state.spec.sourceMode === "mixed" && (materialCount <= 0 || materialCount >= count)) errors.materialQuestionCount = "混合出题时，资料题数量需大于 0 且小于总题数";
+    const questionBankIds = Array.isArray(state.spec.questionBankIds) ? state.spec.questionBankIds : [];
+    const questionBankItems = Array.isArray(state.spec.questionBankItems) ? state.spec.questionBankItems : [];
+    const questionBankCount = questionBankIds.length;
+    const remainingCount = Math.max(0, count - questionBankCount);
+    const materialCount = clampNumber(state.spec.materialQuestionCount, 0, remainingCount, 0);
+    if (questionBankCount > count) errors.questionBankIds = `题库题已选择 ${questionBankCount} 道，超过试卷总题数 ${count} 道`;
+    paperTypeConfig.forEach((item) => {
+      const selectedCount = questionBankItems.filter((question) => question.type === item.type).length;
+      const targetCount = clampNumber(state.spec[item.countKey], 0, 50, 0);
+      if (selectedCount > targetCount) {
+        errors.questionBankIds = `${item.type}目标为 ${targetCount} 道，当前已选择 ${selectedCount} 道题库题，请移除至少 ${selectedCount - targetCount} 道`;
+      }
+    });
+    if (materialCount > 0 && !(state.spec.materialIds || []).length) errors.materialIds = "资料题数量大于 0 时，请选择至少一份出题资料";
+    if (Number(state.spec.materialQuestionCount || 0) > remainingCount) errors.materialQuestionCount = `资料题最多可设置 ${remainingCount} 道`;
     paperTypeConfig.forEach((item) => {
       const score = Number(state.spec[item.scoreKey]);
       if (!Number.isFinite(score) || score < 1 || score > 200) errors[item.scoreKey] = item.type + "每题分值需为 1 到 200";
@@ -354,13 +383,20 @@ export function createAuthoringStore({
       knowledgeInputEmpty: !String(state.spec.knowledge || "").trim(),
       requirements: String(state.spec.requirements || "").trim(),
       sourcePlan: {
-        mode: state.spec.sourceMode,
-        materialIds: state.spec.sourceMode === "ai-only" ? [] : [...(state.spec.materialIds || [])],
-        materialQuestionCount: state.spec.sourceMode === "ai-only"
-          ? 0
-          : state.spec.sourceMode === "materials-only"
-            ? Object.values(typeCounts).reduce((sum, value) => sum + value, 0)
-            : clampNumber(state.spec.materialQuestionCount, 0, Object.values(typeCounts).reduce((sum, value) => sum + value, 0), 0),
+        questionBankIds: [...(state.spec.questionBankIds || [])],
+        materialIds: [...(state.spec.materialIds || [])],
+        materialQuestionCount: clampNumber(
+          state.spec.materialQuestionCount,
+          0,
+          Math.max(0, Object.values(typeCounts).reduce((sum, value) => sum + value, 0) - (state.spec.questionBankIds || []).length),
+          0,
+        ),
+        aiQuestionCount: Math.max(
+          0,
+          Object.values(typeCounts).reduce((sum, value) => sum + value, 0)
+            - (state.spec.questionBankIds || []).length
+            - clampNumber(state.spec.materialQuestionCount, 0, Object.values(typeCounts).reduce((sum, value) => sum + value, 0), 0),
+        ),
         coverageStrategy: state.spec.coverageStrategy,
       },
     };

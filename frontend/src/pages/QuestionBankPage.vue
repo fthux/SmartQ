@@ -128,7 +128,7 @@ function formatAnswer(question) {
       <template #footer><el-button @click="state.questionBankManagement.editorOpen = false">取消</el-button><el-button type="primary" :loading="state.questionBankManagement.saving" @click="saveQuestionBankItem">保存题目</el-button></template>
     </el-dialog>
 
-    <el-drawer v-model="state.questionBankManagement.detailOpen" size="min(800px, 100vw)" title="题库题目详情">
+    <el-drawer v-model="state.questionBankManagement.detailOpen" append-to-body size="min(800px, 100vw)" title="题库题目详情">
       <div v-loading="state.questionBankManagement.detailLoading" class="min-h-64">
         <template v-if="state.questionBankManagement.detail">
           <div class="flex flex-wrap items-center gap-2"><el-tag>{{ state.questionBankManagement.detail.type }}</el-tag><el-tag :type="statusType(state.questionBankManagement.detail.status)">{{ state.questionBankManagement.detail.status }}</el-tag><el-tag effect="plain">{{ state.questionBankManagement.detail.difficulty }} · {{ state.questionBankManagement.detail.defaultScore }} 分</el-tag><el-tag effect="plain">v{{ state.questionBankManagement.detail.version }}</el-tag></div>

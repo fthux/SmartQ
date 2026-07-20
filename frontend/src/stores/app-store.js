@@ -234,10 +234,11 @@ export function createAppStore() {
       const selected = new Set(state.spec.materialIds || []);
       return state.materialManagement.options.filter((item) => selected.has(item.id));
     });
-    const materialQuestionCount = computed(() => state.spec.sourceMode === "ai-only"
-      ? 0
-      : clampNumber(state.spec.materialQuestionCount, 0, totalQuestionCount.value, 0));
-    const aiQuestionCount = computed(() => Math.max(0, totalQuestionCount.value - materialQuestionCount.value));
+    const selectedQuestionBankItems = computed(() => Array.isArray(state.spec.questionBankItems) ? state.spec.questionBankItems : []);
+    const questionBankQuestionCount = computed(() => Array.isArray(state.spec.questionBankIds) ? state.spec.questionBankIds.length : 0);
+    const remainingGeneratedQuestionCount = computed(() => Math.max(0, totalQuestionCount.value - questionBankQuestionCount.value));
+    const materialQuestionCount = computed(() => clampNumber(state.spec.materialQuestionCount, 0, remainingGeneratedQuestionCount.value, 0));
+    const aiQuestionCount = computed(() => Math.max(0, remainingGeneratedQuestionCount.value - materialQuestionCount.value));
     const workflowSteps = computed(() => {
       const hasUnsavedDraft = Boolean(state.generatedDraft?.questions?.length);
       const hasPersistedQuestions = authoringQuestions.value.length > 0 && !hasUnsavedDraft;
@@ -391,13 +392,13 @@ export function createAppStore() {
       openEditQuestionBankItem,
       openQuestionBankDetail,
       openQuestionBankPicker,
+      removeSelectedQuestionBankItem,
       runQuestionBankAction,
       saveQuestionBankItem,
       setQuestionBankPickerSelection,
     } = createQuestionBankStore({
       state,
       notify,
-      refresh: (...args) => refresh(...args),
       authoringQuestions,
     });
     const {
@@ -516,10 +517,8 @@ export function createAppStore() {
       document.title = title;
     }, { immediate: true });
 
-    watch([totalQuestionCount, () => state.spec.sourceMode], ([count, mode]) => {
-      if (mode === "ai-only") state.spec.materialQuestionCount = 0;
-      else if (mode === "materials-only") state.spec.materialQuestionCount = count;
-      else state.spec.materialQuestionCount = clampNumber(state.spec.materialQuestionCount, 0, count, 0);
+    watch([totalQuestionCount, questionBankQuestionCount], ([count, bankCount]) => {
+      state.spec.materialQuestionCount = clampNumber(state.spec.materialQuestionCount, 0, Math.max(0, count - bankCount), 0);
     });
 
     onMounted(async () => {
@@ -595,6 +594,8 @@ export function createAppStore() {
       paperTypeConfig,
       computedSpecTotalScore,
       selectedSourceMaterials,
+      selectedQuestionBankItems,
+      questionBankQuestionCount,
       materialQuestionCount,
       aiQuestionCount,
       refresh,
@@ -624,6 +625,7 @@ export function createAppStore() {
       openEditQuestionBankItem,
       openQuestionBankDetail,
       openQuestionBankPicker,
+      removeSelectedQuestionBankItem,
       runQuestionBankAction,
       saveQuestionBankItem,
       setQuestionBankPickerSelection,
@@ -696,6 +698,8 @@ function freshSpec(overrides = {}) {
   return {
     ...defaultSpec,
     ...overrides,
+    questionBankIds: Array.isArray(overrides.questionBankIds) ? [...overrides.questionBankIds] : [],
+    questionBankItems: Array.isArray(overrides.questionBankItems) ? overrides.questionBankItems.map((item) => ({ ...item })) : [],
     materialIds: Array.isArray(overrides.materialIds) ? [...overrides.materialIds] : [],
   };
 }

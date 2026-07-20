@@ -1,4 +1,5 @@
 import { questions } from "../data/store.js";
+import { questionContentHash } from "./question-utils.js";
 
 const defaultBaseUrl = "";
 const questionTypes = ["单选", "多选", "判断", "填空", "简答", "论述"];
@@ -41,45 +42,50 @@ export function aiConfig() {
 export async function generateQuestions(spec = {}, options = {}) {
   const config = aiConfig();
   const normalizedSpec = normalizeGenerationSpec(spec);
-  const sourcePlan = normalizeSourcePlan(spec.sourcePlan, normalizedSpec.count, options.materialSources);
-  if (sourcePlan.materialQuestionCount <= 0) {
-    options.onProgress?.(40, "AI 正在独立生成题目");
-    const result = await generateQuestionBatch(normalizedSpec, config, { originType: "ai" });
-    return {
-      source: result.source,
-      spec: { ...normalizedSpec, sourcePlan },
-      questions: result.questions,
-      checks: result.checks,
-    };
-  }
-
-  if (!options.materialSources?.length) {
+  const questionBankQuestions = Array.isArray(options.questionBankQuestions) ? options.questionBankQuestions : [];
+  const sourcePlan = normalizeSourcePlan(
+    spec.sourcePlan,
+    normalizedSpec.count,
+    options.materialSources,
+    options.questionBankItems,
+    questionBankQuestions,
+  );
+  const remainingTypeMix = subtractTypePlan(normalizedSpec.typeMix, questionBankQuestions);
+  if (sourcePlan.materialQuestionCount > 0 && !options.materialSources?.length) {
     throw new Error("未找到可用于出题的资料内容，请重新选择资料");
   }
 
-  const materialTypeMix = allocateTypePlan(normalizedSpec.typeMix, sourcePlan.materialQuestionCount);
-  const aiTypeMix = normalizedSpec.typeMix.map((item) => ({
+  const materialTypeMix = allocateTypePlan(remainingTypeMix, sourcePlan.materialQuestionCount);
+  const aiTypeMix = remainingTypeMix.map((item) => ({
     type: item.type,
     count: item.count - (materialTypeMix.find((entry) => entry.type === item.type)?.count || 0),
   })).filter((item) => item.count > 0);
   const materialSpec = createBatchSpec(normalizedSpec, materialTypeMix);
   const aiSpec = createBatchSpec(normalizedSpec, aiTypeMix);
 
-  options.onProgress?.(28, "正在读取并筛选出题资料");
-  const materialResult = await generateQuestionBatch(materialSpec, config, {
-    originType: "material",
-    materialSources: options.materialSources,
-    coverageStrategy: sourcePlan.coverageStrategy,
-    strictSource: true,
-  });
-  let aiResult = { source: materialResult.source, questions: [], checks: {} };
+  let materialResult = { source: config.mockMode ? "mock" : "provider", questions: [] };
+  if (materialSpec.count > 0) {
+    options.onProgress?.(32, `正在生成 ${materialSpec.count} 道资料题`);
+    materialResult = await generateUniqueQuestionBatch(materialSpec, config, {
+      originType: "material",
+      materialSources: options.materialSources,
+      coverageStrategy: sourcePlan.coverageStrategy,
+      strictSource: true,
+    }, questionBankQuestions);
+  }
+  let aiResult = { source: materialResult.source, questions: [] };
   if (aiSpec.count > 0) {
-    options.onProgress?.(62, "AI 正在独立生成剩余题目");
-    aiResult = await generateQuestionBatch(aiSpec, config, { originType: "ai" });
+    options.onProgress?.(66, `正在生成 ${aiSpec.count} 道 AI 独立题`);
+    aiResult = await generateUniqueQuestionBatch(
+      aiSpec,
+      config,
+      { originType: "ai" },
+      [...questionBankQuestions, ...materialResult.questions],
+    );
   }
 
-  options.onProgress?.(86, "正在合并并校验题目来源");
-  const questions = ensureUniqueMergedStems([...materialResult.questions, ...aiResult.questions]).map((question, index) => ({
+  options.onProgress?.(88, "正在合并并校验三类题目");
+  const questions = [...questionBankQuestions, ...materialResult.questions, ...aiResult.questions].map((question, index) => ({
     ...question,
     id: `q-${String(index + 1).padStart(3, "0")}`,
   }));
@@ -98,24 +104,60 @@ export async function generateQuestions(spec = {}, options = {}) {
   };
 }
 
-function ensureUniqueMergedStems(items) {
-  const seen = new Set();
-  return items.map((item, index) => {
-    const key = String(item.stem || "").replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
-    if (!key || !seen.has(key)) {
-      seen.add(key);
-      return item;
+async function generateUniqueQuestionBatch(spec, config, batch, existingQuestions = []) {
+  if (!spec.count) return { source: config.mockMode ? "mock" : "provider", questions: [] };
+  const accepted = [];
+  const seen = questionKeySet(existingQuestions);
+  let source = config.mockMode ? "mock" : "provider";
+  let missing = spec.typeMix;
+  for (let attempt = 0; attempt < 3 && missing.length; attempt += 1) {
+    const attemptSpec = createBatchSpec(spec, missing);
+    const result = await generateQuestionBatch(attemptSpec, config, {
+      ...batch,
+      attempt,
+      sequenceOffset: existingQuestions.length + accepted.length + attempt * spec.count,
+      avoidStems: [...existingQuestions, ...accepted].map((item) => item.stem).filter(Boolean),
+    });
+    source = result.source;
+    for (const question of result.questions) {
+      const keys = questionDuplicateKeys(question);
+      if (keys.some((key) => seen.has(key))) continue;
+      keys.forEach((key) => seen.add(key));
+      accepted.push(question);
     }
-    const suffix = item.origin?.type === "material" ? "依据出题资料" : "AI 独立命题";
-    const stem = `${item.stem}（${suffix} ${index + 1}）`;
-    seen.add(stem.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase());
-    return { ...item, stem };
-  });
+    missing = missingTypePlan(spec.typeMix, accepted);
+  }
+  if (missing.length) {
+    const detail = missing.map((item) => `${item.type}${item.count}道`).join("、");
+    throw new Error(`生成题目重复度过高，仍缺少${detail}，请调整命题范围后重试`);
+  }
+  return { source, questions: accepted };
+}
+
+function questionKeySet(items = []) {
+  return new Set(items.flatMap(questionDuplicateKeys));
+}
+
+function questionDuplicateKeys(question = {}) {
+  const stem = String(question.stem || "").normalize("NFKC").replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
+  return [stem ? `stem:${stem}` : "", `content:${questionContentHash(question)}`].filter(Boolean);
+}
+
+function missingTypePlan(typeMix, questions) {
+  const counts = countBy(questions, "type");
+  return typeMix.map((item) => ({ type: item.type, count: Math.max(0, item.count - (counts[item.type] || 0)) }))
+    .filter((item) => item.count > 0);
+}
+
+function subtractTypePlan(typeMix, questions) {
+  const counts = countBy(questions, "type");
+  return typeMix.map((item) => ({ type: item.type, count: item.count - (counts[item.type] || 0) }))
+    .filter((item) => item.count > 0);
 }
 
 async function generateQuestionBatch(normalizedSpec, config, batch = {}) {
   if (config.mockMode) {
-    const generated = generateMockQuestions(normalizedSpec);
+    const generated = generateMockQuestions(normalizedSpec, batch);
     const finalized = finalizeGeneratedQuestions(generated, normalizedSpec, batch);
     return {
       source: "mock",
@@ -147,6 +189,9 @@ async function generateQuestionBatch(normalizedSpec, config, batch = {}) {
     "quality 评分标准：95-100 表示题干明确、答案唯一或评分规则完整、解析充分、选项无歧义、完全符合题型和知识点；90-94 表示整体可直接使用，仅有轻微表达优化空间；85-89 表示基本可用，但题干、选项、解析或 rubric 有轻微不完整；80-84 表示需要修订后使用，存在一定歧义、解析偏弱、选项干扰性不足或 rubric 不够细；70-79 表示不建议直接使用，存在明显歧义、答案支撑不足、题型不规范、知识点偏离或评分规则不清。",
     "quality 硬约束：客观题答案不能唯一确定时 quality 不得高于 84；多选题答案必须是数组且至少两个正确选项，否则 quality 不得高于 84；判断题答案只能是“正确”或“错误”，否则 quality 不得高于 84；填空题必须有明确参考答案，否则 quality 不得高于 84；简答和论述题必须包含可执行 rubric，rubric 为空或笼统时 quality 不得高于 84；题干与指定知识点或出题方向关联弱时 quality 不得高于 86；解析只是重复答案且没有解释依据时 quality 不得高于 88。",
     "自检要求：输出前逐题核对题干事实、选项、答案和解析是否一致；如果无法确认客观题答案，必须改写成可确定答案的题目。",
+    ...(batch.avoidStems?.length ? [
+      `不得与以下已有题干重复或仅做同义改写：${batch.avoidStems.slice(0, 80).map((stem) => String(stem).slice(0, 120)).join("；")}`,
+    ] : []),
     "事实边界示例：localStorage/sessionStorage 不会随 HTTP 请求自动发送到服务器；Cookie 才会在满足 domain/path/SameSite/Secure 等条件时由浏览器随请求携带。",
     ...(batch.originType === "material" ? [
       "本批题目必须仅依据下方出题资料生成，不得使用资料之外的事实补充答案。",
@@ -208,18 +253,28 @@ async function generateQuestionBatch(normalizedSpec, config, batch = {}) {
   };
 }
 
-function normalizeSourcePlan(input = {}, count, materialSources = []) {
-  const requestedMode = ["ai-only", "mixed", "materials-only"].includes(input?.mode) ? input.mode : "ai-only";
-  let materialQuestionCount = requestedMode === "materials-only"
-    ? count
-    : clampNumber(input?.materialQuestionCount, 0, count, 0);
-  if (requestedMode === "ai-only") materialQuestionCount = 0;
-  const mode = materialQuestionCount <= 0 ? "ai-only" : materialQuestionCount >= count ? "materials-only" : "mixed";
+function normalizeSourcePlan(input = {}, count, materialSources = [], questionBankItems = [], questionBankQuestions = []) {
+  const questionBankCount = questionBankQuestions.length;
+  const remainingCount = Math.max(0, count - questionBankCount);
+  const legacyMode = ["ai-only", "mixed", "materials-only"].includes(input?.mode) ? input.mode : "";
+  const unifiedPlan = Array.isArray(input?.questionBankIds) || !legacyMode;
+  let materialQuestionCount = legacyMode === "materials-only" && !unifiedPlan
+    ? remainingCount
+    : clampNumber(input?.materialQuestionCount, 0, remainingCount, 0);
+  if (legacyMode === "ai-only" && !unifiedPlan) materialQuestionCount = 0;
+  const aiQuestionCount = remainingCount - materialQuestionCount;
+  const sourceKinds = [questionBankCount > 0, materialQuestionCount > 0, aiQuestionCount > 0].filter(Boolean).length;
+  const mode = sourceKinds > 1
+    ? "mixed"
+    : questionBankCount > 0 ? "question-bank" : materialQuestionCount > 0 ? "materials-only" : "ai-only";
   return {
     mode,
+    questionBankIds: questionBankItems.map((item) => item.id),
+    questionBankCount,
+    questionBankItems: questionBankItems.map((item) => ({ id: item.id, type: item.type, stem: item.stem, version: item.version })),
     materialIds: materialSources.map((item) => item.id),
     materialQuestionCount,
-    aiQuestionCount: count - materialQuestionCount,
+    aiQuestionCount,
     coverageStrategy: input?.coverageStrategy === "best-match" ? "best-match" : "balanced",
     materials: materialSources.map((item) => ({ id: item.id, name: item.name, version: item.version })),
   };
@@ -548,13 +603,14 @@ function normalizeGenerationSpec(spec = {}) {
   };
 }
 
-function generateMockQuestions(spec) {
+function generateMockQuestions(spec, options = {}) {
   const types = spec.typeMix.flatMap((item) => Array.from({ length: item.count }, () => item.type)).slice(0, spec.count);
   return types.map((type, index) => {
     const knowledge = spec.knowledge[index % spec.knowledge.length];
+    const sequenceIndex = index + Number(options.sequenceOffset || 0);
     return buildMockQuestion({
       id: `q-${String(index + 1).padStart(3, "0")}`,
-      index,
+      index: sequenceIndex,
       type,
       score: scoreForType(type, spec),
       knowledge,
@@ -619,11 +675,12 @@ function buildMockQuestion({ id, index, type, score, knowledge, spec }) {
 }
 
 function buildStem(type, direction, knowledge, index) {
-  if (type === "单选") return `关于${knowledge}的理解，以下哪一项最准确？`;
-  if (type === "多选") return `在处理${knowledge}相关问题时，哪些做法是合理的？`;
-  if (type === "判断") return `${knowledge}在实际开发中只需要记忆语法，不需要结合场景判断。`;
-  if (type === "填空") return buildBlankStem(knowledge);
-  return `请说明${knowledge}在工程实践中的应用方式，并指出常见风险。`;
+  const context = `${direction}场景 ${index + 1}`;
+  if (type === "单选") return `在${context}中，关于${knowledge}的理解，以下哪一项最准确？`;
+  if (type === "多选") return `在${context}中处理${knowledge}相关问题时，哪些做法是合理的？`;
+  if (type === "判断") return `在${context}中，${knowledge}只需要记忆语法，不需要结合实际条件判断。`;
+  if (type === "填空") return `${buildBlankStem(knowledge)}（${context}）`;
+  return `请结合${context}说明${knowledge}的应用方式，并指出常见风险。`;
 }
 
 function buildBlankStem(knowledge) {

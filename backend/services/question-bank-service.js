@@ -214,6 +214,37 @@ export async function importQuestionBankIntoAuthoring(body = {}, actor = "") {
   });
 }
 
+export function resolveGenerationQuestionBank(state, sourcePlan = {}, spec = {}) {
+  const ids = [...new Set((Array.isArray(sourcePlan.questionBankIds) ? sourcePlan.questionBankIds : []).map(String))].slice(0, 100);
+  if (!ids.length) return { questions: [], items: [] };
+  const selected = ids.map((id) => findQuestionBankItem(state, id)).filter(Boolean);
+  if (selected.length !== ids.length) throw badRequest("部分题库题目不存在，请重新选择");
+  const unavailable = selected.find((item) => item.status !== "已校验");
+  if (unavailable) throw badRequest(`题库题目 ${unavailable.id} 尚未审核通过或已归档`);
+
+  const typeTargets = generationTypeTargets(spec);
+  const selectedTypeCounts = new Map();
+  for (const item of selected) {
+    selectedTypeCounts.set(item.type, (selectedTypeCounts.get(item.type) || 0) + 1);
+  }
+  for (const [type, selectedCount] of selectedTypeCounts) {
+    const targetCount = typeTargets.get(type) || 0;
+    if (selectedCount > targetCount) {
+      throw badRequest(`${type}目标为 ${targetCount} 道，当前已选择 ${selectedCount} 道题库题，请移除至少 ${selectedCount - targetCount} 道`);
+    }
+  }
+
+  return {
+    questions: selected.map((item) => bankItemToAuthoringQuestion(item, generationScoreForType(spec, item.type))),
+    items: selected.map((item) => ({
+      id: item.id,
+      type: item.type,
+      stem: item.stem,
+      version: Number(item.version || 1),
+    })),
+  };
+}
+
 export function questionBankUsages(state, id) {
   return [...(questionBankUsageMap(state).get(id)?.values() || [])]
     .sort((a, b) => new Date(b.publishedAt || b.createdAt || 0) - new Date(a.publishedAt || a.createdAt || 0));
@@ -267,7 +298,7 @@ function addQuestionSource(item, source) {
   if (!exists) item.sources.push(source);
 }
 
-function bankItemToAuthoringQuestion(item) {
+function bankItemToAuthoringQuestion(item, score = item.defaultScore) {
   return {
     id: `q-bank-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`,
     type: item.type,
@@ -276,7 +307,7 @@ function bankItemToAuthoringQuestion(item) {
     answer: Array.isArray(item.answer) ? [...item.answer] : item.answer,
     explanation: item.explanation || "",
     rubric: [...(item.rubric || [])],
-    score: Number(item.defaultScore || 1),
+    score: Number(score || 1),
     difficulty: item.difficulty,
     knowledge: [...(item.knowledge || [])],
     quality: 100,
@@ -290,6 +321,23 @@ function bankItemToAuthoringQuestion(item) {
       edited: false,
     },
   };
+}
+
+function generationTypeTargets(spec = {}) {
+  const apiKeys = { 单选: "single", 多选: "multiple", 判断: "judge", 填空: "blank", 简答: "short", 论述: "essay" };
+  const counts = spec.typeCounts && typeof spec.typeCounts === "object" ? spec.typeCounts : {};
+  const mix = Array.isArray(spec.typeMix) ? spec.typeMix : [];
+  return new Map(questionTypes.map((type) => {
+    const mixItem = mix.find((item) => item?.type === type);
+    return [type, clampNumber(counts[apiKeys[type]] ?? counts[type] ?? mixItem?.count, 0, 50, 0)];
+  }));
+}
+
+function generationScoreForType(spec = {}, type) {
+  const apiKeys = { 单选: "single", 多选: "multiple", 判断: "judge", 填空: "blank", 简答: "short", 论述: "essay" };
+  const defaults = { 单选: 2, 多选: 4, 判断: 2, 填空: 2, 简答: 5, 论述: 10 };
+  const scores = spec.typeScores && typeof spec.typeScores === "object" ? spec.typeScores : {};
+  return clampNumber(scores[apiKeys[type]] ?? scores[type], 1, 200, defaults[type] || 1);
 }
 
 function buildBankGenerationTask(questions, paperName) {

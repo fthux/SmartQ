@@ -7,7 +7,7 @@ import {
   splitList,
 } from "../core/domain-utils.js";
 
-export function createQuestionBankStore({ state, notify, refresh, authoringQuestions }) {
+export function createQuestionBankStore({ state, notify, authoringQuestions }) {
   async function loadQuestionBank(target = "page") {
     const management = state.questionBankManagement;
     const picker = management.picker;
@@ -194,7 +194,12 @@ export function createQuestionBankStore({ state, notify, refresh, authoringQuest
     const picker = state.questionBankManagement.picker;
     picker.open = true;
     picker.page = 1;
-    picker.selection = [];
+    const selectedItems = Array.isArray(state.spec.questionBankItems) ? state.spec.questionBankItems : [];
+    const selectedById = new Map(selectedItems.map((item) => [item.id, { ...item }]));
+    (state.spec.questionBankIds || []).forEach((id) => {
+      if (!selectedById.has(id)) selectedById.set(id, { id });
+    });
+    picker.selection = [...selectedById.values()];
     picker.status = "已校验";
     loadQuestionBank("picker");
   }
@@ -206,37 +211,31 @@ export function createQuestionBankStore({ state, notify, refresh, authoringQuest
 
   function changeQuestionBankPickerPage(page) {
     state.questionBankManagement.picker.page = page;
-    state.questionBankManagement.picker.selection = [];
     loadQuestionBank("picker");
   }
 
   function setQuestionBankPickerSelection(rows) {
-    state.questionBankManagement.picker.selection = rows || [];
+    const picker = state.questionBankManagement.picker;
+    const pageIds = new Set((picker.items || []).map((item) => item.id));
+    const retained = (picker.selection || []).filter((item) => !pageIds.has(item.id));
+    const merged = new Map([...retained, ...(rows || [])].map((item) => [item.id, item]));
+    picker.selection = [...merged.values()];
   }
 
-  async function addSelectedQuestionBankToAuthoring() {
+  function addSelectedQuestionBankToAuthoring() {
     const picker = state.questionBankManagement.picker;
-    const ids = picker.selection.map((item) => item.id);
-    if (!ids.length) {
-      notify("请至少选择一道题目");
-      return;
-    }
-    picker.importing = true;
-    try {
-      const result = await request("/api/authoring/questions/import", {
-        method: "POST",
-        body: JSON.stringify({ questionBankIds: ids, paperName: state.spec.paperName || "题库组卷" }),
-      });
-      picker.open = false;
-      await refresh();
-      state.authoringNewDraftActive = !state.authoringPaperId;
-      state.activeWorkflowStep = "review";
-      notify(`已加入 ${result.added} 道题${result.skipped ? `，跳过 ${result.skipped} 道重复题` : ""}`);
-    } catch (error) {
-      notify(`加入试卷失败：${error.message}`);
-    } finally {
-      picker.importing = false;
-    }
+    const selected = (picker.selection || []).filter((item) => item?.id).map((item) => ({ ...item }));
+    state.spec.questionBankIds = selected.map((item) => item.id);
+    state.spec.questionBankItems = selected;
+    picker.open = false;
+    state.specFormErrors.questionBankIds = "";
+    notify(selected.length ? `已选择 ${selected.length} 道题库题` : "已清空题库题选择");
+  }
+
+  function removeSelectedQuestionBankItem(id) {
+    state.spec.questionBankIds = (state.spec.questionBankIds || []).filter((itemId) => itemId !== id);
+    state.spec.questionBankItems = (state.spec.questionBankItems || []).filter((item) => item.id !== id);
+    state.specFormErrors.questionBankIds = "";
   }
 
   return {
@@ -253,6 +252,7 @@ export function createQuestionBankStore({ state, notify, refresh, authoringQuest
     openEditQuestionBankItem,
     openQuestionBankDetail,
     openQuestionBankPicker,
+    removeSelectedQuestionBankItem,
     runQuestionBankAction,
     saveQuestionBankItem,
     setQuestionBankPickerSelection,

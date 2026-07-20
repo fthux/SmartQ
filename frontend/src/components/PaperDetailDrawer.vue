@@ -30,6 +30,7 @@ function questionSourceLabel(question) {
 <template>
   <el-drawer
     :model-value="Boolean(state.selectedPaperId)"
+    append-to-body
     direction="rtl"
     size="min(860px, 100vw)"
     aria-label="试卷详情抽屉"
@@ -61,6 +62,7 @@ function questionSourceLabel(question) {
 
         <div v-if="state.selectedPaperDetail.sourcePlanSnapshot" class="mt-4 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-4 text-xs font-semibold dark:border-night-border">
           <span>题目来源：</span>
+          <el-tag type="primary" effect="plain">题库题 {{ state.selectedPaperDetail.sourcePlanSnapshot.questionBankCount || 0 }}</el-tag>
           <el-tag type="success" effect="plain">资料题 {{ state.selectedPaperDetail.sourcePlanSnapshot.materialQuestionCount || 0 }}</el-tag>
           <el-tag type="info" effect="plain">AI 独立题 {{ state.selectedPaperDetail.sourcePlanSnapshot.aiQuestionCount || 0 }}</el-tag>
           <el-tag v-for="material in state.selectedPaperDetail.sourcePlanSnapshot.materials || []" :key="`${material.id}-${material.version}`" effect="plain">{{ material.name }} · v{{ material.version }}</el-tag>

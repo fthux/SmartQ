@@ -35,6 +35,8 @@ export const defaultSpec = {
   knowledge: "",
   requirements: "",
   sourceMode: "ai-only",
+  questionBankIds: [],
+  questionBankItems: [],
   materialIds: [],
   materialQuestionCount: 0,
   coverageStrategy: "balanced",

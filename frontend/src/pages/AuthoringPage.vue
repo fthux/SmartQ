@@ -23,6 +23,8 @@ const {
   totalQuestionCount,
   computedSpecTotalScore,
   selectedSourceMaterials,
+  selectedQuestionBankItems,
+  questionBankQuestionCount,
   materialQuestionCount,
   aiQuestionCount,
   paperTypeConfig,
@@ -36,6 +38,7 @@ const {
   saveDraft,
   openQuestionEditor,
   openQuestionBankPicker,
+  removeSelectedQuestionBankItem,
   addCurrentQuestionsToBank,
   reviewQuestion,
   publishPaper,
@@ -53,12 +56,6 @@ const reviewType = ref("all");
 const selectedQuestionId = ref("");
 const materialSearch = ref("");
 
-const sourceModeOptions = [
-  { label: "AI 独立生成", value: "ai-only" },
-  { label: "资料 + AI", value: "mixed" },
-  { label: "仅从资料出题", value: "materials-only" },
-];
-
 const reviewStatusOptions = [
   { label: "全部", value: "all" },
   { label: "待审核", value: "pending" },
@@ -72,7 +69,9 @@ const activeSpec = computed(() => state.generatedDraft?.spec
   || ((state.authoringPaperId || state.authoringNewDraftActive) ? state.dashboard?.generationTask : null)
   || state.spec);
 const activeSourcePlan = computed(() => activeSpec.value?.sourcePlan || {
-  mode: state.spec.sourceMode,
+  questionBankIds: state.spec.questionBankIds,
+  questionBankCount: questionBankQuestionCount.value,
+  questionBankItems: selectedQuestionBankItems.value,
   materialIds: state.spec.materialIds,
   materialQuestionCount: materialQuestionCount.value,
   aiQuestionCount: aiQuestionCount.value,
@@ -95,6 +94,9 @@ const overviewQuestionSources = computed(() => ({
   material: activeQuestions.value.filter((item) => item.origin?.type === "material").length,
   ai: activeQuestions.value.filter((item) => !["question-bank", "material"].includes(item.origin?.type)).length,
 }));
+const sourceAllocationError = computed(() => questionBankQuestionCount.value > totalQuestionCount.value
+  ? `题库题已选择 ${questionBankQuestionCount.value} 道，超过试卷总题数 ${totalQuestionCount.value} 道`
+  : "");
 const overviewPaperName = computed(() => activePaper.value.name || activeSpec.value?.paperName || state.spec.paperName || "未命名试卷");
 const overviewKnowledge = computed(() => {
   const value = activeSpec.value?.knowledge;
@@ -141,17 +143,6 @@ watch(() => state.activeWorkflowStep, (step) => {
   if (nextPending) selectedQuestionId.value = nextPending.id;
 });
 
-watch([totalQuestionCount, () => state.spec.sourceMode], ([count, mode], previous = []) => {
-  if (mode !== "mixed") return;
-  if (count <= 1) {
-    state.spec.materialQuestionCount = 0;
-    return;
-  }
-  if (previous[1] !== "mixed" || Number(state.spec.materialQuestionCount || 0) <= 0) {
-    state.spec.materialQuestionCount = Math.max(1, Math.floor(count / 2));
-  }
-});
-
 function workflowButtonType(step) {
   if (step.status === "done") return "success";
   if (step.status === "active") return "primary";
@@ -186,14 +177,18 @@ function questionKnowledge(question) {
 }
 
 function questionSourceLabel(question) {
-  if (question?.origin?.type === "question-bank") return `题库 · ${question.origin.bankQuestionId || "已入库"}`;
+  if (question?.origin?.type === "question-bank") return `题库 · ${question.origin.bankQuestionId || "已入库"} · v${question.origin.bankVersion || 1}`;
   if (question?.origin?.type !== "material") return "AI 独立";
   const names = [...new Set((question.origin.materialRefs || []).map((item) => item.name).filter(Boolean))];
   return names.join("、") || "资料题";
 }
 
-function sourceModeLabel(mode) {
-  return { "ai-only": "AI 独立生成", mixed: "资料 + AI", "materials-only": "仅资料", "question-bank": "题库选题" }[mode] || "AI 独立生成";
+function sourcePlanLabel(plan = {}) {
+  const sources = [];
+  if (Number(plan.questionBankCount || plan.questionBankIds?.length || 0) > 0) sources.push("题库题");
+  if (Number(plan.materialQuestionCount || 0) > 0) sources.push("资料题");
+  if (Number(plan.aiQuestionCount ?? 0) > 0 || !sources.length) sources.push("AI 独立题");
+  return sources.join(" + ");
 }
 
 function selectQuestion(question) {
@@ -273,7 +268,6 @@ function editPublishIssue(issue) {
                 </div>
               </div>
               <div class="flex flex-wrap items-center gap-2">
-                <el-button :icon="Collection" :disabled="state.generating" @click="openQuestionBankPicker">从题库选题</el-button>
                 <el-tag :type="formLocked ? 'info' : 'success'" effect="plain">{{ state.spec.difficulty || '中' }}等难度</el-tag>
               </div>
             </div>
@@ -310,61 +304,6 @@ function editPublishIssue(issue) {
             </div>
           </section>
 
-          <section class="workbench-section mt-3" data-question-source-plan>
-            <div class="section-heading">
-              <div>
-                <div class="flex items-center gap-2 text-sm font-black"><el-icon class="text-leaf"><FolderOpened /></el-icon>题目来源</div>
-                <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">资料题严格引用所选资料，AI 独立题不会携带资料正文</div>
-              </div>
-              <el-tag type="success" effect="plain">{{ sourceModeLabel(state.spec.sourceMode) }}</el-tag>
-            </div>
-
-            <el-segmented v-model="state.spec.sourceMode" class="mt-4 source-mode-control" :options="sourceModeOptions" :disabled="formLocked" aria-label="题目来源模式" />
-
-            <template v-if="state.spec.sourceMode !== 'ai-only'">
-              <div class="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-start sm:justify-between dark:border-night-border">
-                <div class="min-w-0 flex-1">
-                  <div class="text-xs font-black">已选出题资料</div>
-                  <div v-if="selectedSourceMaterials.length" class="mt-2 flex flex-wrap gap-2">
-                    <el-tag v-for="material in selectedSourceMaterials" :key="material.id" :closable="!formLocked" :disable-transitions="true" @close="removeSelectedMaterial(material.id)">
-                      {{ material.name }} · v{{ material.version }}
-                    </el-tag>
-                  </div>
-                  <div v-else class="mt-2 text-xs font-semibold text-slate-400">尚未选择资料</div>
-                  <div v-if="state.specFormErrors.materialIds" class="mt-2 text-xs font-bold text-coral">{{ state.specFormErrors.materialIds }}</div>
-                </div>
-                <el-button :icon="FolderOpened" :disabled="formLocked" @click="openMaterialSelector">选择资料</el-button>
-              </div>
-
-              <div class="mt-4 grid gap-4 md:grid-cols-[minmax(150px,1fr)_minmax(150px,1fr)_minmax(180px,1.2fr)]">
-                <el-form-item label="资料题数量" :error="state.specFormErrors.materialQuestionCount">
-                  <el-input-number
-                    v-model="state.spec.materialQuestionCount"
-                    :disabled="formLocked || state.spec.sourceMode === 'materials-only'"
-                    :min="state.spec.sourceMode === 'mixed' && totalQuestionCount > 1 ? 1 : 0"
-                    :max="state.spec.sourceMode === 'mixed' ? Math.max(0, totalQuestionCount - 1) : totalQuestionCount"
-                    controls-position="right"
-                    class="w-full"
-                  />
-                </el-form-item>
-                <el-form-item label="AI 独立题数量"><el-input-number :model-value="aiQuestionCount" disabled class="w-full" /></el-form-item>
-                <el-form-item label="资料覆盖策略">
-                  <el-select v-model="state.spec.coverageStrategy" :disabled="formLocked" class="w-full">
-                    <el-option label="均衡覆盖所选资料" value="balanced" />
-                    <el-option label="按内容相关性择优" value="best-match" />
-                  </el-select>
-                </el-form-item>
-              </div>
-              <el-alert
-                v-if="state.spec.coverageStrategy === 'balanced' && materialQuestionCount > 0 && selectedSourceMaterials.length > materialQuestionCount"
-                title="资料题数量少于所选资料数量，无法保证每份资料至少生成一道题"
-                type="warning"
-                show-icon
-                :closable="false"
-              />
-            </template>
-          </section>
-
           <section class="workbench-section mt-3" data-question-type-matrix>
             <div class="section-heading">
               <div>
@@ -396,11 +335,99 @@ function editPublishIssue(issue) {
             </el-table>
           </section>
 
+          <section class="workbench-section mt-3" data-question-source-plan>
+            <div class="section-heading">
+              <div>
+                <div class="flex items-center gap-2 text-sm font-black"><el-icon class="text-leaf"><FolderOpened /></el-icon>题目来源</div>
+                <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">选择题库题和资料题，其余题目由 AI 自动补足</div>
+              </div>
+              <el-tag :type="sourceAllocationError ? 'danger' : 'success'" effect="plain">
+                {{ totalQuestionCount }} = {{ questionBankQuestionCount }} + {{ materialQuestionCount }} + {{ aiQuestionCount }}
+              </el-tag>
+            </div>
+
+            <div class="source-allocation-list mt-4">
+              <div class="source-allocation-row">
+                <div class="source-allocation-name">
+                  <el-icon class="text-ocean"><Collection /></el-icon>
+                  <div><strong>题库题</strong><span>从已校验题库中选择具体题目</span></div>
+                </div>
+                <div class="source-allocation-content">
+                  <div v-if="selectedQuestionBankItems.length" class="flex flex-wrap gap-2">
+                    <el-tag v-for="item in selectedQuestionBankItems" :key="item.id" :closable="!formLocked" :disable-transitions="true" @close="removeSelectedQuestionBankItem(item.id)">
+                      {{ item.type ? `${item.type} · ` : '' }}{{ item.id }}<template v-if="item.version"> · v{{ item.version }}</template>
+                    </el-tag>
+                  </div>
+                  <span v-else class="source-empty">未选择，默认由 AI 补足</span>
+                  <div v-if="state.specFormErrors.questionBankIds || sourceAllocationError" class="mt-2 text-xs font-bold text-coral">{{ state.specFormErrors.questionBankIds || sourceAllocationError }}</div>
+                </div>
+                <div class="source-allocation-actions">
+                  <strong>{{ questionBankQuestionCount }} 题</strong>
+                  <el-button :icon="Collection" :disabled="formLocked" @click="openQuestionBankPicker">选择题目</el-button>
+                </div>
+              </div>
+
+              <div class="source-allocation-row">
+                <div class="source-allocation-name">
+                  <el-icon class="text-leaf"><FolderOpened /></el-icon>
+                  <div><strong>资料题</strong><span>严格依据所选资料内容生成</span></div>
+                </div>
+                <div class="source-allocation-content">
+                  <div v-if="selectedSourceMaterials.length" class="flex flex-wrap gap-2">
+                    <el-tag v-for="material in selectedSourceMaterials" :key="material.id" :closable="!formLocked" :disable-transitions="true" @close="removeSelectedMaterial(material.id)">
+                      {{ material.name }} · v{{ material.version }}
+                    </el-tag>
+                  </div>
+                  <span v-else class="source-empty">未选择资料</span>
+                  <div v-if="state.specFormErrors.materialIds" class="mt-2 text-xs font-bold text-coral">{{ state.specFormErrors.materialIds }}</div>
+                </div>
+                <div class="source-allocation-actions source-material-actions">
+                  <el-input-number
+                    v-model="state.spec.materialQuestionCount"
+                    :disabled="formLocked"
+                    :min="0"
+                    :max="Math.max(0, totalQuestionCount - questionBankQuestionCount)"
+                    controls-position="right"
+                    aria-label="资料题数量"
+                  />
+                  <el-button :icon="FolderOpened" :disabled="formLocked" @click="openMaterialSelector">选择资料</el-button>
+                </div>
+              </div>
+
+              <div class="source-allocation-row">
+                <div class="source-allocation-name">
+                  <el-icon class="text-iris"><MagicStick /></el-icon>
+                  <div><strong>AI 独立题</strong><span>自动补齐剩余题型和数量</span></div>
+                </div>
+                <div class="source-allocation-content">
+                  <span class="source-empty">无需设置，将根据前两类题目自动计算</span>
+                </div>
+                <div class="source-allocation-actions"><strong>{{ aiQuestionCount }} 题</strong></div>
+              </div>
+            </div>
+
+            <div v-if="materialQuestionCount > 0" class="mt-4 grid gap-3 md:grid-cols-[minmax(220px,320px)_1fr] md:items-center">
+              <el-select v-model="state.spec.coverageStrategy" :disabled="formLocked" aria-label="资料覆盖策略">
+                <el-option label="均衡覆盖所选资料" value="balanced" />
+                <el-option label="按内容相关性择优" value="best-match" />
+              </el-select>
+              <el-alert
+                v-if="state.spec.coverageStrategy === 'balanced' && selectedSourceMaterials.length > materialQuestionCount"
+                title="资料题数量少于所选资料数量，无法保证每份资料至少生成一道题"
+                type="warning"
+                show-icon
+                :closable="false"
+              />
+            </div>
+          </section>
+
           <section v-if="state.generatedDraft?.questions?.length" class="workbench-section mt-3">
             <div class="section-heading">
               <div>
                 <div class="text-sm font-black">生成结果</div>
-                <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{{ state.generatedDraft.questions.length }} 题 · {{ state.generatedDraft.spec?.totalScore }} 分</div>
+                <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  {{ state.generatedDraft.questions.length }} 题 · 题库 {{ overviewQuestionSources.bank }} · 资料 {{ overviewQuestionSources.material }} · AI {{ overviewQuestionSources.ai }}
+                </div>
               </div>
               <el-tag type="success" effect="plain">等待确认</el-tag>
             </div>
@@ -420,10 +447,9 @@ function editPublishIssue(issue) {
           <div class="section-heading">
             <div>
               <div class="text-sm font-black">人工审核</div>
-              <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{{ authoringReviewedCount }}/{{ authoringQuestions.length }} 已通过</div>
+              <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{{ authoringReviewedCount }}/{{ authoringQuestions.length }} 已通过 · 题库 {{ overviewQuestionSources.bank }} · 资料 {{ overviewQuestionSources.material }} · AI {{ overviewQuestionSources.ai }}</div>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2">
-              <el-button :icon="Collection" @click="openQuestionBankPicker">从题库选题</el-button>
               <el-button type="success" plain :loading="state.questionBankManagement.importingCurrent" :disabled="!authoringReviewedCount" @click="addCurrentQuestionsToBank">已校验题目入库</el-button>
               <el-progress class="review-progress" :percentage="authoringQuestions.length ? Math.round(authoringReviewedCount / authoringQuestions.length * 100) : 0" :stroke-width="8" />
             </div>
@@ -525,7 +551,7 @@ function editPublishIssue(issue) {
           <dl class="summary-details mt-4">
             <div><dt>出题方向</dt><dd>{{ activeSpec?.direction || state.spec.direction || '未设置' }}</dd></div>
             <div><dt>知识点</dt><dd>{{ overviewKnowledge }}</dd></div>
-            <div><dt>题目来源</dt><dd>{{ sourceModeLabel(activeSourcePlan?.mode) }}</dd></div>
+            <div><dt>题目来源</dt><dd>{{ sourcePlanLabel(activeSourcePlan) }}</dd></div>
             <div v-if="activeSourceMaterials.length"><dt>使用资料</dt><dd>{{ activeSourceMaterials.map((item) => `${item.name} v${item.version}`).join('、') }}</dd></div>
             <div><dt>审核进度</dt><dd>{{ authoringReviewedCount }}/{{ authoringQuestions.length || overviewQuestionCount }}</dd></div>
           </dl>
@@ -603,7 +629,7 @@ function editPublishIssue(issue) {
         <div class="text-xs font-black">{{ currentStep?.title }}</div>
         <div class="mt-1 truncate text-[11px] font-semibold text-slate-500 dark:text-slate-400">
           <template v-if="visibleWorkflowStep === 'config' && state.generatedDraft?.questions?.length">生成结果等待确认</template>
-          <template v-else-if="visibleWorkflowStep === 'config'">{{ totalQuestionCount }} 题 · {{ computedSpecTotalScore }} 分</template>
+          <template v-else-if="visibleWorkflowStep === 'config'">{{ totalQuestionCount }} 题 = 题库 {{ questionBankQuestionCount }} + 资料 {{ materialQuestionCount }} + AI {{ aiQuestionCount }}</template>
           <template v-else-if="visibleWorkflowStep === 'review'">{{ authoringPendingReviewCount ? `还有 ${authoringPendingReviewCount} 题待审核` : '题目已全部审核通过' }}</template>
           <template v-else>{{ state.publishQualityFailures.length ? `请先修正 ${state.publishQualityFailures.length} 个发布问题` : '发布时将自动保存并执行完整检查' }}</template>
         </div>
@@ -613,7 +639,7 @@ function editPublishIssue(issue) {
           <el-button v-if="formLocked && !state.generating" :icon="RefreshRight" @click="regenerate">重新生成</el-button>
           <el-button v-if="state.generatedDraft?.questions?.length" :icon="Delete" :disabled="state.saving" @click="discardDraft">丢弃</el-button>
           <el-button v-if="state.generatedDraft?.questions?.length" type="primary" :icon="Check" :loading="state.saving" @click="saveDraft">确认并审核</el-button>
-          <el-button v-else-if="!formLocked" type="primary" :icon="MagicStick" :loading="state.generating" @click="generateDraft">生成试卷</el-button>
+          <el-button v-else-if="!formLocked" type="primary" :icon="MagicStick" :loading="state.generating" @click="generateDraft">生成并组合试卷</el-button>
         </template>
         <el-button v-else-if="visibleWorkflowStep === 'review' && !authoringPendingReviewCount" type="primary" :icon="Promotion" @click="setWorkflowStep('publish')">进入发布</el-button>
         <el-button v-else-if="visibleWorkflowStep === 'publish'" type="primary" :icon="Promotion" :loading="state.publishing" @click="publishPaper">发布试卷</el-button>
@@ -703,8 +729,67 @@ function editPublishIssue(issue) {
   padding: 10px 12px;
 }
 
-.source-mode-control {
-  width: min(100%, 520px);
+.source-allocation-list {
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.source-allocation-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.7fr) minmax(220px, 1.5fr) minmax(180px, auto);
+  gap: 16px;
+  min-height: 76px;
+  align-items: center;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 12px 0;
+}
+
+.source-allocation-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.source-allocation-name .el-icon {
+  flex: 0 0 auto;
+  font-size: 20px;
+}
+
+.source-allocation-name strong,
+.source-allocation-name span {
+  display: block;
+}
+
+.source-allocation-name strong {
+  font-size: 13px;
+}
+
+.source-allocation-name span,
+.source-empty {
+  margin-top: 3px;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.source-allocation-content {
+  min-width: 0;
+}
+
+.source-allocation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.source-allocation-actions > strong {
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.source-material-actions :deep(.el-input-number) {
+  width: 112px;
 }
 
 .source-evidence {
@@ -944,6 +1029,15 @@ function editPublishIssue(issue) {
 
   .paper-summary-grid > div:nth-child(-n + 2) {
     border-bottom: 1px solid var(--el-border-color-lighter);
+  }
+
+  .source-allocation-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .source-allocation-actions {
+    justify-content: space-between;
   }
 }
 

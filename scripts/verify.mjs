@@ -142,10 +142,10 @@ try {
   assert(frontend.includes('aria-label="试卷详情抽屉"') && frontend.includes("paperDetailMode"), "paper details open in the responsive drawer");
   assert((frontend.match(/if \(state\.selectedPaperId\) clearSelectedPaper\(\);/g) || []).length >= 2, "route changes close an open paper detail drawer");
   assert(frontend.includes("出题资料管理") && frontend.includes("/api/materials/upload") && frontend.includes("data-question-source-plan"), "frontend exposes material management and source allocation");
-  assert(frontend.includes("materialQuestionCount") && frontend.includes("AI 独立题数量") && frontend.includes("资料依据"), "authoring config and review expose mixed-source traceability");
+  assert(frontend.includes("questionBankQuestionCount") && frontend.includes("自动补齐剩余题型和数量") && frontend.includes("资料依据"), "authoring config and review expose unified source allocation and traceability");
   assert(frontend.includes("题库管理") && frontend.includes("data-question-bank-page") && frontend.includes("从题库选择题目"), "frontend exposes question bank management and paper selection");
   assert(frontend.includes("已校验题目入库") && frontend.includes("整卷入库") && frontend.includes("加入题库"), "review and paper detail surfaces can explicitly add questions to the bank");
-  assert(backend.includes("questionContentHash") && backend.includes("questionBankUsageMap") && backend.includes("importQuestionBankIntoAuthoring"), "backend implements question deduplication, usage relations, and paper imports");
+  assert(backend.includes("questionContentHash") && backend.includes("questionBankUsageMap") && backend.includes("resolveGenerationQuestionBank"), "backend implements question deduplication, usage relations, and unified bank-question generation");
 
   const blockedDashboard = await getJson("/api/dashboard", { expectedStatus: 401 });
   assert(blockedDashboard.error.includes("运营控制台"), "dashboard requires admin login");
@@ -341,6 +341,33 @@ try {
   assert(materialTwo.status === "ready" && materialTwo.sourceType === "file", "TXT material upload is parsed");
   const materialList = await getJson("/api/materials?status=ready&page=1&pageSize=20", { headers: contentUserHeaders });
   assert(materialList.total === 2, "material list returns created sources");
+
+  const combinedSpec = {
+    paperName: "三类题源组合测评",
+    direction: "JavaScript 工程实践",
+    difficulty: "中",
+    typeCounts: { single: 2, multiple: 1, judge: 1, blank: 0, short: 0, essay: 0 },
+    typeScores: { single: 2, multiple: 4, judge: 3, blank: 2, short: 5, essay: 10 },
+    knowledge: ["语言基础", "工程质量"],
+    requirements: "题干清晰，答案明确。",
+    sourcePlan: {
+      questionBankIds: [manualBankQuestion.id],
+      materialIds: [materialOne.id],
+      materialQuestionCount: 1,
+      coverageStrategy: "balanced",
+    },
+  };
+  const combined = await generateQuestionsAsync(combinedSpec, contentUserHeaders);
+  const combinedBank = combined.questions.filter((question) => question.origin?.type === "question-bank");
+  const combinedMaterial = combined.questions.filter((question) => question.origin?.type === "material");
+  const combinedAi = combined.questions.filter((question) => question.origin?.type === "ai");
+  assert(combined.questions.length === 4 && combined.spec.totalScore === 11 && combined.checks.specPass === true, "three-source generation keeps the requested count, type matrix, and score");
+  assert(combinedBank.length === 1 && combinedMaterial.length === 1 && combinedAi.length === 2, "question-bank, material, and independent AI quotas compose in one generation task");
+  assert(combinedBank[0].score === 3 && combinedBank[0].status === "已校验" && combinedBank[0].origin.bankVersion === 2, "bank questions use the paper score and preserve reviewed version provenance");
+  assert(combined.spec.sourcePlan.questionBankItems[0].version === 2 && combined.spec.sourcePlan.materials[0].version === 2, "combined generation freezes question-bank and material versions");
+  assert(new Set(combined.questions.map((question) => question.stem.replace(/\s+/g, ""))).size === 4, "combined generation removes duplicates and fills every missing slot");
+  const combinedPreviewDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
+  assert(combinedPreviewDashboard.questions.length === 0, "three-source preview does not mutate the active authoring draft");
 
   const generationSpec = {
     paperName: "核心能力测评",

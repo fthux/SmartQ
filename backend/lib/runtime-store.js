@@ -437,8 +437,10 @@ function defaultState() {
       publishedAt: null,
       questionIds: [],
       buildSpec: null,
+      sourcePlanSnapshot: null,
     },
     papers: [],
+    sourceMaterials: [],
     generationTask: null,
     adminSessions: {},
     adminUsers: [],
@@ -462,6 +464,7 @@ function normalizeState(input) {
     publishedAt: input.paper?.publishedAt || null,
     questionIds: Array.isArray(input.paper?.questionIds) ? input.paper.questionIds : [],
     buildSpec: input.paper?.buildSpec || null,
+    sourcePlanSnapshot: input.paper?.sourcePlanSnapshot || input.paper?.buildSpec?.sourcePlanSnapshot || null,
   };
   const hasDiscardableAuthoringDraft = Boolean(input.generationTask && !normalizedPaper.id && !normalizedPaper.status);
   const hasRetiredRuntimeData = retiredRuntimeKeys.some((key) => Object.prototype.hasOwnProperty.call(input, key));
@@ -470,8 +473,9 @@ function normalizeState(input) {
   const normalized = {
     exam: input.exam || exam,
     questions: hasDiscardableAuthoringDraft ? [] : (Array.isArray(input.questions) ? input.questions : []),
-    paper: hasDiscardableAuthoringDraft ? { ...normalizedPaper, questionIds: [], buildSpec: null } : normalizedPaper,
+    paper: hasDiscardableAuthoringDraft ? { ...normalizedPaper, questionIds: [], buildSpec: null, sourcePlanSnapshot: null } : normalizedPaper,
     papers: Array.isArray(input.papers) ? input.papers.map(normalizePaperSnapshot).filter(Boolean) : [],
+    sourceMaterials: Array.isArray(input.sourceMaterials) ? input.sourceMaterials.map(normalizeSourceMaterial).filter(Boolean) : [],
     generationTask: hasDiscardableAuthoringDraft ? null : (input.generationTask || null),
     adminSessions: input.adminSessions && typeof input.adminSessions === "object" ? input.adminSessions : {},
     adminUsers: Array.isArray(input.adminUsers) ? input.adminUsers : [],
@@ -481,6 +485,28 @@ function normalizeState(input) {
   };
   if (hasRetiredRuntimeData || auditLog.length !== sourceAuditLog.length) normalizedStateNeedsSave = true;
   return stripLegacyQuestionSeed(normalized);
+}
+
+function normalizeSourceMaterial(item) {
+  if (!item || typeof item !== "object" || !item.id) return null;
+  return {
+    id: String(item.id),
+    name: String(item.name || "未命名资料"),
+    description: String(item.description || ""),
+    tags: Array.isArray(item.tags) ? item.tags.map(String).filter(Boolean) : [],
+    status: ["ready", "failed", "archived"].includes(item.status) ? item.status : "failed",
+    sourceType: item.sourceType === "file" ? "file" : "text",
+    filename: String(item.filename || ""),
+    mimeType: String(item.mimeType || ""),
+    version: Math.max(1, Number(item.version || 1)),
+    contentHash: String(item.contentHash || ""),
+    textLength: Math.max(0, Number(item.textLength || 0)),
+    parseError: String(item.parseError || ""),
+    revisions: Array.isArray(item.revisions) ? item.revisions : [],
+    createdBy: String(item.createdBy || ""),
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+  };
 }
 
 function defaultLoginSecurity() {
@@ -558,6 +584,7 @@ function normalizePaperSnapshot(item) {
     questionIds: Array.isArray(item.questionIds) ? item.questionIds : [],
     questions: Array.isArray(item.questions) ? item.questions : [],
     buildSpec: item.buildSpec || null,
+    sourcePlanSnapshot: item.sourcePlanSnapshot || item.buildSpec?.sourcePlanSnapshot || null,
     publishedAt: item.publishedAt || null,
     createdAt: item.createdAt || item.buildSpec?.builtAt || new Date().toISOString(),
   };

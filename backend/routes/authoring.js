@@ -41,7 +41,7 @@ export async function handleAuthoringRoutes(req, res, url, state) {
         status: item.status || "待确认",
       }));
       current.generationTask = spec;
-      current.paper = { id: null, name: "", status: null, publishedAt: null, questionIds: [], buildSpec: null };
+      current.paper = { id: null, name: "", status: null, publishedAt: null, questionIds: [], buildSpec: null, sourcePlanSnapshot: spec.sourcePlan || null };
       current.auditLog.push(logItem("ai-draft-save", `保存「${spec.paperName || "未命名试卷"}」试卷内容 ${current.questions.length} 道，稳定性 ${checks.stabilityScore}`));
     });
     sendJson(res, 200, { saved: true, questions, spec, checks });
@@ -62,6 +62,7 @@ export async function handleAuthoringRoutes(req, res, url, state) {
       }
       Object.assign(target, body);
       if (questionContentChanged(before, target)) {
+        target.origin = { ...(target.origin || { type: "ai", materialRefs: [] }), edited: true };
         const inPaper = (current.paper.questionIds || []).includes(id);
         if (inPaper) {
           current.paper.status = "草稿";

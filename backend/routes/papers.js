@@ -12,6 +12,7 @@ export async function handlePaperRoutes(req, res, url, state) {
         ...current.paper,
         id: `paper-${Date.now()}`,
         name: body.name || current.generationTask?.paperName || current.paper.name || "未命名试卷",
+        sourcePlanSnapshot: current.generationTask?.sourcePlan || current.paper.sourcePlanSnapshot || null,
       });
       if (saved.error) return saved;
       current.paper = {
@@ -21,6 +22,7 @@ export async function handlePaperRoutes(req, res, url, state) {
         status: "草稿",
         questionIds: saved.questionIds,
         buildSpec: saved.buildSpec,
+        sourcePlanSnapshot: saved.sourcePlanSnapshot || current.generationTask?.sourcePlan || null,
         publishedAt: null,
       };
       upsertPaperSnapshot(current, buildPaper(current.questions, current.paper));
@@ -65,6 +67,7 @@ export async function handlePaperRoutes(req, res, url, state) {
           ...current.paper,
           id: `paper-${Date.now()}`,
           name: current.generationTask?.paperName || current.paper.name || "未命名试卷",
+          sourcePlanSnapshot: current.generationTask?.sourcePlan || current.paper.sourcePlanSnapshot || null,
         });
         if (saved.error) return saved;
         current.paper = {
@@ -74,6 +77,7 @@ export async function handlePaperRoutes(req, res, url, state) {
           status: "草稿",
           questionIds: saved.questionIds,
           buildSpec: saved.buildSpec,
+          sourcePlanSnapshot: saved.sourcePlanSnapshot || current.generationTask?.sourcePlan || null,
           publishedAt: null,
         };
         current.auditLog.push(logItem("paper-auto-save", `发布前自动保存试卷：${saved.name}，${saved.questionCount} 题 / ${saved.score} 分`));
@@ -101,6 +105,7 @@ export async function handlePaperRoutes(req, res, url, state) {
         publishedAt: target.publishedAt || null,
         questionIds: target.questionIds || [],
         buildSpec: target.buildSpec || null,
+        sourcePlanSnapshot: target.sourcePlanSnapshot || target.buildSpec?.sourcePlanSnapshot || null,
       };
       const targetQuestions = paperSnapshotDetail(target, current.questions).questions;
       if (targetQuestions.length) {
@@ -133,7 +138,7 @@ export async function handlePaperRoutes(req, res, url, state) {
       if (index < 0) return null;
       const [deleted] = current.papers.splice(index, 1);
       if (current.paper.id === id) {
-        current.paper = { id: null, name: "", status: null, publishedAt: null, questionIds: [], buildSpec: null };
+        current.paper = { id: null, name: "", status: null, publishedAt: null, questionIds: [], buildSpec: null, sourcePlanSnapshot: null };
         current.questions = [];
         current.generationTask = null;
       }

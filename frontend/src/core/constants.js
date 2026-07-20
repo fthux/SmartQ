@@ -34,4 +34,8 @@ export const defaultSpec = {
   essayScore: 10,
   knowledge: "",
   requirements: "",
+  sourceMode: "ai-only",
+  materialIds: [],
+  materialQuestionCount: 0,
+  coverageStrategy: "balanced",
 };

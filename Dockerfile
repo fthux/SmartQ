@@ -13,13 +13,16 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
 COPY backend ./backend
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV SMARTQ_DATA_FILE=/app/runtime/runtime.json
+ENV SMARTQ_MATERIAL_DIR=/app/runtime/materials
 
 EXPOSE 3000
 

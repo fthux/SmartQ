@@ -23,6 +23,7 @@ import { createAuthoringStore } from "./authoring-store.js";
 import { createPapersStore } from "./papers-store.js";
 import { createUiStore } from "./ui-store.js";
 import { createLayoutStore } from "./layout-store.js";
+import { createMaterialsStore } from "./materials-store.js";
 import { createUsersStore } from "./users-store.js";
 import { computed, onMounted, reactive, watch } from "vue";
 
@@ -83,6 +84,31 @@ export function createAppStore() {
         resetError: "",
         resetting: false,
       },
+      materialManagement: {
+        items: [],
+        options: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        search: "",
+        status: "",
+        loading: false,
+        optionsLoading: false,
+        error: "",
+        actionId: null,
+        selectorOpen: false,
+        editorOpen: false,
+        editorMode: "create",
+        editingId: null,
+        form: { name: "", description: "", tags: "", content: "", mode: "text", file: null },
+        formError: "",
+        saving: false,
+        detailOpen: false,
+        detailLoading: false,
+        detail: null,
+        usages: [],
+        returnToAuthoring: false,
+      },
       ui: {
         sidebarCollapsed: localStorage.getItem("smartqSidebarCollapsed") === "1",
         theme: ["system", "light", "dark"].includes(localStorage.getItem("smartqTheme")) ? localStorage.getItem("smartqTheme") : "system",
@@ -119,13 +145,14 @@ export function createAppStore() {
       editingPaperId: null,
       authoringPaperId: currentAuthoringPaperId(),
       authoringNewDraftActive: false,
-      spec: { ...defaultSpec },
+      spec: freshSpec(),
       specFormErrors: {},
     });
 
     const navItems = [
       { key: "papers", label: "已出卷子", icon: "files" },
       { key: "authoring", label: "出题制卷", icon: "sparkles" },
+      { key: "materials", label: "出题资料", icon: "folder" },
       { key: "users", label: "用户管理", icon: "users" },
       { key: "profile", label: "个人资料", icon: "user-round", showInNav: false },
     ];
@@ -162,6 +189,14 @@ export function createAppStore() {
         return sum + count * score;
       }, 0),
     );
+    const selectedSourceMaterials = computed(() => {
+      const selected = new Set(state.spec.materialIds || []);
+      return state.materialManagement.options.filter((item) => selected.has(item.id));
+    });
+    const materialQuestionCount = computed(() => state.spec.sourceMode === "ai-only"
+      ? 0
+      : clampNumber(state.spec.materialQuestionCount, 0, totalQuestionCount.value, 0));
+    const aiQuestionCount = computed(() => Math.max(0, totalQuestionCount.value - materialQuestionCount.value));
     const workflowSteps = computed(() => {
       const hasUnsavedDraft = Boolean(state.generatedDraft?.questions?.length);
       const hasPersistedQuestions = authoringQuestions.value.length > 0 && !hasUnsavedDraft;
@@ -284,6 +319,24 @@ export function createAppStore() {
       setManagedAdminUserStatus,
     } = createUsersStore({ state, request, notify });
     const {
+      applyMaterialFilters,
+      changeMaterialPage,
+      changeMaterialPageSize,
+      loadMaterials,
+      loadMaterialOptions,
+      manageMaterialsFromAuthoring,
+      openCreateMaterial,
+      openEditMaterial,
+      openMaterialDetail,
+      openMaterialSelector,
+      removeSelectedMaterial,
+      resumeAuthoringFromMaterials,
+      runMaterialAction,
+      saveMaterial,
+      selectMaterialFile,
+      toggleMaterialSelection,
+    } = createMaterialsStore({ state, notify, go: (...args) => go(...args) });
+    const {
       activatePaper,
       askDeletePaper,
       changePaperPage,
@@ -356,6 +409,7 @@ export function createAppStore() {
       }
       state.route = route;
       if (route === "authoring") {
+        const resume = params?.resume === "1";
         state.authoringPaperId = params.paperid || params.paperId || params.papeid || "";
         state.editingPaperId = state.authoringPaperId || null;
         state.authoringNewDraftActive = false;
@@ -363,12 +417,25 @@ export function createAppStore() {
         if (!state.authoringPaperId) {
           state.generatedDraft = null;
           state.regeneratingDraft = false;
-          state.spec = { ...defaultSpec };
+          if (resume) {
+            try {
+              state.spec = freshSpec(JSON.parse(sessionStorage.getItem("smartqAuthoringSpec") || "{}"));
+            } catch {
+              state.spec = freshSpec();
+            }
+            sessionStorage.removeItem("smartqAuthoringSpec");
+          } else {
+            state.spec = freshSpec();
+          }
           state.activeWorkflowStep = "config";
         }
       }
       if (route === "papers") clearSelectedPaper();
       if (route === "users") loadAdminUsers();
+      if (route === "materials") {
+        state.materialManagement.returnToAuthoring = params?.returnTo === "authoring";
+        loadMaterials();
+      }
       const routeHash = formatRouteHash(route, params);
       if (routeHash) location.hash = routeHash;
       else history.replaceState(null, "", `${location.pathname}${location.search}`);
@@ -384,6 +451,12 @@ export function createAppStore() {
       document.title = title;
     }, { immediate: true });
 
+    watch([totalQuestionCount, () => state.spec.sourceMode], ([count, mode]) => {
+      if (mode === "ai-only") state.spec.materialQuestionCount = 0;
+      else if (mode === "materials-only") state.spec.materialQuestionCount = count;
+      else state.spec.materialQuestionCount = clampNumber(state.spec.materialQuestionCount, 0, count, 0);
+    });
+
     onMounted(async () => {
       window.addEventListener("hashchange", () => {
         state.route = currentRoute();
@@ -398,6 +471,7 @@ export function createAppStore() {
         state.editingPaperId = state.route === "authoring" && state.authoringPaperId ? state.authoringPaperId : null;
         if (state.route === "papers") clearSelectedPaper();
         if (state.route === "users") loadAdminUsers();
+        if (state.route === "materials") loadMaterials();
         if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
           activatePaper(state.authoringPaperId, { silent: true }).catch(() => {});
         }
@@ -415,6 +489,8 @@ export function createAppStore() {
       await loadAdminSession();
       await refresh();
       if (state.route === "users") await loadAdminUsers();
+      if (state.route === "materials") await loadMaterials();
+      if (state.route === "authoring") await loadMaterialOptions();
       if (state.route === "authoring" && state.authoringPaperId && state.dashboard?.paper?.id !== state.authoringPaperId) {
         await activatePaper(state.authoringPaperId, { silent: true });
       }
@@ -451,6 +527,9 @@ export function createAppStore() {
       visibleWorkflowStep,
       paperTypeConfig,
       computedSpecTotalScore,
+      selectedSourceMaterials,
+      materialQuestionCount,
+      aiQuestionCount,
       refresh,
       go,
       canAccessRoute,
@@ -465,6 +544,22 @@ export function createAppStore() {
       revokeManagedAdminSessions,
       saveManagedAdminUser,
       setManagedAdminUserStatus,
+      applyMaterialFilters,
+      changeMaterialPage,
+      changeMaterialPageSize,
+      loadMaterials,
+      loadMaterialOptions,
+      manageMaterialsFromAuthoring,
+      openCreateMaterial,
+      openEditMaterial,
+      openMaterialDetail,
+      openMaterialSelector,
+      removeSelectedMaterial,
+      resumeAuthoringFromMaterials,
+      runMaterialAction,
+      saveMaterial,
+      selectMaterialFile,
+      toggleMaterialSelection,
       loginAdmin,
       logoutAdmin,
       openAdminProfile,
@@ -512,4 +607,12 @@ export function createAppStore() {
       escapeHtml,
       publicUrl,
     };
+}
+
+function freshSpec(overrides = {}) {
+  return {
+    ...defaultSpec,
+    ...overrides,
+    materialIds: Array.isArray(overrides.materialIds) ? [...overrides.materialIds] : [],
+  };
 }

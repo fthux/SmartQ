@@ -5,6 +5,8 @@ SmartQ 是一个面向考试与测评内容生产的轻量管理系统。当前�
 ## 功能范围
 
 - AI 命题：配置考卷名称、出题方向、难度、题型、题量、分值和知识点
+- 出题资料：管理文本、TXT、Markdown、PDF 和 DOCX 资料，支持多选资料及资料题/AI 独立题配额
+- 来源追溯：资料题保存资料版本和引用片段，人工修改及历史试卷仍保留来源记录
 - 生成稳定性：规范化 AI 输出并校验题量、题型、总分和必填字段
 - 题目质量：质量复检、自动修复、人工审核和题目编辑
 - 试卷管理：保存草稿、发布试卷、查看详情、切换当前试卷和删除试卷
@@ -74,6 +76,9 @@ SMARTQ_BACKUP_DIR=backend/data/backups
 SMARTQ_BACKUP_RETENTION=20
 SMARTQ_BACKUP_MIN_INTERVAL_SECONDS=60
 SMARTQ_MAX_REQUEST_BYTES=2097152
+SMARTQ_MATERIAL_DIR=backend/data/materials
+SMARTQ_MATERIAL_FILE_MAX_BYTES=8388608
+SMARTQ_MATERIAL_TEXT_MAX_CHARS=400000
 SMARTQ_LOGIN_MAX_FAILURES=5
 SMARTQ_LOGIN_WINDOW_SECONDS=900
 SMARTQ_LOGIN_LOCK_SECONDS=600
@@ -87,6 +92,8 @@ AI_MOCK_MODE=false
 ```
 
 `SMARTQ_ADMIN_USER`、`SMARTQ_ADMIN_PASSWORD` 和 `SMARTQ_ADMIN_ACCOUNTS` 只用于首次初始化账号。初始化完成后，账号和密码以运行时存储中的 `adminUsers` 为准；已有 `adminProfiles` 会自动合并到对应用户，旧会话会失效。所有有效账号均可使用完整控制台功能，密码只以 scrypt 哈希保存，不会把环境变量中的明文密码写入运行时文件。
+
+出题资料元数据保存在运行时状态中，原始文件和解析后的版本正文保存在 `SMARTQ_MATERIAL_DIR`。Docker 默认将其放入与 `runtime.json` 相同的持久卷。单个文件默认最大 8 MB，单份解析正文默认最多 40 万字符。
 
 `npm run verify` 会使用 `AI_MOCK_MODE=true` 启动临时服务，不会调用真实 AI 接口。
 

@@ -9,6 +9,7 @@ import { handleAdminLoginRoute, handleAdminRoutes } from "./admin.js";
 import { handleAdminUserRoutes } from "./admin-users.js";
 import { handleAuthoringRoutes } from "./authoring.js";
 import { handlePaperRoutes } from "./papers.js";
+import { handleMaterialRoutes } from "./materials.js";
 import { handleDashboardRoute, handlePublicSystemRoutes } from "./system.js";
 
 export async function handleApi(req, res, url) {
@@ -30,6 +31,7 @@ export async function handleApi(req, res, url) {
   if (await handleAdminRoutes(req, res, url, state, auth, token)) return;
   if (await handleAdminUserRoutes(req, res, url, state, auth, token)) return;
   if (handleDashboardRoute(req, res, url, state)) return;
+  if (await handleMaterialRoutes(req, res, url, state, auth)) return;
   if (await handleAuthoringRoutes(req, res, url, state)) return;
   if (await handlePaperRoutes(req, res, url, state)) return;
   sendJson(res, 404, { error: "Not Found" });

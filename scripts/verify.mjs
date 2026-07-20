@@ -8,6 +8,7 @@ const baseUrl = `http://127.0.0.1:${port}`;
 const runtimeDir = await mkdtemp(join(tmpdir(), "smartq-verify-"));
 const runtimeFile = join(runtimeDir, "runtime.json");
 const backupDir = join(runtimeDir, "backups");
+const materialDir = join(runtimeDir, "materials");
 let adminHeaders = {};
 let output = "";
 const retiredInitialPasswordFlag = ["must", "ChangePassword"].join("");
@@ -21,6 +22,7 @@ const server = spawn(process.execPath, ["backend/server.js"], {
     PORT: String(port),
     SMARTQ_DATA_FILE: runtimeFile,
     SMARTQ_BACKUP_DIR: backupDir,
+    SMARTQ_MATERIAL_DIR: materialDir,
     SMARTQ_BACKUP_RETENTION: "5",
     SMARTQ_BACKUP_MIN_INTERVAL_SECONDS: "0",
     SMARTQ_MAX_REQUEST_BYTES: String(128 * 1024),
@@ -62,6 +64,7 @@ try {
     "frontend/src/core/router.js",
     "frontend/src/pages/AuthoringPage.vue",
     "frontend/src/pages/LoginPage.vue",
+    "frontend/src/pages/MaterialsPage.vue",
     "frontend/src/pages/PapersPage.vue",
     "frontend/src/pages/ProfilePage.vue",
     "frontend/src/pages/UsersPage.vue",
@@ -69,6 +72,7 @@ try {
     "frontend/src/stores/authoring-store.js",
     "frontend/src/stores/auth-store.js",
     "frontend/src/stores/layout-store.js",
+    "frontend/src/stores/materials-store.js",
     "frontend/src/stores/users-store.js",
     "frontend/src/styles/index.css",
   ];
@@ -76,6 +80,8 @@ try {
   const frontend = frontendSources.join("\n");
   const backendFiles = [
     "backend/routes/index.js",
+    "backend/routes/materials.js",
+    "backend/services/material-service.js",
     "backend/services/admin-user-service.js",
     "backend/services/auth-service.js",
   ];
@@ -113,7 +119,7 @@ try {
   assert(frontend.includes('window.scrollTo({ top: 0, left: 0, behavior: "auto" });'), "frontend resets scroll on module switches");
   assert(frontend.includes("出题制卷") && frontend.includes("已出卷子"), "frontend keeps authoring and paper UI");
   assert(frontend.indexOf('{ key: "papers"') < frontend.indexOf('{ key: "authoring"'), "paper management is the first navigation item");
-  assert(frontend.includes('return ["authoring", "papers", "users", "profile"].includes(route) ? route : "papers";'), "papers is the default route and protected user/profile routes are routable");
+  assert(frontend.includes('return ["authoring", "papers", "materials", "users", "profile"].includes(route) ? route : "papers";'), "papers is the default route and content-management routes are routable");
   assert(frontend.includes('if (route === "papers") return "";'), "papers uses the root URL");
   assert(!/控制台首页|数据维护|运营会话|审计日志|自动备份历史/.test(frontend), "frontend removes the console homepage and maintenance UI");
   assert(!/参与者管理|试卷分配|监考工作台|阅卷分析|考生系统/.test(frontend), "frontend removes retired navigation and pages");
@@ -128,6 +134,8 @@ try {
   assert(frontend.includes("data-question-type-matrix") && frontend.includes("typeMatrixRows") && frontend.includes("通过并继续"), "authoring keeps the compact type matrix and next-question review flow");
   assert(frontend.includes('paperPageSize: 20') && frontend.includes('aria-label="试卷状态筛选"'), "paper management uses the Element Plus list controls");
   assert(frontend.includes('aria-label="试卷详情抽屉"') && frontend.includes("paperDetailMode"), "paper details open in the responsive drawer");
+  assert(frontend.includes("出题资料管理") && frontend.includes("/api/materials/upload") && frontend.includes("data-question-source-plan"), "frontend exposes material management and source allocation");
+  assert(frontend.includes("materialQuestionCount") && frontend.includes("AI 独立题数量") && frontend.includes("资料依据"), "authoring config and review expose mixed-source traceability");
 
   const blockedDashboard = await getJson("/api/dashboard", { expectedStatus: 401 });
   assert(blockedDashboard.error.includes("运营控制台"), "dashboard requires admin login");
@@ -259,6 +267,29 @@ try {
   assert(freshDashboard.questions.length === 0 && freshDashboard.papers.length === 0, "fresh dashboard starts without content");
   assert(!("participants" in freshDashboard) && !("sessions" in freshDashboard) && !("analysis" in freshDashboard), "dashboard omits retired domain payloads");
 
+  const materialOne = await postJson("/api/materials", {
+    name: "JavaScript 基础规范",
+    description: "用于验证资料题生成",
+    tags: "JavaScript，基础",
+    content: "JavaScript 中 const 声明创建不可重新赋值的绑定。数组的 map 方法会返回一个新数组，不会直接修改原数组。",
+  }, { headers: contentUserHeaders, expectedStatus: 201 });
+  assert(materialOne.status === "ready" && materialOne.version === 1, "text material can be created");
+  const materialOneUpdated = await patchJson(`/api/materials/${materialOne.id}`, {
+    name: "JavaScript 基础规范",
+    description: "用于验证资料题生成和版本冻结",
+    tags: "JavaScript，基础",
+    content: "JavaScript 中 const 声明创建不可重新赋值的绑定，但对象内部属性仍可修改。数组的 map 方法会返回一个新数组，不会直接修改原数组。",
+  }, { headers: contentUserHeaders });
+  assert(materialOneUpdated.version === 2, "editing material content creates a new version");
+  const materialTwo = await postMaterialFile("工程质量要求.txt", "代码评审应检查正确性、可维护性和测试覆盖。提交前应执行自动化测试并处理失败。", {
+    name: "工程质量要求",
+    description: "工程质量资料",
+    tags: "工程质量，评审",
+  }, contentUserHeaders);
+  assert(materialTwo.status === "ready" && materialTwo.sourceType === "file", "TXT material upload is parsed");
+  const materialList = await getJson("/api/materials?status=ready&page=1&pageSize=20", { headers: contentUserHeaders });
+  assert(materialList.total === 2, "material list returns created sources");
+
   const generationSpec = {
     paperName: "核心能力测评",
     direction: "JavaScript 工程实践",
@@ -267,9 +298,21 @@ try {
     typeScores: { single: 2, multiple: 4, judge: 2, blank: 2, short: 5, essay: 10 },
     knowledge: ["语言基础", "工程质量"],
     requirements: "题干清晰，答案明确。",
+    sourcePlan: {
+      mode: "mixed",
+      materialIds: [materialOne.id, materialTwo.id],
+      materialQuestionCount: 2,
+      coverageStrategy: "balanced",
+    },
   };
   const generated = await generateQuestionsAsync(generationSpec, contentUserHeaders);
   assert(generated.questions.length === 4 && generated.spec.totalScore === 10, "AI mock generation respects retained paper specification");
+  const materialQuestions = generated.questions.filter((question) => question.origin?.type === "material");
+  const independentQuestions = generated.questions.filter((question) => question.origin?.type === "ai");
+  assert(materialQuestions.length === 2 && independentQuestions.length === 2, "mixed generation respects material and independent AI quotas");
+  assert(new Set(materialQuestions.flatMap((question) => question.origin.materialRefs.map((ref) => ref.materialId))).size === 2, "balanced material generation covers multiple selected materials");
+  assert(materialQuestions.every((question) => question.origin.materialRefs.every((ref) => ref.excerpt && Number.isFinite(ref.version))), "material questions preserve versioned evidence excerpts");
+  assert(generated.spec.sourcePlan.materials.find((item) => item.id === materialOne.id)?.version === 2, "generation freezes the current material version");
   const previewDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
   assert(previewDashboard.questions.length === 0, "unsaved generation does not mutate runtime content");
 
@@ -296,6 +339,13 @@ try {
   const paper = published;
   const paperDetail = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
   assert(paperDetail.questions.length === 4 && paperDetail.status === "已发布", "paper detail returns the published snapshot");
+  assert(paperDetail.sourcePlanSnapshot.materialQuestionCount === 2 && paperDetail.sourcePlanSnapshot.materials.length === 2, "paper snapshot preserves source allocation and material versions");
+  const usages = await getJson(`/api/materials/${materialOne.id}/usages`, { headers: contentUserHeaders });
+  assert(usages.items.some((item) => item.paperId === paper.id && item.questionCount >= 1), "material usage links back to published papers");
+  const archivedMaterial = await postJson(`/api/materials/${materialOne.id}/archive`, {}, { headers: contentUserHeaders });
+  assert(archivedMaterial.status === "archived", "material can be archived without deleting historical evidence");
+  const archivedPaperDetail = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
+  assert(archivedPaperDetail.questions.some((question) => question.origin?.materialRefs?.some((ref) => ref.materialId === materialOne.id && ref.version === 2)), "archiving material keeps historical paper evidence intact");
   const activated = await postJson(`/api/papers/${paper.id}/activate`, {}, { headers: contentUserHeaders });
   assert(activated.id === paper.id, "paper can be activated as current");
 
@@ -319,6 +369,21 @@ async function generateQuestionsAsync(spec, headers) {
     await delay(20);
   }
   throw new Error("AI generation timed out");
+}
+
+async function postMaterialFile(filename, content, fields, headers) {
+  const form = new FormData();
+  Object.entries(fields).forEach(([key, value]) => form.append(key, value));
+  form.append("file", new Blob([content], { type: "text/plain" }), filename);
+  const response = await fetch(`${baseUrl}/api/materials/upload`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch {}
+  if (response.status !== 201) throw new Error(`POST /api/materials/upload expected 201, received ${response.status}: ${JSON.stringify(payload)}`);
+  return payload;
 }
 
 async function verifyLegacyAdminNormalization() {

@@ -38,15 +38,87 @@ export function aiConfig() {
   };
 }
 
-export async function generateQuestions(spec = {}) {
+export async function generateQuestions(spec = {}, options = {}) {
   const config = aiConfig();
   const normalizedSpec = normalizeGenerationSpec(spec);
+  const sourcePlan = normalizeSourcePlan(spec.sourcePlan, normalizedSpec.count, options.materialSources);
+  if (sourcePlan.materialQuestionCount <= 0) {
+    options.onProgress?.(40, "AI 正在独立生成题目");
+    const result = await generateQuestionBatch(normalizedSpec, config, { originType: "ai" });
+    return {
+      source: result.source,
+      spec: { ...normalizedSpec, sourcePlan },
+      questions: result.questions,
+      checks: result.checks,
+    };
+  }
+
+  if (!options.materialSources?.length) {
+    throw new Error("未找到可用于出题的资料内容，请重新选择资料");
+  }
+
+  const materialTypeMix = allocateTypePlan(normalizedSpec.typeMix, sourcePlan.materialQuestionCount);
+  const aiTypeMix = normalizedSpec.typeMix.map((item) => ({
+    type: item.type,
+    count: item.count - (materialTypeMix.find((entry) => entry.type === item.type)?.count || 0),
+  })).filter((item) => item.count > 0);
+  const materialSpec = createBatchSpec(normalizedSpec, materialTypeMix);
+  const aiSpec = createBatchSpec(normalizedSpec, aiTypeMix);
+
+  options.onProgress?.(28, "正在读取并筛选出题资料");
+  const materialResult = await generateQuestionBatch(materialSpec, config, {
+    originType: "material",
+    materialSources: options.materialSources,
+    coverageStrategy: sourcePlan.coverageStrategy,
+    strictSource: true,
+  });
+  let aiResult = { source: materialResult.source, questions: [], checks: {} };
+  if (aiSpec.count > 0) {
+    options.onProgress?.(62, "AI 正在独立生成剩余题目");
+    aiResult = await generateQuestionBatch(aiSpec, config, { originType: "ai" });
+  }
+
+  options.onProgress?.(86, "正在合并并校验题目来源");
+  const questions = ensureUniqueMergedStems([...materialResult.questions, ...aiResult.questions]).map((question, index) => ({
+    ...question,
+    id: `q-${String(index + 1).padStart(3, "0")}`,
+  }));
+  const checks = validateQuestions(questions);
+  const specChecks = validateGenerationSpec(questions, normalizedSpec);
+  return {
+    source: config.mockMode ? "mock" : "provider",
+    spec: { ...normalizedSpec, sourcePlan },
+    questions,
+    checks: {
+      ...checks,
+      specPass: specChecks.failures.length === 0,
+      specFailures: specChecks.failures,
+      stabilityScore: Math.max(0, checks.stabilityScore - specChecks.failures.length * 8),
+    },
+  };
+}
+
+function ensureUniqueMergedStems(items) {
+  const seen = new Set();
+  return items.map((item, index) => {
+    const key = String(item.stem || "").replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
+    if (!key || !seen.has(key)) {
+      seen.add(key);
+      return item;
+    }
+    const suffix = item.origin?.type === "material" ? "依据出题资料" : "AI 独立命题";
+    const stem = `${item.stem}（${suffix} ${index + 1}）`;
+    seen.add(stem.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase());
+    return { ...item, stem };
+  });
+}
+
+async function generateQuestionBatch(normalizedSpec, config, batch = {}) {
   if (config.mockMode) {
     const generated = generateMockQuestions(normalizedSpec);
-    const finalized = finalizeGeneratedQuestions(generated, normalizedSpec);
+    const finalized = finalizeGeneratedQuestions(generated, normalizedSpec, batch);
     return {
       source: "mock",
-      spec: normalizedSpec,
       ...finalized,
     };
   }
@@ -60,7 +132,7 @@ export async function generateQuestions(spec = {}) {
   const prompt = [
     "你是严谨的考试命题专家。只允许输出 JSON，不允许输出 Markdown 或解释文本。",
     "JSON 根对象必须是 {\"questions\":[...]}，questions 必须是题目数组。",
-    "每道题字段必须包含 id,type,stem,options,answer,score,difficulty,knowledge,explanation,rubric,quality。",
+    `每道题字段必须包含 id,type,stem,options,answer,score,difficulty,knowledge,explanation,rubric,quality${batch.originType === "material" ? ",sourceRefs" : ""}。`,
     `考试目标：${normalizedSpec.title}`,
     `出题方向：${normalizedSpec.direction}`,
     `题目数量：${normalizedSpec.count}`,
@@ -76,6 +148,14 @@ export async function generateQuestions(spec = {}) {
     "quality 硬约束：客观题答案不能唯一确定时 quality 不得高于 84；多选题答案必须是数组且至少两个正确选项，否则 quality 不得高于 84；判断题答案只能是“正确”或“错误”，否则 quality 不得高于 84；填空题必须有明确参考答案，否则 quality 不得高于 84；简答和论述题必须包含可执行 rubric，rubric 为空或笼统时 quality 不得高于 84；题干与指定知识点或出题方向关联弱时 quality 不得高于 86；解析只是重复答案且没有解释依据时 quality 不得高于 88。",
     "自检要求：输出前逐题核对题干事实、选项、答案和解析是否一致；如果无法确认客观题答案，必须改写成可确定答案的题目。",
     "事实边界示例：localStorage/sessionStorage 不会随 HTTP 请求自动发送到服务器；Cookie 才会在满足 domain/path/SameSite/Secure 等条件时由浏览器随请求携带。",
+    ...(batch.originType === "material" ? [
+      "本批题目必须仅依据下方出题资料生成，不得使用资料之外的事实补充答案。",
+      "每道题的 sourceRefs 必须是数组，至少包含 materialId、version、chunkId、excerpt；excerpt 必须逐字来自对应资料片段。",
+      "多份资料需要尽量均衡覆盖；资料不足以形成可靠题目时应减少输出，禁止凭空补写。",
+      formatMaterialContext(batch.materialSources),
+    ] : [
+      "本批题目由 AI 独立生成，不得声明或伪造任何出题资料引用。",
+    ]),
   ].join("\n");
 
   let response;
@@ -120,13 +200,68 @@ export async function generateQuestions(spec = {}) {
   if (!generated.length) {
     throw new Error(`AI 返回内容中没有可识别的试题数组：${summarizeAiShape(parsed, content)}`);
   }
-  const finalized = finalizeGeneratedQuestions(generated, normalizedSpec);
+  const finalized = finalizeGeneratedQuestions(generated, normalizedSpec, batch);
 
   return {
     source: "provider",
-    spec: normalizedSpec,
     ...finalized,
   };
+}
+
+function normalizeSourcePlan(input = {}, count, materialSources = []) {
+  const requestedMode = ["ai-only", "mixed", "materials-only"].includes(input?.mode) ? input.mode : "ai-only";
+  let materialQuestionCount = requestedMode === "materials-only"
+    ? count
+    : clampNumber(input?.materialQuestionCount, 0, count, 0);
+  if (requestedMode === "ai-only") materialQuestionCount = 0;
+  const mode = materialQuestionCount <= 0 ? "ai-only" : materialQuestionCount >= count ? "materials-only" : "mixed";
+  return {
+    mode,
+    materialIds: materialSources.map((item) => item.id),
+    materialQuestionCount,
+    aiQuestionCount: count - materialQuestionCount,
+    coverageStrategy: input?.coverageStrategy === "best-match" ? "best-match" : "balanced",
+    materials: materialSources.map((item) => ({ id: item.id, name: item.name, version: item.version })),
+  };
+}
+
+function allocateTypePlan(typeMix, targetCount) {
+  const total = typeMix.reduce((sum, item) => sum + item.count, 0);
+  if (!total || targetCount <= 0) return [];
+  const allocations = typeMix.map((item, index) => {
+    const exact = item.count * targetCount / total;
+    return { type: item.type, count: Math.floor(exact), remainder: exact - Math.floor(exact), max: item.count, index };
+  });
+  let remaining = targetCount - allocations.reduce((sum, item) => sum + item.count, 0);
+  for (const item of [...allocations].sort((a, b) => b.remainder - a.remainder || a.index - b.index)) {
+    if (remaining <= 0) break;
+    if (item.count < item.max) {
+      item.count += 1;
+      remaining -= 1;
+    }
+  }
+  return allocations.filter((item) => item.count > 0).map(({ type, count }) => ({ type, count }));
+}
+
+function createBatchSpec(spec, typeMix) {
+  const count = typeMix.reduce((sum, item) => sum + item.count, 0);
+  const totalScore = typeMix.reduce((sum, item) => sum + item.count * spec.typeScores[item.type], 0);
+  return {
+    ...spec,
+    count,
+    totalScore,
+    typeMix,
+    typeMixText: typeMix.map((item) => `${item.type}${item.count}`).join("，"),
+    typeScoreText: typeMix.map((item) => `${item.type}每题${spec.typeScores[item.type]}分`).join("，"),
+  };
+}
+
+function formatMaterialContext(sources = []) {
+  const content = sources.flatMap((source) => source.chunks.map((chunk) => [
+    `[资料 ${source.name} | materialId=${source.id} | version=${source.version} | chunkId=${chunk.id}]`,
+    chunk.text,
+  ].join("\n"))).join("\n\n");
+  return `出题资料开始\n${content}\n出题资料结束`;
 }
 
 function buildAiRequest(config, prompt) {
@@ -295,6 +430,7 @@ export function buildPaper(sourceQuestions = questions, meta = {}) {
     publishedAt: meta.publishedAt || null,
     questionIds: selected.map((item) => item.id),
     buildSpec: meta.buildSpec || { targetScore, source: "preview" },
+    sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
     score,
     questionCount: selected.length,
     typeGroups,
@@ -310,6 +446,7 @@ function emptyPaper(meta = {}) {
     publishedAt: meta.publishedAt || null,
     questionIds: [],
     buildSpec: meta.buildSpec || null,
+    sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
     score: 0,
     questionCount: 0,
     typeGroups: {},
@@ -340,6 +477,7 @@ export function saveFormalPaper(sourceQuestions = questions, meta = {}) {
     source: "saved-reviewed-questions",
     eligibleCount: eligible.length,
     savedAt: new Date().toISOString(),
+    sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
   };
   return buildPaper(sourceQuestions, {
     ...meta,
@@ -348,6 +486,7 @@ export function saveFormalPaper(sourceQuestions = questions, meta = {}) {
     status: "草稿",
     questionIds: eligible.map((item) => item.id),
     buildSpec,
+    sourcePlanSnapshot: buildSpec.sourcePlanSnapshot,
   });
 }
 
@@ -562,9 +701,9 @@ function buildChoiceOptions(type, knowledge, index) {
   return [options[0], options[2], options[1], options[3]];
 }
 
-function finalizeGeneratedQuestions(items, spec) {
-  const normalized = normalizeGeneratedQuestions(items, spec);
-  const repaired = ensureSpecCompliance(normalized, spec);
+function finalizeGeneratedQuestions(items, spec, options = {}) {
+  const normalized = normalizeGeneratedQuestions(items, spec, options);
+  const repaired = ensureSpecCompliance(normalized, spec, options);
   const factRepaired = repairKnownObjectiveAnswers(repaired);
   const checks = validateQuestions(factRepaired);
   const specChecks = validateGenerationSpec(repaired, spec);
@@ -579,12 +718,12 @@ function finalizeGeneratedQuestions(items, spec) {
   };
 }
 
-function normalizeGeneratedQuestions(items, spec) {
+function normalizeGeneratedQuestions(items, spec, options = {}) {
   const source = Array.isArray(items) ? items : [];
-  return source.map((item, index) => normalizeGeneratedQuestion(item, index, spec));
+  return source.map((item, index) => normalizeGeneratedQuestion(item, index, spec, options));
 }
 
-function normalizeGeneratedQuestion(item = {}, index, spec) {
+function normalizeGeneratedQuestion(item = {}, index, spec, options = {}) {
   const type = normalizeQuestionType(item.type, spec.typeMix[index % spec.typeMix.length]?.type || "单选");
   const knowledge = normalizeList(item.knowledge).length ? normalizeList(item.knowledge) : [spec.knowledge[index % spec.knowledge.length]];
   const answer = normalizeAnswer(item.answer ?? item.correctAnswer ?? item.referenceAnswer, type);
@@ -602,6 +741,7 @@ function normalizeGeneratedQuestion(item = {}, index, spec) {
     rubric: Array.isArray(item.rubric) ? item.rubric.map((entry) => String(entry)) : [],
     quality: Math.max(70, Math.min(100, Number(item.quality || 88))),
     status: "待确认",
+    origin: normalizeQuestionOrigin(item, index, options),
   };
 
   if (["单选", "多选"].includes(type) && question.options.length < 2) {
@@ -612,6 +752,49 @@ function normalizeGeneratedQuestion(item = {}, index, spec) {
     question.rubric = ["概念准确", "覆盖关键步骤", "结合实际场景", "表达清晰"];
   }
   return question;
+}
+
+function normalizeQuestionOrigin(item, index, options = {}) {
+  if (options.originType !== "material") {
+    return { type: "ai", materialRefs: [], edited: Boolean(item.origin?.edited) };
+  }
+  const sources = options.materialSources || [];
+  const sourceMap = new Map(sources.map((source) => [source.id, source]));
+  const requested = Array.isArray(item.sourceRefs)
+    ? item.sourceRefs
+    : Array.isArray(item.origin?.materialRefs) ? item.origin.materialRefs : [];
+  const balancedSource = options.coverageStrategy === "balanced" && sources.length ? sources[index % sources.length] : null;
+  const refs = requested
+    .map((ref) => normalizeMaterialRef(ref, sourceMap))
+    .filter((ref) => ref && (!balancedSource || ref.materialId === balancedSource.id));
+  if (!refs.length && sources.length) {
+    const source = balancedSource || sources[index % sources.length];
+    const chunk = source.chunks[index % Math.max(1, source.chunks.length)] || source.chunks[0];
+    if (chunk) refs.push(materialRefFromChunk(source, chunk));
+  }
+  return { type: "material", materialRefs: refs, edited: Boolean(item.origin?.edited) };
+}
+
+function normalizeMaterialRef(ref = {}, sourceMap) {
+  const source = sourceMap.get(String(ref.materialId || ref.id || ""));
+  if (!source) return null;
+  const chunk = source.chunks.find((item) => item.id === ref.chunkId) || source.chunks[0];
+  if (!chunk) return null;
+  const requestedExcerpt = cleanText(ref.excerpt, "");
+  const excerpt = requestedExcerpt && chunk.text.includes(requestedExcerpt)
+    ? requestedExcerpt.slice(0, 360)
+    : chunk.text.slice(0, 220).trim();
+  return { materialId: source.id, name: source.name, version: source.version, chunkId: chunk.id, excerpt };
+}
+
+function materialRefFromChunk(source, chunk) {
+  return {
+    materialId: source.id,
+    name: source.name,
+    version: source.version,
+    chunkId: chunk.id,
+    excerpt: chunk.text.slice(0, 220).trim(),
+  };
 }
 
 function normalizeOptions(value) {
@@ -630,14 +813,16 @@ function normalizeOptions(value) {
   return [];
 }
 
-function ensureSpecCompliance(items, spec) {
+function ensureSpecCompliance(items, spec, options = {}) {
   const targetTypes = spec.typeMix.flatMap((item) => Array.from({ length: item.count }, () => item.type)).slice(0, spec.count);
   const output = [];
   for (let index = 0; index < spec.count; index += 1) {
     const targetType = targetTypes[index] || "单选";
     const existing = items[index] || {};
-    const question =
-      items[index] === undefined
+    if (items[index] === undefined && options.strictSource) {
+      throw new Error(`资料题生成数量不足：需要 ${spec.count} 道，实际 ${items.length} 道`);
+    }
+    const question = items[index] === undefined
         ? buildMockQuestion({
           id: `q-${String(index + 1).padStart(3, "0")}`,
           index,
@@ -648,7 +833,7 @@ function ensureSpecCompliance(items, spec) {
         })
         : { ...existing, type: targetType };
     question.id = `q-${String(index + 1).padStart(3, "0")}`;
-    output.push(normalizeGeneratedQuestion(question, index, spec));
+    output.push(normalizeGeneratedQuestion(question, index, spec, options));
   }
 
   return output.map((item) => ({

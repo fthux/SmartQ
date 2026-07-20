@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { generateQuestions } from "../lib/ai.js";
+import { loadState } from "../lib/runtime-store.js";
+import { resolveGenerationMaterials } from "./material-service.js";
 
 const generationJobs = new Map();
 const generationJobTtlMs = 30 * 60 * 1000;
@@ -31,7 +33,15 @@ export function getGenerationJob(id) {
 async function runGenerationJob(job, spec) {
   updateGenerationJob(job, { progress: 36, stage: "AI 正在生成题目" });
   try {
-    const result = await generateQuestions(spec);
+    const state = await loadState();
+    const requestedMaterialCount = Number(spec?.sourcePlan?.materialQuestionCount || 0);
+    const materialSources = requestedMaterialCount > 0 || spec?.sourcePlan?.mode === "materials-only"
+      ? await resolveGenerationMaterials(state, spec.sourcePlan, spec)
+      : [];
+    const result = await generateQuestions(spec, {
+      materialSources,
+      onProgress: (progress, stage) => updateGenerationJob(job, { progress, stage }),
+    });
     updateGenerationJob(job, {
       status: "done",
       progress: 100,

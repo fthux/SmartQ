@@ -3,8 +3,9 @@ import { publicUrl } from "./public-path.js";
 export async function request(path, options = {}) {
   const adminToken = localStorage.getItem("smartqAdminToken") || "";
   const useAdminToken = adminToken && path.startsWith("/api/") && !path.startsWith("/api/admin/login") && !["/api/health", "/api/config"].includes(path);
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers = {
-    "content-type": "application/json",
+    ...(isFormData ? {} : { "content-type": "application/json" }),
     ...(useAdminToken ? { authorization: `Bearer ${adminToken}` } : {}),
     ...(options.headers || {}),
   };

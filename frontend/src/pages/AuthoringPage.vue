@@ -5,6 +5,7 @@ import {
   Delete,
   DocumentChecked,
   Edit,
+  FolderOpened,
   MagicStick,
   Promotion,
   RefreshRight,
@@ -20,6 +21,9 @@ const {
   formLocked,
   totalQuestionCount,
   computedSpecTotalScore,
+  selectedSourceMaterials,
+  materialQuestionCount,
+  aiQuestionCount,
   paperTypeConfig,
   authoringQuestions,
   authoringReviewedCount,
@@ -32,6 +36,10 @@ const {
   openQuestionEditor,
   reviewQuestion,
   publishPaper,
+  openMaterialSelector,
+  removeSelectedMaterial,
+  manageMaterialsFromAuthoring,
+  toggleMaterialSelection,
   displayPaperStatus,
   workflowStatusText,
 } = useSmartQ();
@@ -40,6 +48,13 @@ const reviewSearch = ref("");
 const reviewStatus = ref("all");
 const reviewType = ref("all");
 const selectedQuestionId = ref("");
+const materialSearch = ref("");
+
+const sourceModeOptions = [
+  { label: "AI 独立生成", value: "ai-only" },
+  { label: "资料 + AI", value: "mixed" },
+  { label: "仅从资料出题", value: "materials-only" },
+];
 
 const reviewStatusOptions = [
   { label: "全部", value: "all" },
@@ -53,6 +68,20 @@ const activePaper = computed(() => state.authoringPaperId ? paper.value : {});
 const activeSpec = computed(() => state.generatedDraft?.spec
   || ((state.authoringPaperId || state.authoringNewDraftActive) ? state.dashboard?.generationTask : null)
   || state.spec);
+const activeSourcePlan = computed(() => activeSpec.value?.sourcePlan || {
+  mode: state.spec.sourceMode,
+  materialIds: state.spec.materialIds,
+  materialQuestionCount: materialQuestionCount.value,
+  aiQuestionCount: aiQuestionCount.value,
+  materials: selectedSourceMaterials.value,
+});
+const activeSourceMaterials = computed(() => activeSourcePlan.value?.materials?.length
+  ? activeSourcePlan.value.materials
+  : selectedSourceMaterials.value);
+const filteredMaterialOptions = computed(() => {
+  const keyword = materialSearch.value.trim().toLowerCase();
+  return state.materialManagement.options.filter((item) => !keyword || [item.name, item.description, item.filename, ...(item.tags || [])].join(" ").toLowerCase().includes(keyword));
+});
 const overviewQuestionCount = computed(() => activeQuestions.value.length || totalQuestionCount.value);
 const overviewTotalScore = computed(() => {
   if (activeQuestions.value.length) return activeQuestions.value.reduce((sum, item) => sum + Number(item.score || 0), 0);
@@ -104,6 +133,17 @@ watch(() => state.activeWorkflowStep, (step) => {
   if (nextPending) selectedQuestionId.value = nextPending.id;
 });
 
+watch([totalQuestionCount, () => state.spec.sourceMode], ([count, mode], previous = []) => {
+  if (mode !== "mixed") return;
+  if (count <= 1) {
+    state.spec.materialQuestionCount = 0;
+    return;
+  }
+  if (previous[1] !== "mixed" || Number(state.spec.materialQuestionCount || 0) <= 0) {
+    state.spec.materialQuestionCount = Math.max(1, Math.floor(count / 2));
+  }
+});
+
 function workflowButtonType(step) {
   if (step.status === "done") return "success";
   if (step.status === "active") return "primary";
@@ -135,6 +175,16 @@ function formatAnswer(question) {
 
 function questionKnowledge(question) {
   return Array.isArray(question?.knowledge) ? question.knowledge.join("、") : String(question?.knowledge || "未设置");
+}
+
+function questionSourceLabel(question) {
+  if (question?.origin?.type !== "material") return "AI 独立";
+  const names = [...new Set((question.origin.materialRefs || []).map((item) => item.name).filter(Boolean))];
+  return names.join("、") || "资料题";
+}
+
+function sourceModeLabel(mode) {
+  return { "ai-only": "AI 独立生成", mixed: "资料 + AI", "materials-only": "仅资料" }[mode] || "AI 独立生成";
 }
 
 function selectQuestion(question) {
@@ -248,6 +298,61 @@ function editPublishIssue(issue) {
             </div>
           </section>
 
+          <section class="workbench-section mt-3" data-question-source-plan>
+            <div class="section-heading">
+              <div>
+                <div class="flex items-center gap-2 text-sm font-black"><el-icon class="text-leaf"><FolderOpened /></el-icon>题目来源</div>
+                <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">资料题严格引用所选资料，AI 独立题不会携带资料正文</div>
+              </div>
+              <el-tag type="success" effect="plain">{{ sourceModeLabel(state.spec.sourceMode) }}</el-tag>
+            </div>
+
+            <el-segmented v-model="state.spec.sourceMode" class="mt-4 source-mode-control" :options="sourceModeOptions" :disabled="formLocked" aria-label="题目来源模式" />
+
+            <template v-if="state.spec.sourceMode !== 'ai-only'">
+              <div class="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-start sm:justify-between dark:border-night-border">
+                <div class="min-w-0 flex-1">
+                  <div class="text-xs font-black">已选出题资料</div>
+                  <div v-if="selectedSourceMaterials.length" class="mt-2 flex flex-wrap gap-2">
+                    <el-tag v-for="material in selectedSourceMaterials" :key="material.id" :closable="!formLocked" :disable-transitions="true" @close="removeSelectedMaterial(material.id)">
+                      {{ material.name }} · v{{ material.version }}
+                    </el-tag>
+                  </div>
+                  <div v-else class="mt-2 text-xs font-semibold text-slate-400">尚未选择资料</div>
+                  <div v-if="state.specFormErrors.materialIds" class="mt-2 text-xs font-bold text-coral">{{ state.specFormErrors.materialIds }}</div>
+                </div>
+                <el-button :icon="FolderOpened" :disabled="formLocked" @click="openMaterialSelector">选择资料</el-button>
+              </div>
+
+              <div class="mt-4 grid gap-4 md:grid-cols-[minmax(150px,1fr)_minmax(150px,1fr)_minmax(180px,1.2fr)]">
+                <el-form-item label="资料题数量" :error="state.specFormErrors.materialQuestionCount">
+                  <el-input-number
+                    v-model="state.spec.materialQuestionCount"
+                    :disabled="formLocked || state.spec.sourceMode === 'materials-only'"
+                    :min="state.spec.sourceMode === 'mixed' && totalQuestionCount > 1 ? 1 : 0"
+                    :max="state.spec.sourceMode === 'mixed' ? Math.max(0, totalQuestionCount - 1) : totalQuestionCount"
+                    controls-position="right"
+                    class="w-full"
+                  />
+                </el-form-item>
+                <el-form-item label="AI 独立题数量"><el-input-number :model-value="aiQuestionCount" disabled class="w-full" /></el-form-item>
+                <el-form-item label="资料覆盖策略">
+                  <el-select v-model="state.spec.coverageStrategy" :disabled="formLocked" class="w-full">
+                    <el-option label="均衡覆盖所选资料" value="balanced" />
+                    <el-option label="按内容相关性择优" value="best-match" />
+                  </el-select>
+                </el-form-item>
+              </div>
+              <el-alert
+                v-if="state.spec.coverageStrategy === 'balanced' && materialQuestionCount > 0 && selectedSourceMaterials.length > materialQuestionCount"
+                title="资料题数量少于所选资料数量，无法保证每份资料至少生成一道题"
+                type="warning"
+                show-icon
+                :closable="false"
+              />
+            </template>
+          </section>
+
           <section class="workbench-section mt-3" data-question-type-matrix>
             <div class="section-heading">
               <div>
@@ -290,6 +395,7 @@ function editPublishIssue(issue) {
             <el-table :data="state.generatedDraft.questions" class="mt-3" max-height="430" size="small" highlight-current-row @row-click="selectQuestion">
               <el-table-column type="index" label="#" width="54" />
               <el-table-column label="题型" width="86"><template #default="{ row }"><el-tag :type="questionTagType(row.type)" size="small">{{ row.type }}</el-tag></template></el-table-column>
+              <el-table-column label="来源" min-width="120" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.origin?.type === 'material' ? 'success' : 'info'" size="small" effect="plain">{{ questionSourceLabel(row) }}</el-tag></template></el-table-column>
               <el-table-column prop="stem" label="题干" min-width="260" show-overflow-tooltip />
               <el-table-column prop="difficulty" label="难度" width="68" />
               <el-table-column label="答案" min-width="110" show-overflow-tooltip><template #default="{ row }">{{ formatAnswer(row) }}</template></el-table-column>
@@ -329,6 +435,7 @@ function editPublishIssue(issue) {
             <el-table-column type="index" label="#" width="52" />
             <el-table-column label="状态" width="88"><template #default="{ row }"><el-tag :type="questionStatusTagType(row.status)" size="small">{{ row.status === '已校验' ? '已通过' : '待审核' }}</el-tag></template></el-table-column>
             <el-table-column label="题型" width="82"><template #default="{ row }"><el-tag :type="questionTagType(row.type)" size="small" effect="plain">{{ row.type }}</el-tag></template></el-table-column>
+            <el-table-column label="来源" min-width="120" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.origin?.type === 'material' ? 'success' : 'info'" size="small" effect="plain">{{ questionSourceLabel(row) }}</el-tag></template></el-table-column>
             <el-table-column prop="stem" label="题干" min-width="260" show-overflow-tooltip />
             <el-table-column prop="difficulty" label="难度" width="64" />
             <el-table-column label="答案" min-width="100" show-overflow-tooltip><template #default="{ row }">{{ formatAnswer(row) }}</template></el-table-column>
@@ -358,6 +465,8 @@ function editPublishIssue(issue) {
             <div><span>试卷总分</span><strong>{{ paper.score || overviewTotalScore }} 分</strong></div>
             <div><span>题目数量</span><strong>{{ paper.questionCount || authoringQuestions.length }} 题</strong></div>
             <div><span>审核状态</span><strong :class="authoringPendingReviewCount ? 'text-coral' : 'text-leaf'">{{ authoringPendingReviewCount ? `${authoringPendingReviewCount} 题待审核` : '全部通过' }}</strong></div>
+            <div><span>资料题</span><strong>{{ activeSourcePlan?.materialQuestionCount || 0 }} 题</strong></div>
+            <div><span>AI 独立题</span><strong>{{ activeSourcePlan?.aiQuestionCount ?? overviewQuestionCount }} 题</strong></div>
           </div>
 
           <div v-if="state.publishQualityFailures.length" class="mt-4">
@@ -399,6 +508,8 @@ function editPublishIssue(issue) {
           <dl class="summary-details mt-4">
             <div><dt>出题方向</dt><dd>{{ activeSpec?.direction || state.spec.direction || '未设置' }}</dd></div>
             <div><dt>知识点</dt><dd>{{ overviewKnowledge }}</dd></div>
+            <div><dt>题目来源</dt><dd>{{ sourceModeLabel(activeSourcePlan?.mode) }}</dd></div>
+            <div v-if="activeSourceMaterials.length"><dt>使用资料</dt><dd>{{ activeSourceMaterials.map((item) => `${item.name} v${item.version}`).join('、') }}</dd></div>
             <div><dt>审核进度</dt><dd>{{ authoringReviewedCount }}/{{ authoringQuestions.length || overviewQuestionCount }}</dd></div>
           </dl>
 
@@ -423,17 +534,52 @@ function editPublishIssue(issue) {
             </div>
             <p class="mt-3 text-sm font-bold leading-6">{{ selectedQuestion.stem }}</p>
             <div class="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">{{ selectedQuestion.difficulty }} · {{ questionKnowledge(selectedQuestion) }}</div>
+            <div class="mt-2 flex flex-wrap items-center gap-1">
+              <el-tag :type="selectedQuestion.origin?.type === 'material' ? 'success' : 'info'" size="small" effect="plain">{{ questionSourceLabel(selectedQuestion) }}</el-tag>
+              <el-tag v-if="selectedQuestion.origin?.edited" size="small" type="warning" effect="plain">已人工修改</el-tag>
+            </div>
             <ol v-if="selectedQuestion.options?.length" class="mt-3 space-y-1 text-xs leading-5">
               <li v-for="(option, index) in selectedQuestion.options" :key="index"><strong>{{ String.fromCharCode(65 + index) }}.</strong> {{ option }}</li>
             </ol>
             <div class="question-answer mt-3"><span>答案</span><strong>{{ formatAnswer(selectedQuestion) }}</strong></div>
             <div v-if="selectedQuestion.explanation" class="mt-3 text-xs leading-5 text-slate-600 dark:text-slate-300"><strong>解析：</strong>{{ selectedQuestion.explanation }}</div>
             <div v-if="selectedQuestion.rubric?.length" class="mt-3 text-xs leading-5 text-slate-600 dark:text-slate-300"><strong>评分规则：</strong>{{ selectedQuestion.rubric.join('；') }}</div>
+            <div v-if="selectedQuestion.origin?.materialRefs?.length" class="source-evidence mt-3">
+              <div class="text-xs font-black">资料依据</div>
+              <div v-for="ref in selectedQuestion.origin.materialRefs" :key="`${ref.materialId}-${ref.chunkId}`" class="mt-2">
+                <div class="text-[11px] font-bold text-leaf">{{ ref.name }} · v{{ ref.version }}</div>
+                <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">{{ ref.excerpt }}</p>
+              </div>
+            </div>
             <el-button v-if="visibleWorkflowStep === 'review'" class="mt-3 w-full" :icon="Edit" @click="openQuestionEditor(selectedQuestion)">编辑当前题目</el-button>
           </div>
         </div>
       </aside>
     </div>
+
+    <el-dialog v-model="state.materialManagement.selectorOpen" title="选择出题资料" width="780px" top="6vh" append-to-body>
+      <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <el-input v-model="materialSearch" clearable :prefix-icon="Search" placeholder="搜索资料名称、标签或文件名" />
+        <el-button text type="primary" :icon="FolderOpened" @click="manageMaterialsFromAuthoring">管理出题资料</el-button>
+      </div>
+      <el-table v-loading="state.materialManagement.optionsLoading" :data="filteredMaterialOptions" class="mt-4" max-height="440" empty-text="暂无可用资料">
+        <el-table-column width="52">
+          <template #default="{ row }"><el-checkbox :model-value="state.spec.materialIds.includes(row.id)" :aria-label="`选择${row.name}`" @change="toggleMaterialSelection(row.id)" /></template>
+        </el-table-column>
+        <el-table-column label="资料" min-width="260">
+          <template #default="{ row }">
+            <div class="font-black">{{ row.name }}</div>
+            <div class="mt-1 text-xs font-semibold text-slate-400">{{ row.filename || '纯文本资料' }} · v{{ row.version }} · {{ row.textLength }} 字</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="标签" min-width="180"><template #default="{ row }"><div class="flex flex-wrap gap-1"><el-tag v-for="tag in row.tags || []" :key="tag" size="small" effect="plain">{{ tag }}</el-tag><span v-if="!row.tags?.length" class="text-xs text-slate-400">未设置</span></div></template></el-table-column>
+        <el-table-column label="使用" width="100"><template #default="{ row }">{{ row.paperUsageCount }} 卷</template></el-table-column>
+      </el-table>
+      <template #footer>
+        <span class="mr-auto text-xs font-bold text-slate-500 dark:text-slate-400">已选择 {{ state.spec.materialIds.length }} 份资料</span>
+        <el-button @click="state.materialManagement.selectorOpen = false">完成选择</el-button>
+      </template>
+    </el-dialog>
 
     <footer class="authoring-action-bar" data-authoring-action-bar>
       <div class="min-w-0">
@@ -538,6 +684,16 @@ function editPublishIssue(issue) {
   border-radius: 6px;
   background: var(--el-fill-color-lighter);
   padding: 10px 12px;
+}
+
+.source-mode-control {
+  width: min(100%, 520px);
+}
+
+.source-evidence {
+  border-left: 3px solid var(--el-color-success-light-5);
+  background: var(--el-fill-color-lighter);
+  padding: 9px 10px;
 }
 
 .type-matrix-table :deep(.el-table__cell) {

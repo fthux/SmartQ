@@ -15,7 +15,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:3000",
+      "/api": process.env.SMARTQ_API_PROXY || "http://127.0.0.1:3000",
     },
   },
   build: {

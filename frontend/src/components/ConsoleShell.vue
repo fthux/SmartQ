@@ -4,6 +4,7 @@ import {
   ArrowDown,
   Check,
   Files,
+  FolderOpened,
   Fold,
   FullScreen,
   Loading,
@@ -17,6 +18,7 @@ import {
   User,
 } from "@element-plus/icons-vue";
 import AuthoringPage from "../pages/AuthoringPage.vue";
+import MaterialsPage from "../pages/MaterialsPage.vue";
 import PapersPage from "../pages/PapersPage.vue";
 import ProfilePage from "../pages/ProfilePage.vue";
 import UsersPage from "../pages/UsersPage.vue";
@@ -43,6 +45,7 @@ const {
 const iconMap = {
   files: Files,
   sparkles: MagicStick,
+  folder: FolderOpened,
   "user-round": User,
   users: Management,
 };
@@ -189,6 +192,7 @@ async function handleThemePreference(theme) {
         <div v-else data-admin-route-content>
           <AuthoringPage v-if="state.route === 'authoring'" />
           <PapersPage v-if="state.route === 'papers'" />
+          <MaterialsPage v-if="state.route === 'materials'" />
           <UsersPage v-if="state.route === 'users'" />
           <ProfilePage v-if="state.route === 'profile'" />
           <PaperDetailDrawer />

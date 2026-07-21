@@ -1,8 +1,7 @@
-import { ElMessageBox, ElNotification } from "element-plus";
-import "element-plus/theme-chalk/el-notification.css";
+import { ElMessageBox } from "element-plus";
 import "element-plus/theme-chalk/el-message-box.css";
 
-export function createAuthStore({ state, request, notify, refresh, canAccessRoute, go, mountIcons, resetSessionState }) {
+export function createAuthStore({ state, request, notify, go, mountIcons, resetSessionState, redirectToAdminLogin, resumeAdminRoute }) {
   function toggleAdminMenu() {
     state.admin.menuOpen = !state.admin.menuOpen;
     state.ui.themeMenuOpen = false;
@@ -22,6 +21,7 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
   function handleAdminAuthError(error) {
     const message = String(error?.message || "");
     if (error?.status === 401 || message.includes("控制台登录") || message.includes("请先登录控制台")) {
+      redirectToAdminLogin();
       state.admin.token = "";
       state.admin.user = null;
       state.admin.menuOpen = false;
@@ -66,8 +66,7 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
       if (state.admin.rememberUsername) localStorage.setItem("smartqAdminUsername", username);
       else localStorage.removeItem("smartqAdminUsername");
       notify("登录成功");
-      if (!canAccessRoute(state.route)) go("papers");
-      await refresh();
+      await resumeAdminRoute();
     } catch (error) {
       state.admin.error = error.message || "登录失败";
     } finally {
@@ -96,6 +95,7 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
     state.admin.menuOpen = false;
     resetSessionState();
     localStorage.removeItem("smartqAdminToken");
+    redirectToAdminLogin({ rememberRoute: false });
     notify("已退出控制台");
     mountIcons();
   }
@@ -141,12 +141,12 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
     state.profile.error = "";
     if (!displayName) {
       state.profile.error = "请输入显示名称";
-      notifyProfileSaveError(state.profile.error);
+      notify(state.profile.error, "error");
       return;
     }
     if (displayName.length > 32) {
       state.profile.error = "显示名称不能超过 32 个字符";
-      notifyProfileSaveError(state.profile.error);
+      notify(state.profile.error, "error");
       return;
     }
     state.profile.saving = true;
@@ -158,13 +158,10 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
       state.admin.user = result.admin;
       releaseProfilePreview();
       syncProfileForm();
-      ElNotification.success({
-        title: "保存成功",
-        message: "个人资料已保存",
-      });
+      notify("个人资料已保存");
     } catch (error) {
       state.profile.error = error.message || "个人资料保存失败";
-      notifyProfileSaveError(state.profile.error);
+      notify(state.profile.error, "error");
     } finally {
       state.profile.saving = false;
       mountIcons();
@@ -175,19 +172,23 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
     state.password.error = "";
     if (!state.password.currentPassword) {
       state.password.error = "请输入当前密码";
+      notify(state.password.error, "error");
       return;
     }
     const passwordError = validatePassword(state.password.newPassword);
     if (passwordError) {
       state.password.error = passwordError;
+      notify(state.password.error, "error");
       return;
     }
     if (state.password.currentPassword === state.password.newPassword) {
       state.password.error = "新密码不能与当前密码相同";
+      notify(state.password.error, "error");
       return;
     }
     if (state.password.newPassword !== state.password.confirmPassword) {
       state.password.error = "两次输入的新密码不一致";
+      notify(state.password.error, "error");
       return;
     }
     state.password.saving = true;
@@ -206,6 +207,7 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
       notify("登录密码已更新");
     } catch (error) {
       state.password.error = error.message || "密码修改失败";
+      notify(state.password.error, "error");
     } finally {
       state.password.saving = false;
     }
@@ -271,16 +273,10 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
       releaseProfilePreview();
       state.profile.avatarFile = null;
       state.profile.avatarPreview = result.admin.avatar || "";
-      ElNotification.success({
-        title: "恢复成功",
-        message: "已恢复默认头像",
-      });
+      notify("已恢复默认头像");
     } catch (error) {
       state.profile.error = error.message || "默认头像恢复失败";
-      ElNotification.error({
-        title: "恢复失败",
-        message: state.profile.error,
-      });
+      notify(state.profile.error, "error");
     } finally {
       state.profile.resettingAvatar = false;
       mountIcons();
@@ -314,13 +310,6 @@ function validatePassword(value) {
   if (password.length > 128) return "密码不能超过 128 个字符";
   if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) return "密码必须同时包含字母和数字";
   return "";
-}
-
-function notifyProfileSaveError(message) {
-  ElNotification.error({
-    title: "保存失败",
-    message,
-  });
 }
 
 function loadImageDimensions(file) {

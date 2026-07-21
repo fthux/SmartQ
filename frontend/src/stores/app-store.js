@@ -17,7 +17,7 @@ import {
   workflowStatusText,
 } from "../core/presentation.js";
 import { cleanupLegacyServiceWorkers, publicUrl } from "../core/public-path.js";
-import { currentAuthoringPaperId, currentRoute, formatRouteHash } from "../core/router.js";
+import { ADMIN_LOGIN_HASH, currentAuthoringPaperId, currentRoute, formatRouteHash, isAdminLoginRoute, parseHashRoute } from "../core/router.js";
 import { createAuthStore } from "./auth-store.js";
 import { createAuthoringStore } from "./authoring-store.js";
 import { createPapersStore } from "./papers-store.js";
@@ -29,6 +29,8 @@ import { createUsersStore } from "./users-store.js";
 import { computed, onMounted, reactive, watch } from "vue";
 
 cleanupLegacyServiceWorkers();
+
+const ADMIN_LOGIN_RETURN_KEY = "smartqAdminLoginReturnTo";
 
 export function createAppStore() {
     const state = reactive({
@@ -385,11 +387,11 @@ export function createAppStore() {
       state,
       request,
       notify,
-      refresh: (...args) => refresh(...args),
-      canAccessRoute: (...args) => canAccessRoute(...args),
       go: (...args) => go(...args),
       mountIcons,
       resetSessionState,
+      redirectToAdminLogin,
+      resumeAdminRoute,
     });
     const {
       applyAdminUserFilters,
@@ -585,6 +587,60 @@ export function createAppStore() {
       mountIcons();
     }
 
+    function redirectToAdminLogin(options = {}) {
+      const rememberRoute = options.rememberRoute !== false;
+      if (!rememberRoute) {
+        sessionStorage.removeItem(ADMIN_LOGIN_RETURN_KEY);
+      } else if (!isAdminLoginRoute()) {
+        const parsed = parseHashRoute();
+        const route = canAccessRoute(parsed.route) ? parsed.route : (canAccessRoute(state.route) ? state.route : "papers");
+        const params = canAccessRoute(parsed.route)
+          ? Object.fromEntries(parsed.params.entries())
+          : route === "authoring" && state.authoringPaperId ? { paperid: state.authoringPaperId } : {};
+        sessionStorage.setItem(ADMIN_LOGIN_RETURN_KEY, JSON.stringify({ route, params }));
+      }
+      if (location.hash !== ADMIN_LOGIN_HASH) {
+        history.replaceState(null, "", `${location.pathname}${location.search}${ADMIN_LOGIN_HASH}`);
+      }
+    }
+
+    async function resumeAdminRoute() {
+      const target = consumeAdminLoginReturnTarget();
+      go(target.route, target.params);
+      await refresh();
+      if (!state.admin.token) return;
+      if (target.route === "authoring") {
+        await loadMaterialOptions();
+        const paperId = target.params.paperid || target.params.paperId || target.params.papeid || "";
+        if (paperId && state.dashboard?.paper?.id !== paperId) {
+          try {
+            await activatePaper(paperId, { silent: true });
+          } catch {
+            go("papers");
+            notify("登录前的试卷已无法打开，已返回试卷管理", "warning");
+          }
+        }
+      }
+    }
+
+    function consumeAdminLoginReturnTarget() {
+      const fallback = {
+        route: canAccessRoute(state.route) ? state.route : "papers",
+        params: state.route === "authoring" && state.authoringPaperId ? { paperid: state.authoringPaperId } : {},
+      };
+      const raw = sessionStorage.getItem(ADMIN_LOGIN_RETURN_KEY);
+      sessionStorage.removeItem(ADMIN_LOGIN_RETURN_KEY);
+      if (!raw) return fallback;
+      try {
+        const target = JSON.parse(raw);
+        return canAccessRoute(target?.route) && target.params && typeof target.params === "object"
+          ? { route: target.route, params: target.params }
+          : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
     function syncRecoveredDraftSpec(spec) {
       if (!spec || typeof spec !== "object") return;
       state.spec = freshSpec({
@@ -690,6 +746,17 @@ export function createAppStore() {
 
     onMounted(async () => {
       window.addEventListener("hashchange", () => {
+        if (!state.admin.token) {
+          state.route = currentRoute();
+          state.authoringPaperId = currentAuthoringPaperId();
+          redirectToAdminLogin();
+          mountIcons();
+          return;
+        }
+        if (isAdminLoginRoute()) {
+          go("papers");
+          return;
+        }
         state.route = currentRoute();
         if (state.admin.token && !canAccessRoute(state.route)) {
           state.route = "papers";
@@ -727,9 +794,20 @@ export function createAppStore() {
         state.systemLimits.materialFileMaxBytes = Number(health.limits?.materialFileMaxBytes || state.systemLimits.materialFileMaxBytes);
       }).catch(() => {});
       if (state.route === "authoring" && state.authoringPaperId) state.activeWorkflowStep = "edit";
+      if (!state.admin.token) {
+        redirectToAdminLogin();
+        return;
+      }
       await loadAdminSession();
+      if (!state.admin.token) return;
+      if (isAdminLoginRoute()) {
+        await resumeAdminRoute();
+        return;
+      }
       await refresh();
+      if (!state.admin.token) return;
       await loadQuestionBankCategories();
+      if (!state.admin.token) return;
       if (state.route === "users") await loadAdminUsers();
       if (state.route === "question-bank") {
         await loadQuestionBankCategories();

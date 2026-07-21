@@ -329,6 +329,7 @@ export function createAuthoringStore({
       notify("AI 正在生成修改方案，请稍候再关闭");
       return;
     }
+    if (state.questionSaving) return;
     const initialForm = editorFormFromQuestion(state.editingQuestion);
     const changed = JSON.stringify(initialForm) !== JSON.stringify(state.questionEditForm) || Boolean(state.questionAi.candidate);
     if (changed) {
@@ -348,7 +349,7 @@ export function createAuthoringStore({
 
   async function runQuestionAiTransform(operation) {
     const form = state.questionEditForm;
-    if (!form?.id || state.questionAi.loading) return;
+    if (!form?.id || questionEditorLocked()) return;
     if (operation === "custom" && !String(state.questionAi.customPrompt || "").trim()) {
       state.questionAi.error = "请输入希望 AI 如何修改这道题";
       return;
@@ -380,7 +381,7 @@ export function createAuthoringStore({
 
   function applyQuestionAiCandidate() {
     const candidate = state.questionAi.candidate;
-    if (!candidate || !state.questionEditForm) return;
+    if (!candidate || !state.questionEditForm || questionEditorLocked()) return;
     state.questionAi.previousForm = cloneValue(state.questionEditForm);
     state.questionEditForm = editorFormFromQuestion({
       ...candidate,
@@ -395,6 +396,7 @@ export function createAuthoringStore({
   }
 
   function discardQuestionAiCandidate() {
+    if (questionEditorLocked()) return;
     state.questionAi.candidate = null;
     state.questionAi.changedFields = [];
     state.questionAi.warnings = [];
@@ -402,7 +404,7 @@ export function createAuthoringStore({
   }
 
   function undoQuestionAiChange() {
-    if (!state.questionAi.previousForm) return;
+    if (!state.questionAi.previousForm || questionEditorLocked()) return;
     state.questionEditForm = cloneValue(state.questionAi.previousForm);
     state.questionAi.previousForm = null;
     state.questionAi.appliedOperation = "";
@@ -413,13 +415,13 @@ export function createAuthoringStore({
   function moveQuestionOption(index, offset) {
     const form = state.questionEditForm;
     const target = index + offset;
-    if (!form || !["单选", "多选"].includes(form.type) || target < 0 || target > 3) return;
+    if (!form || questionEditorLocked() || !["单选", "多选"].includes(form.type) || target < 0 || target > 3) return;
     swapQuestionOptions(form, index, target);
   }
 
   function moveSingleCorrectAnswer(targetLetter) {
     const form = state.questionEditForm;
-    if (!form || form.type !== "单选") return;
+    if (!form || questionEditorLocked() || form.type !== "单选") return;
     const currentIndex = optionIndex(form.answerSingle);
     const targetIndex = optionIndex(targetLetter);
     if (currentIndex < 0 || targetIndex < 0 || currentIndex === targetIndex) return;
@@ -428,7 +430,7 @@ export function createAuthoringStore({
 
   async function saveQuestionEdit() {
     const form = state.questionEditForm;
-    if (!form?.id) return;
+    if (!form?.id || questionEditorLocked()) return;
     const errors = validateQuestionEditForm(form);
     state.questionEditErrors = errors;
     if (!showFirstFormError(errors)) return;
@@ -471,6 +473,10 @@ export function createAuthoringStore({
       previousForm: null,
       appliedOperation: "",
     });
+  }
+
+  function questionEditorLocked() {
+    return state.questionSaving || state.questionAi.loading;
   }
 
   function swapQuestionOptions(form, leftIndex, rightIndex) {

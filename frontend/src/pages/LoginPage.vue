@@ -32,8 +32,6 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
               <el-input v-model="state.admin.password" type="password" autocomplete="current-password" placeholder="请输入密码" show-password size="large" :prefix-icon="Lock" />
             </el-form-item>
 
-            <el-alert class="mb-4" title="请使用分配给你的控制台账号登录，不要向他人透露登录密码。" type="info" :closable="false" show-icon />
-
             <el-alert v-if="state.admin.error" class="mb-4" :title="state.admin.error" type="error" :closable="false" show-icon />
 
             <el-button class="w-full" type="primary" size="large" native-type="submit" :loading="state.admin.loading">

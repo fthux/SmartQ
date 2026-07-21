@@ -4,6 +4,8 @@ import { logItem } from "../lib/audit.js";
 
 const scrypt = promisify(scryptCallback);
 const passwordKeyLength = 64;
+const defaultAdminUsername = "admin";
+const previousDefaultAdminUsername = "kongdao123";
 
 export async function initializeAdminUsers(state) {
   const before = JSON.stringify({
@@ -13,6 +15,7 @@ export async function initializeAdminUsers(state) {
   });
   const profiles = state.adminProfiles && typeof state.adminProfiles === "object" ? state.adminProfiles : {};
   let users = normalizeStoredUsers(state.adminUsers);
+  migrateBootstrapAdminUsername(state, users);
 
   if (!users.length) {
     const accounts = loadBootstrapAccounts();
@@ -284,9 +287,27 @@ function normalizeStoredUser(item = {}) {
 function loadBootstrapAccounts() {
   const configured = parseBootstrapAccounts(process.env.SMARTQ_ADMIN_ACCOUNTS);
   if (configured.length) return configured;
-  const username = String(process.env.SMARTQ_ADMIN_USER || "admin").trim() || "admin";
-  const password = String(process.env.SMARTQ_ADMIN_PASSWORD || "123456");
+  const username = String(process.env.SMARTQ_ADMIN_USER || defaultAdminUsername).trim() || defaultAdminUsername;
+  const password = String(process.env.SMARTQ_ADMIN_PASSWORD || "kongdao123");
   return [{ username, password }];
+}
+
+function migrateBootstrapAdminUsername(state, users) {
+  if (users.some((user) => user.username.toLowerCase() === defaultAdminUsername)) return;
+  const target = users.find((user) => user.username.toLowerCase() === previousDefaultAdminUsername && user.createdBy === "bootstrap");
+  if (!target) return;
+  const previousUsername = target.username;
+  target.username = defaultAdminUsername;
+  target.authVersion += 1;
+  target.updatedAt = new Date().toISOString();
+  const revokedSessions = revokeAdminUserSessions(state, target.id);
+  state.auditLog = Array.isArray(state.auditLog) ? state.auditLog : [];
+  state.auditLog.push(logItem("admin-account-username-migrate", `${previousUsername} 登录账号已迁移为 ${defaultAdminUsername}`, {
+    userId: target.id,
+    previousUsername,
+    username: target.username,
+    revokedSessions,
+  }));
 }
 
 function parseBootstrapAccounts(raw = "") {

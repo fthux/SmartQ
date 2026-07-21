@@ -15,7 +15,7 @@ import { changeAdminPassword } from "../services/admin-user-service.js";
 export async function handleAdminLoginRoute(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/admin/login") {
     const body = await readJson(req);
-    const result = await updateState((current) => loginAdmin(current, body, req));
+    const result = await updateState((current) => loginAdmin(current, body));
     if (result.error) {
       sendJson(res, result.statusCode || 401, result);
       return true;

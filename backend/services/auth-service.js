@@ -6,11 +6,6 @@ import {
   verifyAdminPassword,
 } from "./admin-user-service.js";
 
-const loginSecurity = {
-  maxFailures: Number(process.env.SMARTQ_LOGIN_MAX_FAILURES || 5),
-  windowMs: Number(process.env.SMARTQ_LOGIN_WINDOW_SECONDS || 15 * 60) * 1000,
-  lockMs: Number(process.env.SMARTQ_LOGIN_LOCK_SECONDS || 10 * 60) * 1000,
-};
 export const maxAdminAvatarBytes = 100 * 1024;
 
 export function requiresAdminAuth(req, url) {
@@ -20,31 +15,18 @@ export function requiresAdminAuth(req, url) {
   return true;
 }
 
-export async function loginAdmin(state, body = {}, req = {}) {
+export async function loginAdmin(state, body = {}) {
   const username = String(body.username || "").trim();
   const password = String(body.password || "");
   if (!username || !password) return { error: "请输入登录账号和密码", statusCode: 400 };
-  const attemptKey = loginAttemptKey("admin", username || "unknown", req);
-  const limit = checkLoginLimit(state, attemptKey);
-  if (limit.blocked) {
-    state.auditLog.push(logItem("admin-login-blocked", `${username || "unknown"} 管理员登录被限流`, {
-      identifier: username || "unknown",
-      retryAfterSeconds: limit.retryAfterSeconds,
-    }));
-    return loginLockedResponse(limit);
-  }
   const user = findAdminUser(state, username);
   const passwordMatches = user ? await verifyAdminPassword(password, user.passwordHash) : false;
   if (!user || !passwordMatches) {
-    const failure = recordLoginFailure(state, attemptKey);
     state.auditLog.push(logItem("admin-login-failed", `${username || "unknown"} 管理员登录失败`, {
       identifier: username || "unknown",
-      failures: failure.failures,
-      lockedUntil: failure.lockedUntil || null,
     }));
     return { error: "登录账号或密码错误", statusCode: 401 };
   }
-  clearLoginFailures(state, attemptKey);
   if (user.status !== "active") {
     state.auditLog.push(logItem("admin-login-disabled", `${username} 已停用账号尝试登录`, { identifier: username }));
     return { error: "账号已停用，请联系管理员", statusCode: 403 };
@@ -190,76 +172,6 @@ function webpDimensions(buffer) {
     return { width: buffer.readUInt16LE(26) & 0x3fff, height: buffer.readUInt16LE(28) & 0x3fff };
   }
   return null;
-}
-
-function checkLoginLimit(state, key) {
-  const bucket = loginAttemptBucket(state, key);
-  const lockedUntil = new Date(bucket.lockedUntil || 0).getTime();
-  if (lockedUntil && lockedUntil > Date.now()) {
-    return {
-      blocked: true,
-      retryAfterSeconds: Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000)),
-      lockedUntil: bucket.lockedUntil,
-    };
-  }
-  if (lockedUntil) {
-    delete bucket.lockedUntil;
-    bucket.failures = 0;
-  }
-  return { blocked: false };
-}
-
-function recordLoginFailure(state, key) {
-  const bucket = loginAttemptBucket(state, key);
-  const now = Date.now();
-  const firstFailureAt = new Date(bucket.firstFailureAt || 0).getTime();
-  if (!firstFailureAt || now - firstFailureAt > loginSecurity.windowMs) {
-    bucket.failures = 0;
-    bucket.firstFailureAt = new Date(now).toISOString();
-  }
-  bucket.failures = Number(bucket.failures || 0) + 1;
-  bucket.lastFailureAt = new Date(now).toISOString();
-  if (bucket.failures >= loginSecurity.maxFailures) bucket.lockedUntil = new Date(now + loginSecurity.lockMs).toISOString();
-  return bucket;
-}
-
-function clearLoginFailures(state, key) {
-  if (state.loginSecurity?.attempts) delete state.loginSecurity.attempts[key];
-}
-
-function loginAttemptBucket(state, key) {
-  state.loginSecurity = state.loginSecurity && typeof state.loginSecurity === "object" ? state.loginSecurity : {};
-  state.loginSecurity.attempts = state.loginSecurity.attempts && typeof state.loginSecurity.attempts === "object" ? state.loginSecurity.attempts : {};
-  state.loginSecurity.attempts = pruneLoginAttempts(state.loginSecurity.attempts);
-  if (!state.loginSecurity.attempts[key]) state.loginSecurity.attempts[key] = { failures: 0 };
-  return state.loginSecurity.attempts[key];
-}
-
-function pruneLoginAttempts(attempts = {}) {
-  const now = Date.now();
-  return Object.fromEntries(Object.entries(attempts || {}).filter(([, item]) => {
-    const lockedUntil = new Date(item?.lockedUntil || 0).getTime();
-    const lastFailureAt = new Date(item?.lastFailureAt || item?.firstFailureAt || 0).getTime();
-    return (lockedUntil && lockedUntil > now) || (lastFailureAt && now - lastFailureAt <= loginSecurity.windowMs);
-  }));
-}
-
-function loginLockedResponse(limit = {}) {
-  return {
-    error: `登录失败次数过多，请 ${limit.retryAfterSeconds || Math.ceil(loginSecurity.lockMs / 1000)} 秒后再试`,
-    statusCode: 429,
-    retryAfterSeconds: limit.retryAfterSeconds || Math.ceil(loginSecurity.lockMs / 1000),
-    lockedUntil: limit.lockedUntil || null,
-  };
-}
-
-function loginAttemptKey(scope, identifier, req = {}) {
-  return `${scope}:${String(identifier || "unknown").trim().toLowerCase()}:${clientIp(req)}`;
-}
-
-function clientIp(req = {}) {
-  const forwarded = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
-  return forwarded || req.socket?.remoteAddress || "local";
 }
 
 function pruneAdminSessions(sessions = {}) {

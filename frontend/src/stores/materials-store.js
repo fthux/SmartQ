@@ -3,6 +3,7 @@ import { ElMessageBox } from "element-plus";
 
 export function createMaterialsStore({ state, notify, go }) {
   async function loadMaterials() {
+    if (!state.admin.token) return;
     const management = state.materialManagement;
     management.loading = true;
     management.error = "";
@@ -14,6 +15,7 @@ export function createMaterialsStore({ state, notify, go }) {
       management.items = result.items || [];
       management.total = Number(result.total || 0);
     } catch (error) {
+      if (!state.admin.token || error?.status === 401) return;
       management.error = error.message || "出题资料加载失败";
     } finally {
       management.loading = false;
@@ -21,11 +23,13 @@ export function createMaterialsStore({ state, notify, go }) {
   }
 
   async function loadMaterialOptions() {
+    if (!state.admin.token) return;
     state.materialManagement.optionsLoading = true;
     try {
       const result = await request("/api/materials?status=ready&page=1&pageSize=1000");
       state.materialManagement.options = result.items || [];
     } catch (error) {
+      if (!state.admin.token || error?.status === 401) return;
       notify(`资料选项加载失败：${error.message}`);
     } finally {
       state.materialManagement.optionsLoading = false;

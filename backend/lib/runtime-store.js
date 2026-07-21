@@ -23,7 +23,7 @@ const storageStatus = resolveStorageStatus();
 const postgresStore = storageStatus.requestedAdapter === "postgres" ? createPostgresStore() : null;
 const legacySeedAuditPattern = /MVP|初始数据|题库初始化内容/;
 const legacySeedQuestionIdPattern = /^q-\d{3}$/;
-const retiredRuntimeKeys = ["sessions", "candidates", "participants", "groups", "answers", "gradingResults", "proctorRules"];
+const retiredRuntimeKeys = ["sessions", "candidates", "participants", "groups", "answers", "gradingResults", "proctorRules", "loginSecurity"];
 const retiredAuditTypePattern = /^(?:assignment|candidate|participant|group|proctor|exam|grading)(?:-|$)|^answer-save$/;
 
 let state = null;
@@ -449,7 +449,6 @@ function defaultState() {
     generationTask: null,
     adminSessions: {},
     adminUsers: [],
-    loginSecurity: defaultLoginSecurity(),
     auditLog: [
       {
         id: "log-init",
@@ -489,7 +488,6 @@ function normalizeState(input) {
     adminSessions: input.adminSessions && typeof input.adminSessions === "object" ? input.adminSessions : {},
     adminUsers: Array.isArray(input.adminUsers) ? input.adminUsers : [],
     ...(input.adminProfiles && typeof input.adminProfiles === "object" ? { adminProfiles: normalizeAdminProfiles(input.adminProfiles) } : {}),
-    loginSecurity: normalizeLoginSecurity(input.loginSecurity),
     auditLog,
   };
   const knownCategoryIds = new Set(normalized.questionBankCategories.map((item) => item.id));
@@ -528,18 +526,6 @@ function normalizeSourceMaterial(item) {
     createdBy: String(item.createdBy || ""),
     createdAt: item.createdAt || new Date().toISOString(),
     updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
-  };
-}
-
-function defaultLoginSecurity() {
-  return {
-    attempts: {},
-  };
-}
-
-function normalizeLoginSecurity(input = {}) {
-  return {
-    attempts: input?.attempts && typeof input.attempts === "object" ? input.attempts : {},
   };
 }
 

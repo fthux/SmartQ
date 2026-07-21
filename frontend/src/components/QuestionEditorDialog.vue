@@ -5,7 +5,9 @@ import {
   ArrowUp,
   Check,
   Close,
+  Loading,
   MagicStick,
+  QuestionFilled,
   RefreshRight,
 } from "@element-plus/icons-vue";
 import { useSmartQ } from "../stores/context.js";
@@ -24,6 +26,11 @@ const {
 
 const letters = ["A", "B", "C", "D"];
 const isChoice = computed(() => ["单选", "多选"].includes(state.questionEditForm?.type));
+const questionAiLoadingTitle = computed(() => ({
+  regenerate: "正在按原来源重新生成题目",
+  distractors: "正在重新生成干扰项",
+  custom: "正在生成自定义修改方案",
+}[state.questionAi.operation] || "AI 正在生成修改方案"));
 const sourceLabel = computed(() => {
   const origin = state.editingQuestion?.origin || {};
   if (origin.type === "question-bank") return `题库题 · ${origin.bankQuestionId || "已入库"} · v${origin.bankVersion || 1}`;
@@ -62,13 +69,32 @@ function changedFieldLabel(field) {
     top="3vh"
     append-to-body
     destroy-on-close
+    body-class="question-editor-dialog__body"
     :close-on-click-modal="false"
     :close-on-press-escape="!state.questionSaving && !state.questionAi.loading"
     :show-close="!state.questionSaving && !state.questionAi.loading"
     class="question-editor-dialog"
+    :aria-busy="state.questionAi.loading"
     @update:model-value="(value) => !value && requestCloseQuestionEditor()"
   >
-    <div v-if="state.questionEditForm" class="question-editor-layout">
+    <div
+      v-if="state.questionAi.loading"
+      class="question-editor-busy-mask"
+      role="status"
+      aria-live="assertive"
+    >
+      <div class="question-editor-busy-content">
+        <el-icon class="is-loading question-editor-busy-spinner"><Loading /></el-icon>
+        <strong>{{ questionAiLoadingTitle }}</strong>
+        <span>请稍候，完成后可预览并决定是否应用。</span>
+      </div>
+    </div>
+
+    <div
+      v-if="state.questionEditForm"
+      class="question-editor-layout"
+      :inert="state.questionAi.loading"
+    >
       <section class="min-w-0">
         <div class="mb-4 flex flex-wrap items-center gap-2">
           <el-tag :type="sourceTagType" effect="plain">{{ sourceLabel }}</el-tag>
@@ -135,10 +161,30 @@ function changedFieldLabel(field) {
           <el-tag v-if="state.questionAi.loading" type="primary" effect="plain">生成中</el-tag>
         </div>
 
-        <div class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-          <el-button :icon="RefreshRight" :loading="state.questionAi.loading && state.questionAi.operation === 'regenerate'" :disabled="state.questionAi.loading" @click="runQuestionAiTransform('regenerate')">按原来源重新生成</el-button>
-          <el-button v-if="isChoice" :icon="MagicStick" :loading="state.questionAi.loading && state.questionAi.operation === 'distractors'" :disabled="state.questionAi.loading" @click="runQuestionAiTransform('distractors')">重新生成干扰项</el-button>
+        <div class="mt-4 grid gap-2">
+          <div class="question-ai-action">
+            <el-button class="min-w-0 flex-1" :icon="RefreshRight" :loading="state.questionAi.loading && state.questionAi.operation === 'regenerate'" :disabled="state.questionAi.loading" @click="runQuestionAiTransform('regenerate')">按原来源重新生成</el-button>
+            <el-tooltip
+              content="保持题型和分值不变，按照当前题目的来源约束生成一道新题。资料题继续使用原资料引用；题库题只生成衍生题，不修改题库原题。"
+              placement="top"
+              popper-class="question-ai-help-popper"
+            >
+              <button type="button" class="question-ai-help" aria-label="查看按原来源重新生成说明"><el-icon><QuestionFilled /></el-icon></button>
+            </el-tooltip>
+          </div>
+          <div v-if="isChoice" class="question-ai-action">
+            <el-button class="min-w-0 flex-1" :icon="MagicStick" :loading="state.questionAi.loading && state.questionAi.operation === 'distractors'" :disabled="state.questionAi.loading" @click="runQuestionAiTransform('distractors')">重新生成干扰项</el-button>
+            <el-tooltip
+              content="仅重新生成错误选项，保留题干、正确答案内容及答案位置。仅适用于单选题和多选题。"
+              placement="top"
+              popper-class="question-ai-help-popper"
+            >
+              <button type="button" class="question-ai-help" aria-label="查看重新生成干扰项说明"><el-icon><QuestionFilled /></el-icon></button>
+            </el-tooltip>
+          </div>
         </div>
+
+        <p class="mt-3 text-xs font-semibold leading-5 text-slate-500 dark:text-slate-400">生成结果仅供预览，应用修改并保存题目后才会生效。</p>
 
         <div class="mt-4 border-t border-slate-200 pt-4 dark:border-night-border">
           <div class="mb-2 text-xs font-black">自定义 AI 修改</div>
@@ -172,8 +218,8 @@ function changedFieldLabel(field) {
 
     <template #footer>
       <div class="flex justify-end gap-2">
-        <el-button :disabled="state.questionSaving" @click="requestCloseQuestionEditor">取消</el-button>
-        <el-button type="primary" :icon="Check" :loading="state.questionSaving" @click="saveQuestionEdit">保存题目</el-button>
+        <el-button :disabled="state.questionSaving || state.questionAi.loading" @click="requestCloseQuestionEditor">取消</el-button>
+        <el-button type="primary" :icon="Check" :loading="state.questionSaving" :disabled="state.questionAi.loading" @click="saveQuestionEdit">保存题目</el-button>
       </div>
     </template>
   </el-dialog>
@@ -184,15 +230,98 @@ function changedFieldLabel(field) {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.85fr);
   gap: 20px;
-  max-height: calc(94vh - 150px);
+  max-height: calc(94vh - 170px);
   overflow: auto;
   padding-right: 2px;
+}
+
+:global(.question-editor-dialog) {
+  position: relative;
+  overflow: hidden;
+}
+
+:global(.question-editor-dialog__body) {
+  padding-top: 20px;
+}
+
+.question-editor-busy-mask {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--el-bg-color) 88%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.question-editor-busy-content {
+  display: flex;
+  max-width: 360px;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+}
+
+.question-editor-busy-content strong {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.question-editor-busy-content span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.question-editor-busy-spinner {
+  color: var(--el-color-primary);
+  font-size: 34px;
 }
 
 .question-ai-panel {
   min-width: 0;
   border-left: 1px solid var(--el-border-color-lighter);
   padding-left: 18px;
+}
+
+.question-ai-action {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.question-ai-help {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  cursor: help;
+}
+
+.question-ai-help:hover,
+.question-ai-help:focus-visible {
+  color: var(--el-color-primary);
+}
+
+.question-ai-help:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--el-color-primary-light-5);
+  outline-offset: 1px;
+}
+
+:global(.question-ai-help-popper) {
+  max-width: min(320px, calc(100vw - 32px));
+  line-height: 1.6;
+  white-space: normal;
 }
 
 .choice-editor {
@@ -268,6 +397,10 @@ function changedFieldLabel(field) {
 }
 
 @media (max-width: 560px) {
+  :global(.question-editor-dialog__body) {
+    padding-top: 16px;
+  }
+
   .choice-row {
     flex-wrap: wrap;
   }

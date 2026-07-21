@@ -13,6 +13,7 @@ let adminHeaders = {};
 let output = "";
 const retiredInitialPasswordFlag = ["must", "ChangePassword"].join("");
 
+await verifyFrontendRouting();
 await verifyLegacyAdminNormalization();
 
 const server = spawn(process.execPath, ["backend/server.js"], {
@@ -30,9 +31,6 @@ const server = spawn(process.execPath, ["backend/server.js"], {
       { username: "verify-admin", password: "123456" },
       { username: "verify-user", password: "User@2026", role: "author" },
     ]),
-    SMARTQ_LOGIN_MAX_FAILURES: "2",
-    SMARTQ_LOGIN_WINDOW_SECONDS: "60",
-    SMARTQ_LOGIN_LOCK_SECONDS: "30",
     AI_MOCK_MODE: "true",
   },
 });
@@ -80,6 +78,7 @@ try {
     "frontend/src/stores/materials-store.js",
     "frontend/src/stores/papers-store.js",
     "frontend/src/stores/question-bank-store.js",
+    "frontend/src/stores/ui-store.js",
     "frontend/src/stores/users-store.js",
     "frontend/src/styles/index.css",
   ];
@@ -129,10 +128,11 @@ try {
   const builtCss = (await Promise.all(builtCssFiles.map((name) => readFile(join("frontend/dist/assets", name), "utf8")))).join("\n");
   assert(builtCss.includes("html.dark .login-art-skyline") && builtCss.includes("html.dark .smartq-menu"), "built dark rules keep their descendant selectors");
   assert(!/html\.dark\{[^}]*opacity:\s*\.2/.test(builtCss), "built CSS never dims the entire dark document");
-  assert(/\.el-notification\{[^}]*position:fixed/.test(builtCss), "Element Plus notification positioning styles are included in the production build");
+  assert(/\.el-message\{[^}]*position:fixed/.test(builtCss), "Element Plus message positioning styles are included in the production build");
   assert(frontend.includes("个人资料") && frontend.includes("/api/admin/profile/avatar"), "profile page supports persistent avatar updates");
   assert(frontend.includes('@update:model-value="updateAdminDisplayName"') && frontend.includes('.slice(0, maxAdminDisplayNameLength)'), "profile display names are clamped in application state instead of relying only on native maxlength");
-  assert(frontend.includes("ElNotification.success") && frontend.includes("ElNotification.error") && frontend.includes("notifyProfileSaveError(state.profile.error)"), "profile saves show typed Element Plus notifications for success and validation or request failures");
+  assert(frontend.includes('import { ElMessage } from "element-plus"') && frontend.includes('element-plus/theme-chalk/el-message.css') && !frontend.includes("ElNotification"), "frontend uses Element Plus messages instead of notifications");
+  assert(frontend.includes('notify("个人资料已保存")') && frontend.includes('notify(state.profile.error, "error")'), "profile saves show typed Element Plus messages for success and validation or request failures");
   assert(frontend.includes("state.admin.user?.avatar || publicUrl('/assets/default_avatar.jpg')") && frontend.includes("state.profile.avatarPreview || publicUrl('/assets/default_avatar.jpg')") && frontend.includes("row.avatar || publicUrl('/assets/default_avatar.jpg')"), "users without uploaded avatars display default_avatar.jpg by default");
   assert(frontend.includes("用户管理") && frontend.includes("/api/admin/users") && frontend.includes("重置密码"), "admin user management UI is available");
   assert(!frontend.includes("测试账号") && !frontend.includes("密码：123456"), "login page does not expose plaintext test credentials");
@@ -141,8 +141,10 @@ try {
   assert((frontend.match(/append-to-body/g) || []).length >= 2, "user management dialogs attach overlays to the document body");
   assert(frontend.includes('active-value="active"') && frontend.includes('inactive-value="disabled"') && frontend.includes("statusUpdatingId"), "user status switches use Element Plus active, inactive, disabled, and loading states");
   assert(frontend.includes("/api/admin/password"), "profile page keeps voluntary password changes");
+  assert(frontend.includes('notify("登录密码已更新")') && frontend.includes('notify(state.password.error, "error")'), "password changes show typed Element Plus messages for success and validation or request failures");
   assert(!frontend.includes(retiredInitialPasswordFlag) && !/首次登录.*修改.*密码|初始密码/.test(frontend), "frontend removes the initial-password change policy and UI");
   assert(!backend.includes(retiredInitialPasswordFlag) && !backend.includes("请先修改初始密码"), "backend removes the initial-password field and API gate");
+  assert(!backend.includes("SMARTQ_LOGIN_") && !backend.includes("登录失败次数过多") && !backend.includes("admin-login-blocked"), "backend removes failed-login lockout configuration and responses");
   assert(frontend.includes("await uploadAdminAvatar(file)") && frontend.includes("用户头像已更新"), "valid avatar selection uploads immediately");
   assert((frontend.match(/restoreDefaultAdminAvatar/g) || []).length >= 6 && frontend.includes('method: "DELETE"') && frontend.includes("恢复默认头像"), "profile page wires the default-avatar reset action through the app context");
   assert(frontend.includes("确认退出当前账号") && frontend.includes("确认恢复默认头像") && frontend.includes("确认丢弃") && frontend.includes("确认清空题库题配置"), "logout, avatar reset, generated-draft discard, and question-bank plan clearing require confirmation");
@@ -152,6 +154,9 @@ try {
   assert(frontend.indexOf('{ key: "papers"') < frontend.indexOf('{ key: "authoring"'), "paper management is the first navigation item");
   assert(frontend.includes('return ["authoring", "papers", "question-bank", "materials", "users", "profile"].includes(route) ? route : "papers";'), "papers is the default route and content-management routes are routable");
   assert(frontend.includes('if (route === "papers") return "";'), "papers uses the root URL");
+  assert(frontend.includes('ADMIN_LOGIN_HASH = "#/login"') && frontend.includes("ADMIN_LOGIN_RETURN_KEY") && frontend.includes("resumeAdminRoute"), "expired sessions use a distinct login URL and restore the protected route after login");
+  assert(frontend.includes("sessionStorage.setItem(ADMIN_LOGIN_RETURN_KEY") && frontend.includes("Object.fromEntries(parsed.params.entries())"), "login redirects retain protected route parameters such as authoring paperid across refreshes");
+  assert(frontend.includes("if (!state.admin.token) return;") && frontend.includes("if (!state.admin.token || error?.status === 401) return;"), "unauthenticated initialization and material loaders do not surface protected API failures on the login page");
   assert(frontend.includes('@select="(index) => go(index)"'), "desktop navigation passes only the selected route key");
   assert(!/控制台首页|数据维护|运营会话|审计日志|自动备份历史/.test(frontend), "frontend removes the console homepage and maintenance UI");
   assert(!/参与者管理|试卷分配|监考工作台|阅卷分析|考生系统/.test(frontend), "frontend removes retired navigation and pages");
@@ -170,6 +175,9 @@ try {
   assert(frontend.includes("data-question-type-matrix") && frontend.includes("typeMatrixRows") && frontend.includes("试卷编辑"), "authoring keeps the compact type matrix and direct question editing flow");
   assert(frontend.includes('key: "edit"') && !/人工审核|待审核|通过并继续|取消审核|确认并审核/.test(frontend), "authoring removes per-question review controls and wording");
   assert(frontend.includes("按原来源重新生成") && frontend.includes("重新生成干扰项") && frontend.includes("自定义 AI 修改") && frontend.includes("应用修改"), "question editor exposes clear AI regeneration, distractor, custom prompt, and candidate application controls");
+  assert(frontend.includes('body-class="question-editor-dialog__body"') && frontend.includes("padding-top: 20px") && frontend.includes("padding-top: 16px"), "question editor keeps deliberate spacing between the dialog header divider and body content");
+  assert(frontend.includes("查看按原来源重新生成说明") && frontend.includes("查看重新生成干扰项说明") && frontend.includes("生成结果仅供预览，应用修改并保存题目后才会生效"), "question editor explains AI regeneration scope and preview persistence");
+  assert(frontend.includes("question-editor-busy-mask") && frontend.includes(':inert="state.questionAi.loading"') && frontend.includes("questionEditorLocked"), "question AI generation visibly locks the entire editor and guards state-changing actions");
   assert(frontend.includes("moveQuestionOption") && frontend.includes("moveSingleCorrectAnswer") && frontend.includes("undoQuestionAiChange"), "question editor supports answer-safe option movement and AI undo");
   assert(frontend.includes("questionSaving") && frontend.includes("requestCloseQuestionEditor"), "question editing prevents duplicate saves and protects unsaved changes");
   assert(frontend.includes('paperPageSize: 20') && frontend.includes('aria-label="试卷状态筛选"'), "paper management uses the Element Plus list controls");
@@ -219,10 +227,10 @@ try {
   const oversizedLogin = await postJson("/api/admin/login", { username: "x".repeat(140 * 1024), password: "x" }, { expectedStatus: 413 });
   assert(oversizedLogin.error.includes("请求体过大"), "oversized JSON is rejected");
 
-  await postJson("/api/admin/login", { username: "missing", password: "wrong" }, { expectedStatus: 401 });
-  await postJson("/api/admin/login", { username: "missing", password: "wrong" }, { expectedStatus: 401 });
-  const blockedLogin = await postJson("/api/admin/login", { username: "missing", password: "wrong" }, { expectedStatus: 429 });
-  assert(blockedLogin.retryAfterSeconds > 0, "admin login rate limit remains active");
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const rejectedLogin = await postJson("/api/admin/login", { username: "verify-admin", password: "wrong" }, { expectedStatus: 401 });
+    assert(rejectedLogin.error === "登录账号或密码错误", "invalid admin credentials remain a normal authentication failure without lockout");
+  }
 
   const adminLogin = await postJson("/api/admin/login", { username: "verify-admin", password: "123456" });
   adminHeaders = authHeaders(adminLogin.token);
@@ -257,6 +265,7 @@ try {
   assert(persistedRuntime.adminUsers.every((user) => user.passwordHash.startsWith("scrypt$") && !("password" in user)), "runtime users contain password hashes without plaintext passwords");
   assert(persistedRuntime.adminUsers.every((user) => !("role" in user)), "runtime users no longer persist role fields");
   assert(persistedRuntime.adminUsers.every((user) => !(retiredInitialPasswordFlag in user)), "runtime users no longer persist the retired password-policy field");
+  assert(!("loginSecurity" in persistedRuntime), "runtime no longer persists failed-login lockout state");
 
   const initialUsers = await getJson("/api/admin/users", { headers: adminHeaders });
   assert(initialUsers.total === 2 && !("roles" in initialUsers), "authenticated users can list bootstrapped accounts without role metadata");
@@ -781,10 +790,35 @@ async function verifyLegacyAdminNormalization() {
   delete process.env.SMARTQ_ADMIN_USER;
   delete process.env.SMARTQ_ADMIN_PASSWORD;
   try {
-    const { hashAdminPassword, initializeAdminUsers } = await import("../backend/services/admin-user-service.js");
+    const { hashAdminPassword, initializeAdminUsers, verifyAdminPassword } = await import("../backend/services/admin-user-service.js");
     const freshState = { adminUsers: [], adminSessions: {}, auditLog: [] };
     await initializeAdminUsers(freshState);
-    assert(freshState.adminUsers[0].username === "admin" && !(retiredInitialPasswordFlag in freshState.adminUsers[0]), "default admin omits retired password-policy metadata");
+    assert(freshState.adminUsers[0].username === "admin" && await verifyAdminPassword("kongdao123", freshState.adminUsers[0].passwordHash) && !(retiredInitialPasswordFlag in freshState.adminUsers[0]), "default admin credentials use the admin username and retain the configured password");
+
+    const preservedPasswordHash = await hashAdminPassword("kongdao123");
+    const renamedBootstrapState = {
+      adminUsers: [{
+        id: "renamed-bootstrap-admin",
+        username: "kongdao123",
+        passwordHash: preservedPasswordHash,
+        displayName: "admin",
+        avatar: "",
+        status: "active",
+        authVersion: 2,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastLoginAt: null,
+        passwordChangedAt: new Date().toISOString(),
+        createdBy: "bootstrap",
+      }],
+      adminSessions: { existing: { userId: "renamed-bootstrap-admin", username: "kongdao123", authVersion: 2 } },
+      auditLog: [],
+    };
+    await initializeAdminUsers(renamedBootstrapState);
+    const renamedBootstrapAdmin = renamedBootstrapState.adminUsers[0];
+    assert(renamedBootstrapAdmin.username === "admin" && renamedBootstrapAdmin.displayName === "admin", "legacy bootstrap login account is renamed without changing its display name");
+    assert(renamedBootstrapAdmin.passwordHash === preservedPasswordHash && await verifyAdminPassword("kongdao123", renamedBootstrapAdmin.passwordHash), "bootstrap account rename preserves the existing password hash");
+    assert(renamedBootstrapAdmin.authVersion === 3 && !Object.keys(renamedBootstrapState.adminSessions).length, "bootstrap account rename invalidates existing sessions");
 
     const legacyState = {
       adminUsers: [{
@@ -822,6 +856,14 @@ async function verifyLegacyAdminNormalization() {
     restoreEnv("SMARTQ_ADMIN_USER", previous.username);
     restoreEnv("SMARTQ_ADMIN_PASSWORD", previous.password);
   }
+}
+
+async function verifyFrontendRouting() {
+  const { ADMIN_LOGIN_HASH, currentAuthoringPaperId, currentRoute, formatRouteHash, isAdminLoginRoute } = await import("../frontend/src/core/router.js");
+  assert(ADMIN_LOGIN_HASH === "#/login" && isAdminLoginRoute(ADMIN_LOGIN_HASH), "frontend exposes a distinct admin login route");
+  assert(currentRoute("#/authoring?paperid=paper-1784530028213") === "authoring", "authoring remains a protected routable destination");
+  assert(currentAuthoringPaperId("#/authoring?paperid=paper-1784530028213") === "paper-1784530028213", "authoring paperid survives login return-route parsing");
+  assert(formatRouteHash("authoring", { paperid: "paper-1784530028213" }) === "#/authoring?paperid=paper-1784530028213", "authoring login return routes restore the canonical hash");
 }
 
 function restoreEnv(name, value) {

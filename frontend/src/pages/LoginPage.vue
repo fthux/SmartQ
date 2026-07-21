@@ -8,18 +8,18 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
 
 <template>
     <section class="relative flex min-h-screen items-center justify-center overflow-x-hidden overflow-y-auto px-4 py-8 sm:px-8">
-    <div class="absolute inset-y-0 right-0 hidden w-1/2 bg-emerald-100 lg:block dark:bg-night-sidebar"></div>
+    <div class="absolute inset-y-0 right-0 hidden w-1/2 bg-emerald-100 lg:block"></div>
     <div class="absolute left-[17%] top-[9%] hidden h-14 w-14 rotate-45 rounded-md border-[10px] border-emerald-400/70 lg:block"></div>
     <div class="absolute bottom-[9%] left-[30%] hidden h-20 w-20 rotate-45 rounded-md border-[10px] border-leaf/70 lg:block"></div>
     <div class="absolute right-[7%] top-[9%] hidden h-14 w-14 rounded-lg border-[10px] border-teal-300/75 lg:block"></div>
 
-    <div class="relative z-10 grid w-full max-w-6xl overflow-hidden bg-white/80 shadow-[0_34px_85px_rgba(18,32,31,0.22)] lg:h-[calc(100vh-96px)] lg:min-h-[600px] lg:max-h-[720px] lg:grid-cols-2 dark:bg-night-surface/90">
-      <div class="flex min-h-[600px] flex-col items-center justify-center bg-[#f7f9fd]/95 px-6 py-10 sm:px-10 lg:min-h-0 dark:bg-night-surface/95">
+    <div class="relative z-10 grid w-full max-w-6xl overflow-hidden bg-white/80 shadow-[0_34px_85px_rgba(18,32,31,0.22)] lg:h-[calc(100vh-96px)] lg:min-h-[600px] lg:max-h-[720px] lg:grid-cols-2">
+      <div class="flex min-h-[600px] flex-col items-center justify-center bg-[#f7f9fd]/95 px-6 py-10 sm:px-10 lg:min-h-0">
         <div class="mb-9 flex flex-col items-center text-center">
           <div class="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg bg-white p-2 shadow-lg ring-1 ring-emerald-100">
             <img :src="publicUrl('/assets/favicon.svg')" :alt="SMARTQ_BRAND.name" class="h-full w-full object-contain" />
           </div>
-          <div class="mt-3 text-base font-black text-ink dark:text-slate-100">{{ SMARTQ_BRAND.name }}</div>
+          <div class="mt-3 text-base font-black text-ink">{{ SMARTQ_BRAND.name }}</div>
           <div class="mt-1 text-[11px] font-semibold text-slate-400">{{ SMARTQ_BRAND.slogan }}</div>
         </div>
 
@@ -45,10 +45,10 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
           </el-form>
         </el-card>
 
-        <div class="mt-auto pt-8 text-center text-[11px] font-bold text-slate-500 dark:text-slate-400">© 2026 {{ SMARTQ_BRAND.name }}</div>
+        <div class="mt-auto pt-8 text-center text-[11px] font-bold text-slate-500">© 2026 {{ SMARTQ_BRAND.name }}</div>
       </div>
 
-      <div class="relative hidden min-h-[600px] overflow-hidden bg-[#e7faf1] lg:block dark:bg-night-sidebar">
+      <div class="relative hidden min-h-[600px] overflow-hidden bg-[#e7faf1] lg:block">
         <div class="login-art-overlay absolute inset-0"></div>
         <div class="login-art-skyline absolute inset-x-0 bottom-0 h-[46%] opacity-55">
           <div class="absolute bottom-0 left-0 h-28 w-full bg-[#b7ead7]"></div>
@@ -60,10 +60,10 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
           <div class="absolute bottom-24 right-64 h-16 w-20 bg-[#b6edda]"></div>
         </div>
         <div class="relative z-10 flex h-full min-h-[600px] items-center px-12">
-          <div class="max-w-md text-ink dark:text-slate-100">
+          <div class="max-w-md text-ink">
             <div class="text-2xl font-medium">欢迎来到 <span class="font-black">{{ SMARTQ_BRAND.name }}</span></div>
             <div class="mt-4 h-px w-80 max-w-full bg-leaf/35"></div>
-            <p class="mt-6 text-base font-semibold leading-7 text-slate-600 dark:text-slate-300">面向 AI 命题、题目编辑与试卷管理的一体化控制台，让内容生产流程清晰、稳定、可追踪。</p>
+            <p class="mt-6 text-base font-semibold leading-7 text-slate-600">面向 AI 命题、题目编辑与试卷管理的一体化控制台，让内容生产流程清晰、稳定、可追踪。</p>
           </div>
         </div>
       </div>

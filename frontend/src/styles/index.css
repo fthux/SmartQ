@@ -80,17 +80,6 @@ html.dark .smartq-menu .el-menu-item.is-active {
   background: #1d3225;
 }
 
-html.dark .login-art-overlay {
-  background:
-    linear-gradient(180deg, rgba(18, 21, 27, 0.88), rgba(23, 26, 33, 0.96)),
-    radial-gradient(circle at 70% 28%, rgba(134, 239, 172, 0.12), transparent 34%),
-    linear-gradient(135deg, rgba(148, 163, 184, 0.06) 0 1px, transparent 1px 42px);
-}
-
-html.dark .login-art-skyline {
-  opacity: 0.2;
-}
-
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation: none;

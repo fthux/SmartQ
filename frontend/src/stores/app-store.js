@@ -377,6 +377,7 @@ export function createAppStore() {
       toggleSidebar,
       toggleThemeMenu,
       closeThemeMenu,
+      applyTheme,
       setTheme,
       toggleTheme,
       toggleFullscreen,
@@ -761,6 +762,8 @@ export function createAppStore() {
     watch(documentTitle, (title) => {
       document.title = title;
     }, { immediate: true });
+
+    watch(() => state.admin.token, () => applyTheme());
 
     watch([totalQuestionCount, questionBankQuestionCount], ([count, bankCount]) => {
       const requested = Number(state.spec.questionBankRequestedCount || 0);

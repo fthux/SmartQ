@@ -37,7 +37,8 @@ export function createLayoutStore({ state, mountIcons }) {
 
   function applyTheme(options = {}) {
     const systemDark = colorSchemeMedia?.matches || window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const nextDark = state.ui.theme === "dark" || (state.ui.theme === "system" && systemDark);
+    const preferredDark = state.ui.theme === "dark" || (state.ui.theme === "system" && systemDark);
+    const nextDark = Boolean(state.admin.token) && preferredDark;
     const root = document.documentElement;
     const apply = () => {
       state.ui.isDark = nextDark;
@@ -111,6 +112,7 @@ export function createLayoutStore({ state, mountIcons }) {
     toggleSidebar,
     toggleThemeMenu,
     closeThemeMenu,
+    applyTheme,
     setTheme,
     toggleTheme,
     toggleFullscreen,

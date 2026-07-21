@@ -148,11 +148,12 @@ try {
   assert(frontend.includes('@command="handleThemePreference"') && frontend.includes("setTheme(theme, { animate: true })"), "theme preference menu reuses the circular reveal with the fixed corner origin");
   assert(frontend.includes("--el-bg-color: #171a21") && frontend.includes("--el-border-color-lighter: #2a303b"), "Element Plus dark theme uses the neutral charcoal palette");
   assert(frontend.includes("html.dark") && frontend.includes("dark:bg-night-surface"), "theme switching updates Element Plus and application surfaces");
+  assert(frontend.includes("Boolean(state.admin.token) && preferredDark") && !loginPage.includes("dark:"), "login stays light while preserving the saved console theme preference");
   assert(!frontend.includes(":global(html.dark)"), "dark descendant rules stay out of scoped styles");
   const frontendAssets = await readdir("frontend/dist/assets");
   const builtCssFiles = frontendAssets.filter((name) => name.endsWith(".css"));
   const builtCss = (await Promise.all(builtCssFiles.map((name) => readFile(join("frontend/dist/assets", name), "utf8")))).join("\n");
-  assert(builtCss.includes("html.dark .login-art-skyline") && builtCss.includes("html.dark .smartq-menu"), "built dark rules keep their descendant selectors");
+  assert(!builtCss.includes("html.dark .login-art") && builtCss.includes("html.dark .smartq-menu"), "built dark rules exclude the light-only login artwork");
   assert(!/html\.dark\{[^}]*opacity:\s*\.2/.test(builtCss), "built CSS never dims the entire dark document");
   assert(/\.el-message\{[^}]*position:fixed/.test(builtCss), "Element Plus message positioning styles are included in the production build");
   assert(frontend.includes("个人资料") && frontend.includes("/api/admin/profile/avatar"), "profile page supports persistent avatar updates");

@@ -14,7 +14,7 @@ const { state } = context;
 
 <template>
   <el-config-provider :locale="zhCn">
-    <main :class="state.admin.token ? 'min-h-screen w-full bg-[#f3f6f8] dark:bg-night-page' : 'min-h-screen w-full overflow-hidden bg-[#f2f5fa] dark:bg-night-page'">
+    <main :class="state.admin.token ? 'min-h-screen w-full bg-[#f3f6f8] dark:bg-night-page' : 'min-h-screen w-full overflow-hidden bg-[#f2f5fa]'">
       <LoginPage v-if="!state.admin.token" />
       <PaperPrintPage v-else-if="state.route === 'paper-print'" />
       <ConsoleShell v-else />

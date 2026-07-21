@@ -16,6 +16,8 @@ import { useSmartQ } from "../stores/context.js";
 
 const {
   state,
+  isSuperAdmin,
+  contentCreators,
   applyQuestionBankFilters,
   applyBulkQuestionCategories,
   changeQuestionBankPage,
@@ -47,16 +49,28 @@ const specialCategoryNodes = computed(() => [
   { id: "archived", name: "已归档", count: state.questionBankManagement.categoryCounts.archived, special: true },
 ]);
 const categoryTreeData = computed(() => [...specialCategoryNodes.value, ...state.questionBankManagement.categoryTree]);
-const leafCategoryOptions = computed(() => state.questionBankManagement.categories.filter((item) => item.status === "active" && item.isLeaf));
-const bulkCategoryOptions = computed(() => state.questionBankManagement.bulkMode === "remove" ? state.questionBankManagement.categories : leafCategoryOptions.value);
+const leafCategoryOptions = computed(() => {
+  const targetOwnerUserId = state.questionBankManagement.editorMode === "edit"
+    ? state.questionBankManagement.form.ownerUserId
+    : state.admin.user?.id;
+  return state.questionBankManagement.categories.filter((item) => item.status === "active" && item.isLeaf && (!targetOwnerUserId || item.ownerUserId === targetOwnerUserId));
+});
+const bulkCategoryOptions = computed(() => {
+  const ownerIds = new Set(state.questionBankManagement.selectedRows.map((item) => item.ownerUserId).filter(Boolean));
+  const ownerUserId = ownerIds.size === 1 ? [...ownerIds][0] : "";
+  const options = state.questionBankManagement.bulkMode === "remove" ? state.questionBankManagement.categories : state.questionBankManagement.categories.filter((item) => item.status === "active" && item.isLeaf);
+  return ownerUserId ? options.filter((item) => item.ownerUserId === ownerUserId) : [];
+});
 const hasQuestionBankFilters = computed(() => Boolean(
   state.questionBankManagement.search
   || state.questionBankManagement.type
   || state.questionBankManagement.difficulty
+  || state.questionBankManagement.ownerUserId
   || !["", "all"].includes(state.questionBankManagement.selectedCategoryId),
 ));
 const categoryParentOptions = computed(() => state.questionBankManagement.categories.filter((item) => {
   if (item.status !== "active" || item.depth >= 3 || item.id === state.questionBankManagement.categoryEditingId) return false;
+  if (state.questionBankManagement.categoryForm.ownerUserId && item.ownerUserId !== state.questionBankManagement.categoryForm.ownerUserId) return false;
   return !(item.path || []).some((part) => part.id === state.questionBankManagement.categoryEditingId);
 }));
 function categoryPathLabel(category) {
@@ -71,6 +85,7 @@ function clearQuestionBankFilters() {
   state.questionBankManagement.search = "";
   state.questionBankManagement.type = "";
   state.questionBankManagement.difficulty = "";
+  state.questionBankManagement.ownerUserId = "";
   selectQuestionBankCategory("all");
 }
 
@@ -123,10 +138,11 @@ function formatAnswer(question) {
         </div>
 
         <el-card shadow="never" class="question-bank-list-card">
-          <div class="grid gap-3 border-b border-slate-200 pb-4 xl:grid-cols-[minmax(260px,1fr)_140px_130px_auto] dark:border-night-border">
+          <div class="grid gap-3 border-b border-slate-200 pb-4 dark:border-night-border" :class="isSuperAdmin ? 'xl:grid-cols-[minmax(240px,1fr)_130px_120px_190px_auto]' : 'xl:grid-cols-[minmax(260px,1fr)_140px_130px_auto]'">
             <el-input v-model="state.questionBankManagement.search" clearable :prefix-icon="Search" placeholder="搜索题干、知识点、标签或编号" @keyup.enter="applyQuestionBankFilters" @clear="applyQuestionBankFilters" />
             <el-select v-model="state.questionBankManagement.type" clearable placeholder="全部题型" @change="applyQuestionBankFilters"><el-option v-for="type in questionTypes" :key="type" :label="type" :value="type" /></el-select>
             <el-select v-model="state.questionBankManagement.difficulty" clearable placeholder="全部难度" @change="applyQuestionBankFilters"><el-option v-for="difficulty in ['易','中','难','混合']" :key="difficulty" :label="difficulty" :value="difficulty" /></el-select>
+            <el-select v-if="isSuperAdmin" v-model="state.questionBankManagement.ownerUserId" clearable filterable placeholder="全部创建者" @change="applyQuestionBankFilters"><el-option v-for="creator in contentCreators" :key="creator.id" :label="`${creator.displayName} (${creator.username})`" :value="creator.id" /></el-select>
             <div class="flex gap-2"><el-button type="primary" :icon="Search" @click="applyQuestionBankFilters">查询</el-button><el-tooltip content="刷新列表"><el-button :icon="Refresh" circle aria-label="刷新题库" @click="loadQuestionBank" /></el-tooltip></div>
           </div>
 
@@ -161,6 +177,7 @@ function formatAnswer(question) {
         </el-table-column>
         <el-table-column prop="type" label="题型" width="82" />
         <el-table-column prop="difficulty" label="难度" width="72" />
+        <el-table-column label="创建者" min-width="145"><template #default="{ row }"><span class="font-semibold">{{ row.creator?.displayName || row.createdBy || '-' }}</span><div v-if="row.creator?.username" class="mt-1 text-xs text-slate-400">{{ row.creator.username }}</div></template></el-table-column>
         <el-table-column label="分类" min-width="180" show-overflow-tooltip><template #default="{ row }"><span v-if="row.categories?.length">{{ row.categories.map(categoryPathLabel).join('、') }}</span><el-tag v-else type="warning" size="small">未分类</el-tag></template></el-table-column>
         <el-table-column label="默认分值" width="90" align="right"><template #default="{ row }">{{ row.defaultScore }} 分</template></el-table-column>
         <el-table-column label="来源与使用" width="150"><template #default="{ row }">来源 {{ row.sourceCount }} · 已用于 {{ row.paperUsageCount }} 卷</template></el-table-column>

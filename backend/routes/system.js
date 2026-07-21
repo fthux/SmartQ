@@ -3,6 +3,14 @@ import { maxRequestBytes, sendJson } from "../lib/http.js";
 import { storageInfo } from "../lib/runtime-store.js";
 import { materialFileMaxBytes } from "../services/material-service.js";
 import { scopedAuthoringState } from "../services/authoring-workspace-service.js";
+import {
+  accessibleResources,
+  activeAuthoringOwnerId,
+  actorFromAuth,
+  decorateOwnedResource,
+  isSuperAdmin,
+  publicUserSummary,
+} from "../services/access-control-service.js";
 
 export async function handlePublicSystemRoutes(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/health") {
@@ -49,9 +57,17 @@ export async function handlePublicSystemRoutes(req, res, url) {
 
 export function handleDashboardRoute(req, res, url, state, auth) {
   if (req.method !== "GET" || url.pathname !== "/api/dashboard") return false;
-  const scopedState = scopedAuthoringState(state, auth?.user?.id);
-  const paper = buildPaper(scopedState.questions, scopedState.paper);
-  const papers = state.papers || [];
+  const actor = actorFromAuth(auth);
+  const ownerUserId = activeAuthoringOwnerId(auth);
+  const scopedState = scopedAuthoringState(state, ownerUserId);
+  const papers = accessibleResources(state.papers, actor).map((item) => decorateOwnedResource(state, item));
+  const activeSnapshot = (state.papers || []).find((item) => item.id === scopedState.paper?.id);
+  const paper = decorateOwnedResource(state, {
+    ...buildPaper(scopedState.questions, scopedState.paper),
+    ownerUserId: activeSnapshot?.ownerUserId || ownerUserId,
+    createdByUserId: activeSnapshot?.createdByUserId || ownerUserId,
+    updatedByUserId: activeSnapshot?.updatedByUserId || ownerUserId,
+  });
   sendJson(res, 200, {
     exam: state.exam,
     stats: {
@@ -66,7 +82,8 @@ export function handleDashboardRoute(req, res, url, state, auth) {
     papers,
     quality: validateQuestions(scopedState.questions),
     generationTask: scopedState.generationTask,
-    auditLog: state.auditLog.slice(-8).reverse(),
+    auditLog: isSuperAdmin(actor) ? state.auditLog.slice(-8).reverse() : [],
+    creators: isSuperAdmin(actor) ? (state.adminUsers || []).map((item) => publicUserSummary(state, item.id)) : [],
   });
   return true;
 }

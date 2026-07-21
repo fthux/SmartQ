@@ -4,6 +4,8 @@ import { useSmartQ } from "../stores/context.js";
 
 const {
   state,
+  isSuperAdmin,
+  contentCreators,
   paperRows,
   papers,
   filteredPaperRows,
@@ -40,6 +42,7 @@ function onPageSizeChange(size) {
 function clearPaperFilters() {
   state.paperSearch = "";
   state.paperStatusFilter = "all";
+  state.paperOwnerFilter = "";
   resetPaperPage();
 }
 </script>
@@ -63,8 +66,11 @@ function clearPaperFilters() {
 
     <el-card shadow="never" class="paper-list-card">
       <div class="flex flex-col gap-3 border-b border-slate-200 pb-4 xl:flex-row xl:items-center xl:justify-between dark:border-night-border">
-        <el-input v-model="state.paperSearch" class="w-full xl:max-w-md" placeholder="搜索试卷名称或编号" clearable :prefix-icon="Search" @input="resetPaperPage" />
+        <el-input v-model="state.paperSearch" class="w-full xl:max-w-md" placeholder="搜索试卷名称、编号或创建者" clearable :prefix-icon="Search" @input="resetPaperPage" />
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <el-select v-if="isSuperAdmin" v-model="state.paperOwnerFilter" clearable filterable class="sm:w-52" placeholder="全部创建者" @change="resetPaperPage">
+            <el-option v-for="creator in contentCreators" :key="creator.id" :label="`${creator.displayName} (${creator.username})`" :value="creator.id" />
+          </el-select>
           <el-segmented v-model="state.paperStatusFilter" :options="statusOptions" aria-label="试卷状态筛选" @change="resetPaperPage" />
           <el-select v-model="state.paperSort" class="sm:w-36" aria-label="试卷排序" @change="resetPaperPage">
             <el-option label="最近更新" value="latest" />
@@ -90,6 +96,7 @@ function clearPaperFilters() {
         <el-table-column label="状态" width="110">
           <template #default="{ row }"><el-tag :type="statusTagType(row.status)" effect="light">{{ displayPaperStatus(row.status) }}</el-tag></template>
         </el-table-column>
+        <el-table-column label="创建者" min-width="150"><template #default="{ row }"><span class="font-semibold">{{ row.creator?.displayName || '-' }}</span><div v-if="row.creator?.username" class="mt-1 text-xs text-slate-400">{{ row.creator.username }}</div></template></el-table-column>
         <el-table-column label="题数" prop="questionCount" width="90"><template #default="{ row }">{{ row.questionCount || 0 }} 题</template></el-table-column>
         <el-table-column label="总分" prop="score" width="90"><template #default="{ row }">{{ row.score || 0 }} 分</template></el-table-column>
         <el-table-column label="更新时间" min-width="150"><template #default="{ row }">{{ formatDateTime(row.updatedAt || row.publishedAt || row.createdAt) }}</template></el-table-column>

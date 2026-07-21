@@ -27,9 +27,10 @@ const server = spawn(process.execPath, ["backend/server.js"], {
     SMARTQ_BACKUP_RETENTION: "5",
     SMARTQ_BACKUP_MIN_INTERVAL_SECONDS: "0",
     SMARTQ_MAX_REQUEST_BYTES: String(128 * 1024),
+    SUPER_ADMIN_USER: "verify-admin",
+    SUPER_ADMIN_PASSWORD: "123456",
     SMARTQ_ADMIN_ACCOUNTS: JSON.stringify([
-      { username: "verify-admin", password: "123456" },
-      { username: "verify-user", password: "User@2026", role: "author" },
+      { username: "verify-user", password: "User@2026" },
     ]),
     AI_MOCK_MODE: "true",
   },
@@ -100,6 +101,7 @@ try {
     "backend/services/question-bank-category-service.js",
     "backend/lib/question-bank-categories.js",
     "backend/services/admin-user-service.js",
+    "backend/services/access-control-service.js",
     "backend/services/auth-service.js",
     "backend/services/authoring-workspace-service.js",
   ];
@@ -137,7 +139,7 @@ try {
   assert(frontend.includes("用户管理") && frontend.includes("/api/admin/users") && frontend.includes("重置密码"), "admin user management UI is available");
   assert(!frontend.includes("测试账号") && !frontend.includes("密码：123456"), "login page does not expose plaintext test credentials");
   assert(frontend.includes("登录账号需为 3-32 位字母、数字、点、下划线或连字符") && frontend.includes("密码必须同时包含字母和数字") && frontend.includes("两次输入的密码不一致"), "user forms validate account format, password strength, and repeated passwords");
-  assert(!frontend.includes("全部角色") && !frontend.includes('label="角色"') && !frontend.includes("adminRoleLabel"), "role controls and labels are removed from the frontend");
+  assert(frontend.includes("super_admin") && frontend.includes("超级管理员") && !frontend.includes("全部角色"), "frontend exposes fixed role labels without role assignment controls");
   assert((frontend.match(/append-to-body/g) || []).length >= 2, "user management dialogs attach overlays to the document body");
   assert(frontend.includes('active-value="active"') && frontend.includes('inactive-value="disabled"') && frontend.includes("statusUpdatingId"), "user status switches use Element Plus active, inactive, disabled, and loading states");
   assert(frontend.includes("/api/admin/password"), "profile page keeps voluntary password changes");
@@ -234,7 +236,7 @@ try {
 
   const adminLogin = await postJson("/api/admin/login", { username: "verify-admin", password: "123456" });
   adminHeaders = authHeaders(adminLogin.token);
-  assert(!("role" in adminLogin.admin) && !("roleLabel" in adminLogin.admin) && !("permissions" in adminLogin.admin), "login responses omit retired role metadata");
+  assert(adminLogin.admin.role === "super_admin" && adminLogin.admin.roleLabel === "超级管理员" && !("permissions" in adminLogin.admin), "login responses expose the fixed super administrator role");
   const adminMe = await getJson("/api/admin/me", { headers: adminHeaders });
   assert(adminMe.admin.username === "verify-admin", "admin token loads current user");
   assert(adminMe.admin.displayName === "verify-admin" && adminMe.admin.avatar === "", "admin profile has stable defaults");
@@ -263,15 +265,15 @@ try {
   persistedRuntime = JSON.parse(await readFile(runtimeFile, "utf8"));
   assert(persistedRuntime.adminUsers?.find((user) => user.username === "verify-admin")?.avatar === "", "avatar reset is persisted on the unified admin user record");
   assert(persistedRuntime.adminUsers.every((user) => user.passwordHash.startsWith("scrypt$") && !("password" in user)), "runtime users contain password hashes without plaintext passwords");
-  assert(persistedRuntime.adminUsers.every((user) => !("role" in user)), "runtime users no longer persist role fields");
+  assert(persistedRuntime.adminUsers.filter((user) => user.role === "super_admin").length === 1 && persistedRuntime.adminUsers.every((user) => ["super_admin", "user"].includes(user.role)), "runtime persists exactly one fixed super administrator role");
   assert(persistedRuntime.adminUsers.every((user) => !(retiredInitialPasswordFlag in user)), "runtime users no longer persist the retired password-policy field");
   assert(!("loginSecurity" in persistedRuntime), "runtime no longer persists failed-login lockout state");
 
   const initialUsers = await getJson("/api/admin/users", { headers: adminHeaders });
-  assert(initialUsers.total === 2 && !("roles" in initialUsers), "authenticated users can list bootstrapped accounts without role metadata");
-  assert(initialUsers.users.every((user) => !("passwordHash" in user) && !("role" in user)), "user management responses expose neither password hashes nor roles");
+  assert(initialUsers.total === 2 && !("roles" in initialUsers), "super administrator can list bootstrapped accounts");
+  assert(initialUsers.users.every((user) => !("passwordHash" in user) && ["super_admin", "user"].includes(user.role)), "user management responses expose fixed roles without password hashes");
   const selfUpdate = await patchJson(`/api/admin/users/${adminMe.admin.id}`, { status: "disabled" }, { headers: adminHeaders, expectedStatus: 409 });
-  assert(selfUpdate.error.includes("不能停用自己"), "a user cannot disable their own account");
+  assert(selfUpdate.error.includes("不能停用") || selfUpdate.error.includes("不能停用自己"), "the super administrator account cannot be disabled");
 
   const createdUser = await postJson("/api/admin/users", {
     username: "managed-user",
@@ -291,7 +293,7 @@ try {
   const managedHeaders = authHeaders(managedLogin.token);
   assert(!(retiredInitialPasswordFlag in managedLogin.admin), "new user login omits retired password-change metadata");
   await getJson("/api/dashboard", { headers: managedHeaders });
-  await getJson("/api/admin/users", { headers: managedHeaders });
+  await getJson("/api/admin/users", { headers: managedHeaders, expectedStatus: 403 });
   const changedPassword = await putJson("/api/admin/password", {
     currentPassword: "Managed@2026",
     newPassword: "Managed@2027",
@@ -303,7 +305,7 @@ try {
     displayName: "受管账号",
     role: "admin",
   }, { headers: adminHeaders });
-  assert(renamedUser.user.displayName === "受管账号" && !("role" in renamedUser.user), "user profile updates ignore legacy role payloads");
+  assert(renamedUser.user.displayName === "受管账号" && renamedUser.user.role === "user", "user profile updates ignore attempts to assign the super administrator role");
   const managedMe = await getJson("/api/admin/me", { headers: managedHeaders });
   assert(managedMe.admin.displayName === "受管账号", "profile-only user updates keep existing sessions valid");
 
@@ -320,7 +322,7 @@ try {
 
   const secondUserLogin = await postJson("/api/admin/login", { username: "verify-user", password: "User@2026" });
   const secondUserHeaders = authHeaders(secondUserLogin.token);
-  await getJson("/api/admin/users", { headers: secondUserHeaders });
+  await getJson("/api/admin/users", { headers: secondUserHeaders, expectedStatus: 403 });
   const revokedSecondUser = await postJson(`/api/admin/users/${secondUserLogin.admin.id}/revoke-sessions`, {}, { headers: adminHeaders });
   assert(revokedSecondUser.revokedSessions >= 1, "one user can force another user offline");
   await getJson("/api/dashboard", { headers: secondUserHeaders, expectedStatus: 401 });
@@ -728,6 +730,79 @@ try {
   }, { headers: contentUserHeaders });
   assert(fingerprintAfter.version === fingerprintBefore.version + 1, "question-bank versions include explanation, score, difficulty, and knowledge changes");
 
+  await patchJson(`/api/admin/users/${createdUser.user.id}`, { status: "active" }, { headers: adminHeaders });
+  const isolatedLogin = await postJson("/api/admin/login", { username: "managed-user", password: "Reset@2028" });
+  const isolatedHeaders = authHeaders(isolatedLogin.token);
+  await getJson("/api/admin/users", { headers: isolatedHeaders, expectedStatus: 403 });
+  const isolatedRootResult = await postJson("/api/question-bank/categories", { name: "隔离分类" }, { headers: isolatedHeaders, expectedStatus: 201 });
+  const isolatedRoot = isolatedRootResult.items.find((item) => item.name === "隔离分类");
+  const isolatedLeafResult = await postJson("/api/question-bank/categories", { name: "隔离子类", parentId: isolatedRoot.id }, { headers: isolatedHeaders, expectedStatus: 201 });
+  const isolatedLeaf = isolatedLeafResult.items.find((item) => item.name === "隔离子类");
+  const isolatedQuestion = await postJson("/api/question-bank", {
+    type: fingerprintAfter.type,
+    stem: fingerprintAfter.stem,
+    options: fingerprintAfter.options,
+    answer: fingerprintAfter.answer,
+    explanation: fingerprintAfter.explanation,
+    rubric: fingerprintAfter.rubric,
+    defaultScore: fingerprintAfter.defaultScore,
+    difficulty: fingerprintAfter.difficulty,
+    knowledge: fingerprintAfter.knowledge,
+    tags: fingerprintAfter.tags,
+    categoryIds: [isolatedLeaf.id],
+  }, { headers: isolatedHeaders, expectedStatus: 201 });
+  assert(isolatedQuestion.id !== fingerprintAfter.id && isolatedQuestion.ownerUserId === isolatedLogin.admin.id, "identical question content is stored independently for different owners");
+  const isolatedMaterial = await postJson("/api/materials", {
+    name: "隔离用户资料",
+    content: "该资料仅属于受管账号，用于验证普通用户之间的数据隔离。",
+  }, { headers: isolatedHeaders, expectedStatus: 201 });
+  const isolatedSpec = {
+    paperName: "隔离用户试卷",
+    direction: "数据隔离",
+    difficulty: "中",
+    typeCounts: { judge: 1 },
+    typeScores: { judge: 2 },
+    sourcePlan: {},
+  };
+  const isolatedGenerated = await generateQuestionsAsync(isolatedSpec, isolatedHeaders);
+  await postJson("/api/ai/save-question-draft", { questions: isolatedGenerated.questions, spec: isolatedGenerated.spec }, { headers: isolatedHeaders });
+  const isolatedPaper = await postJson("/api/papers/publish", {}, { headers: isolatedHeaders });
+  assert(isolatedPaper.ownerUserId === isolatedLogin.admin.id && isolatedPaper.creator?.id === isolatedLogin.admin.id, "new ordinary-user papers persist owner and creator metadata");
+
+  const contentUserPapers = await getJson("/api/dashboard", { headers: contentUserHeaders });
+  const contentUserBank = await getJson("/api/question-bank?page=1&pageSize=100", { headers: contentUserHeaders });
+  const contentUserMaterials = await getJson("/api/materials?page=1&pageSize=1000", { headers: contentUserHeaders });
+  assert(!contentUserPapers.papers.some((item) => item.id === isolatedPaper.id), "ordinary users cannot list another user's papers");
+  assert(!contentUserBank.items.some((item) => item.id === isolatedQuestion.id), "ordinary users cannot list another user's question bank items");
+  assert(!contentUserMaterials.items.some((item) => item.id === isolatedMaterial.id), "ordinary users cannot list another user's materials");
+  await getJson(`/api/papers/${isolatedPaper.id}`, { headers: contentUserHeaders, expectedStatus: 404 });
+  await getJson(`/api/question-bank/${isolatedQuestion.id}`, { headers: contentUserHeaders, expectedStatus: 404 });
+  await getJson(`/api/materials/${isolatedMaterial.id}`, { headers: contentUserHeaders, expectedStatus: 404 });
+  await getJson(`/api/papers/${paper.id}`, { headers: isolatedHeaders, expectedStatus: 404 });
+  await getJson(`/api/question-bank/${manualBankQuestion.id}`, { headers: isolatedHeaders, expectedStatus: 404 });
+  await getJson(`/api/materials/${materialOne.id}`, { headers: isolatedHeaders, expectedStatus: 404 });
+
+  const globalDashboard = await getJson("/api/dashboard", { headers: adminHeaders });
+  const globalBank = await getJson("/api/question-bank?page=1&pageSize=100", { headers: adminHeaders });
+  const globalMaterials = await getJson("/api/materials?page=1&pageSize=1000", { headers: adminHeaders });
+  assert(globalDashboard.papers.some((item) => item.id === isolatedPaper.id && item.creator?.username === "managed-user"), "super administrator sees all papers with creator information");
+  assert(globalBank.items.some((item) => item.id === isolatedQuestion.id && item.creator?.username === "managed-user"), "super administrator sees all question bank items with creator information");
+  assert(globalMaterials.items.some((item) => item.id === isolatedMaterial.id && item.creator?.username === "managed-user"), "super administrator sees all materials with creator information");
+
+  await postJson(`/api/question-bank/${isolatedQuestion.id}/archive`, {}, { headers: adminHeaders });
+  const restoredIsolatedQuestion = await postJson(`/api/question-bank/${isolatedQuestion.id}/restore`, {}, { headers: adminHeaders });
+  assert(restoredIsolatedQuestion.ownerUserId === isolatedLogin.admin.id, "super administrator can archive and restore another user's question without changing ownership");
+  await postJson(`/api/materials/${isolatedMaterial.id}/archive`, {}, { headers: adminHeaders });
+  const restoredIsolatedMaterial = await postJson(`/api/materials/${isolatedMaterial.id}/restore`, {}, { headers: adminHeaders });
+  assert(restoredIsolatedMaterial.ownerUserId === isolatedLogin.admin.id, "super administrator can archive and restore another user's material without changing ownership");
+  await postJson(`/api/papers/${isolatedPaper.id}/activate`, {}, { headers: adminHeaders });
+  const isolatedPaperBeforeAdminEdit = await getJson(`/api/papers/${isolatedPaper.id}`, { headers: adminHeaders });
+  await patchJson(`/api/questions/${isolatedPaperBeforeAdminEdit.questions[0].id}`, { stem: `${isolatedPaperBeforeAdminEdit.questions[0].stem}（管理员编辑）` }, { headers: adminHeaders });
+  const isolatedPaperAfterAdminEdit = await getJson(`/api/papers/${isolatedPaper.id}`, { headers: adminHeaders });
+  assert(isolatedPaperAfterAdminEdit.ownerUserId === isolatedLogin.admin.id && isolatedPaperAfterAdminEdit.createdByUserId === isolatedLogin.admin.id, "super administrator edits another user's paper in the owner's workspace and preserves creator metadata");
+  await requestJson(`/api/papers/${isolatedPaper.id}`, { method: "DELETE", headers: adminHeaders });
+  await getJson(`/api/papers/${isolatedPaper.id}`, { headers: isolatedHeaders, expectedStatus: 404 });
+
   for (let index = 0; index < 99; index += 1) {
     await postJson("/api/materials", {
       name: `批量资料 ${String(index + 1).padStart(3, "0")}`,
@@ -783,17 +858,21 @@ async function postMaterialFile(filename, content, fields, headers) {
 async function verifyLegacyAdminNormalization() {
   const previous = {
     accounts: process.env.SMARTQ_ADMIN_ACCOUNTS,
-    username: process.env.SMARTQ_ADMIN_USER,
-    password: process.env.SMARTQ_ADMIN_PASSWORD,
+    superUsername: process.env.SUPER_ADMIN_USER,
+    superPassword: process.env.SUPER_ADMIN_PASSWORD,
+    legacyUsername: process.env.SMARTQ_ADMIN_USER,
+    legacyPassword: process.env.SMARTQ_ADMIN_PASSWORD,
   };
   delete process.env.SMARTQ_ADMIN_ACCOUNTS;
-  delete process.env.SMARTQ_ADMIN_USER;
-  delete process.env.SMARTQ_ADMIN_PASSWORD;
+  delete process.env.SUPER_ADMIN_USER;
+  delete process.env.SUPER_ADMIN_PASSWORD;
+  process.env.SMARTQ_ADMIN_USER = "ignored-admin";
+  process.env.SMARTQ_ADMIN_PASSWORD = "Ignored@2026";
   try {
     const { hashAdminPassword, initializeAdminUsers, verifyAdminPassword } = await import("../backend/services/admin-user-service.js");
     const freshState = { adminUsers: [], adminSessions: {}, auditLog: [] };
     await initializeAdminUsers(freshState);
-    assert(freshState.adminUsers[0].username === "admin" && await verifyAdminPassword("kongdao123", freshState.adminUsers[0].passwordHash) && !(retiredInitialPasswordFlag in freshState.adminUsers[0]), "default admin credentials use the admin username and retain the configured password");
+    assert(freshState.adminUsers[0].username === "admin" && freshState.adminUsers[0].role === "super_admin" && await verifyAdminPassword("kongdao123", freshState.adminUsers[0].passwordHash) && !(retiredInitialPasswordFlag in freshState.adminUsers[0]), "default super administrator uses SUPER_ADMIN defaults and ignores legacy SMARTQ_ADMIN credentials");
 
     const preservedPasswordHash = await hashAdminPassword("kongdao123");
     const renamedBootstrapState = {
@@ -849,12 +928,14 @@ async function verifyLegacyAdminNormalization() {
     };
     await initializeAdminUsers(legacyState);
     assert(!(retiredInitialPasswordFlag in legacyState.adminUsers[0]), "legacy user password-policy metadata is removed during normalization");
-    assert(!("role" in legacyState.adminUsers[0]), "legacy role fields are removed during user normalization");
-    assert(!("role" in legacyState.adminSessions.legacy) && !("permissions" in legacyState.adminSessions.legacy) && !(retiredInitialPasswordFlag in legacyState.adminSessions.legacy), "legacy session metadata is removed during normalization");
+    assert(legacyState.adminUsers[0].role === "super_admin", "legacy role values migrate to the single fixed super administrator role");
+    assert(!Object.keys(legacyState.adminSessions).length, "role migration invalidates legacy sessions");
   } finally {
     restoreEnv("SMARTQ_ADMIN_ACCOUNTS", previous.accounts);
-    restoreEnv("SMARTQ_ADMIN_USER", previous.username);
-    restoreEnv("SMARTQ_ADMIN_PASSWORD", previous.password);
+    restoreEnv("SUPER_ADMIN_USER", previous.superUsername);
+    restoreEnv("SUPER_ADMIN_PASSWORD", previous.superPassword);
+    restoreEnv("SMARTQ_ADMIN_USER", previous.legacyUsername);
+    restoreEnv("SMARTQ_ADMIN_PASSWORD", previous.legacyPassword);
   }
 }
 

@@ -7,19 +7,27 @@ import { importQuestionBankIntoAuthoring } from "../services/question-bank-servi
 import { questionContentChanged, upsertPaperSnapshot } from "../services/paper-service.js";
 import { buildPaper } from "../lib/ai.js";
 import { scopedAuthoringState } from "../services/authoring-workspace-service.js";
+import {
+  activeAuthoringOwnerId,
+  actorFromAuth,
+  canAccessResource,
+  resourceOwnerUserId,
+  setActiveAuthoringOwner,
+} from "../services/access-control-service.js";
 
 export async function handleAuthoringRoutes(req, res, url, state, auth) {
-  const userId = auth?.user?.id;
-  const scopedState = scopedAuthoringState(state, userId);
+  const actor = actorFromAuth(auth);
+  const ownerUserId = activeAuthoringOwnerId(auth);
+  const scopedState = scopedAuthoringState(state, ownerUserId);
   if (req.method === "POST" && url.pathname === "/api/ai/generate-questions") {
     const body = await readJson(req);
-    sendJson(res, 202, startGenerationJob(body, userId));
+    sendJson(res, 202, startGenerationJob(body, actor));
     return true;
   }
 
   if (req.method === "GET" && url.pathname.startsWith("/api/ai/generation-jobs/")) {
     const id = decodeURIComponent(url.pathname.split("/").pop() || "");
-    const job = getGenerationJob(id, userId);
+    const job = getGenerationJob(id, actor.userId);
     if (!job) {
       sendJson(res, 404, { error: "出题任务不存在或已过期" });
       return true;
@@ -47,11 +55,13 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
       });
       return true;
     }
-    await updateState((current) => {
-      const currentState = scopedAuthoringState(current, userId);
-      const activePaper = paperId && currentState.paper?.id === paperId
-        ? currentState.paper
-        : paperId ? (currentState.papers || []).find((item) => item.id === paperId) : null;
+    const saveResult = await updateState((current) => {
+      const savedPaper = paperId ? (current.papers || []).find((item) => item.id === paperId && canAccessResource(actor, item)) : null;
+      if (paperId && !savedPaper) return { error: "试卷不存在或已被删除，请刷新后重试", statusCode: 404 };
+      const draftOwnerUserId = savedPaper ? resourceOwnerUserId(savedPaper) : actor.userId;
+      setActiveAuthoringOwner(auth, draftOwnerUserId);
+      const currentState = scopedAuthoringState(current, draftOwnerUserId);
+      const activePaper = paperId && currentState.paper?.id === paperId ? currentState.paper : savedPaper;
       currentState.questions = questions.map((item, index) => ({
         ...item,
         id: item.id || `q-${String(index + 1).padStart(3, "0")}`,
@@ -70,13 +80,18 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
         generationSpecSnapshot: spec,
       };
       currentState.auditLog.push(logItem("ai-draft-save", `保存「${spec.paperName || "未命名试卷"}」试卷内容 ${currentState.questions.length} 道，稳定性 ${checks.stabilityScore}`));
+      return { saved: true };
     });
+    if (saveResult?.error) {
+      sendJson(res, saveResult.statusCode || 404, saveResult);
+      return true;
+    }
     sendJson(res, 200, { saved: true, questions, spec, checks });
     return true;
   }
 
   if (req.method === "POST" && url.pathname === "/api/authoring/questions/import") {
-    const result = await importQuestionBankIntoAuthoring(await readJson(req), auth?.user?.username || "", userId);
+    const result = await importQuestionBankIntoAuthoring(await readJson(req), actor, ownerUserId);
     sendJson(res, 200, result);
     return true;
   }
@@ -109,7 +124,7 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
     const id = url.pathname.split("/").pop();
     const body = await readJson(req);
     const question = await updateState((current) => {
-      const currentState = scopedAuthoringState(current, userId);
+      const currentState = scopedAuthoringState(current, ownerUserId);
       const target = currentState.questions.find((item) => item.id === id);
       if (!target) return null;
       const before = JSON.stringify(target);
@@ -121,7 +136,7 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
         if (inPaper) {
           currentState.paper.status = "草稿";
           currentState.paper.publishedAt = null;
-          upsertPaperSnapshot(currentState, buildPaper(currentState.questions, currentState.paper));
+          upsertPaperSnapshot(currentState, buildPaper(currentState.questions, currentState.paper), actor, ownerUserId);
         } else {
           currentState.auditLog.push(logItem("question-bank-update", `未入卷题目 ${id} 内容已更新`));
         }
@@ -148,14 +163,14 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
 
   if (req.method === "POST" && url.pathname === "/api/quality/repair") {
     const result = await updateState((current) => {
-      const currentState = scopedAuthoringState(current, userId);
+      const currentState = scopedAuthoringState(current, ownerUserId);
       const repaired = repairQuestions(currentState.questions);
       currentState.questions = repaired.questions;
       if (currentState.paper.id) {
         currentState.paper.status = "草稿";
         currentState.paper.publishedAt = null;
         currentState.paper.questionIds = currentState.questions.map((item) => item.id);
-        upsertPaperSnapshot(currentState, buildPaper(currentState.questions, currentState.paper));
+        upsertPaperSnapshot(currentState, buildPaper(currentState.questions, currentState.paper), actor, ownerUserId);
       }
       currentState.auditLog.push(logItem("quality-repair", `自动修复完成：剩余 ${repaired.checks.failures.length} 个问题`));
       return repaired;

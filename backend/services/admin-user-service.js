@@ -1,6 +1,7 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { logItem } from "../lib/audit.js";
+import { USER_ROLES, USER_ROLE_LABELS } from "./access-control-service.js";
 
 const scrypt = promisify(scryptCallback);
 const passwordKeyLength = 64;
@@ -15,10 +16,11 @@ export async function initializeAdminUsers(state) {
   });
   const profiles = state.adminProfiles && typeof state.adminProfiles === "object" ? state.adminProfiles : {};
   let users = normalizeStoredUsers(state.adminUsers);
-  migrateBootstrapAdminUsername(state, users);
+  const accounts = loadBootstrapAccounts();
+  const superAdminAccount = accounts.find((item) => item.role === USER_ROLES.SUPER_ADMIN);
+  let rolesChanged = false;
 
   if (!users.length) {
-    const accounts = loadBootstrapAccounts();
     users = await Promise.all(accounts.map(async (account) => {
       const profile = profiles[account.username] || {};
       const now = new Date().toISOString();
@@ -28,6 +30,7 @@ export async function initializeAdminUsers(state) {
         passwordHash: await hashAdminPassword(account.password),
         displayName: normalizeDisplayName(profile.displayName, account.username),
         avatar: String(profile.avatar || ""),
+        role: account.role,
         status: "active",
         authVersion: 1,
         createdAt: now,
@@ -39,6 +42,51 @@ export async function initializeAdminUsers(state) {
     }));
     state.adminSessions = {};
   } else {
+    let superAdmin = users.find((user) => user.username.toLowerCase() === superAdminAccount.username.toLowerCase());
+    if (!superAdmin) {
+      superAdmin = users.find((user) => user.role === USER_ROLES.SUPER_ADMIN && user.createdBy === "bootstrap")
+        || users.find((user) => [defaultAdminUsername, previousDefaultAdminUsername].includes(user.username.toLowerCase()) && user.createdBy === "bootstrap");
+      if (superAdmin) {
+        const previousUsername = superAdmin.username;
+        superAdmin.username = superAdminAccount.username;
+        superAdmin.updatedAt = new Date().toISOString();
+        rolesChanged = true;
+        state.auditLog = Array.isArray(state.auditLog) ? state.auditLog : [];
+        state.auditLog.push(logItem("super-admin-username-migrate", `${previousUsername} 登录账号已迁移为 ${superAdmin.username}`, {
+          userId: superAdmin.id,
+          previousUsername,
+          username: superAdmin.username,
+        }));
+      }
+    }
+    if (!superAdmin) {
+      const now = new Date().toISOString();
+      superAdmin = {
+        id: createUserId(),
+        username: superAdminAccount.username,
+        passwordHash: await hashAdminPassword(superAdminAccount.password),
+        displayName: normalizeDisplayName(profiles[superAdminAccount.username]?.displayName, superAdminAccount.username),
+        avatar: String(profiles[superAdminAccount.username]?.avatar || ""),
+        role: USER_ROLES.SUPER_ADMIN,
+        status: "active",
+        authVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+        lastLoginAt: null,
+        passwordChangedAt: now,
+        createdBy: "bootstrap",
+      };
+      users.unshift(superAdmin);
+      rolesChanged = true;
+    }
+    users = users.map((user) => {
+      const role = user.id === superAdmin.id ? USER_ROLES.SUPER_ADMIN : USER_ROLES.USER;
+      if (user.role !== role) {
+        user.authVersion += 1;
+        rolesChanged = true;
+      }
+      return { ...user, role };
+    });
     users = users.map((user) => {
       const profile = profiles[user.username] || {};
       return {
@@ -49,12 +97,14 @@ export async function initializeAdminUsers(state) {
     });
   }
 
-  if (users.length && !users.some((user) => user.status === "active")) {
-    users[0] = { ...users[0], status: "active", authVersion: users[0].authVersion + 1 };
+  const superAdminIndex = users.findIndex((user) => user.role === USER_ROLES.SUPER_ADMIN);
+  if (superAdminIndex >= 0 && users[superAdminIndex].status !== "active") {
+    users[superAdminIndex] = { ...users[superAdminIndex], status: "active", authVersion: users[superAdminIndex].authVersion + 1 };
+    rolesChanged = true;
   }
 
   state.adminUsers = users;
-  state.adminSessions = normalizeStoredSessions(state.adminSessions);
+  state.adminSessions = rolesChanged ? {} : normalizeStoredSessions(state.adminSessions);
   delete state.adminProfiles;
   const after = JSON.stringify({ users: state.adminUsers, profiles: null, sessions: state.adminSessions });
   return before !== after;
@@ -73,6 +123,8 @@ export function publicAdminUser(user = {}, session = {}) {
     username: user.username || "",
     displayName: user.displayName || user.username || "",
     avatar: user.avatar || "",
+    role: user.role === USER_ROLES.SUPER_ADMIN ? USER_ROLES.SUPER_ADMIN : USER_ROLES.USER,
+    roleLabel: USER_ROLE_LABELS[user.role] || USER_ROLE_LABELS[USER_ROLES.USER],
     status: user.status || "disabled",
     createdAt: user.createdAt || null,
     updatedAt: user.updatedAt || null,
@@ -124,6 +176,7 @@ export async function createAdminUser(state, actorSession = {}, body = {}) {
     passwordHash: await hashAdminPassword(password),
     displayName,
     avatar: "",
+    role: USER_ROLES.USER,
     status: "active",
     authVersion: 1,
     createdAt: now,
@@ -147,6 +200,9 @@ export function updateAdminUser(state, actorSession = {}, userId = "", body = {}
   if (!["active", "disabled"].includes(nextStatus)) return errorResult("请选择有效用户状态");
 
   const changesStatus = nextStatus !== target.status;
+  if (target.role === USER_ROLES.SUPER_ADMIN && changesStatus) {
+    return errorResult("超级管理员账号不能停用", 409);
+  }
   if (target.id === actorSession.userId && changesStatus) {
     return errorResult("不能停用自己的账号", 409);
   }
@@ -167,6 +223,7 @@ export function updateAdminUser(state, actorSession = {}, userId = "", body = {}
 export async function resetAdminUserPassword(state, actorSession = {}, userId = "", body = {}) {
   const target = findAdminUser(state, userId);
   if (!target) return errorResult("用户不存在", 404);
+  if (target.role === USER_ROLES.SUPER_ADMIN) return errorResult("请由超级管理员在个人资料中修改密码", 409);
   if (target.id === actorSession.userId) return errorResult("请在个人资料中修改自己的密码", 409);
   const password = String(body.password || "");
   const passwordError = validatePassword(password);
@@ -206,6 +263,7 @@ export async function changeAdminPassword(state, session = {}, token = "", body 
 export function revokeManagedAdminUserSessions(state, actorSession = {}, userId = "") {
   const target = findAdminUser(state, userId);
   if (!target) return errorResult("用户不存在", 404);
+  if (target.role === USER_ROLES.SUPER_ADMIN) return errorResult("不能在用户管理中强制下线超级管理员", 409);
   if (target.id === actorSession.userId) return errorResult("不能在用户管理中强制下线自己", 409);
   const revokedSessions = revokeAdminUserSessions(state, target.id);
   pushAudit(state, "admin-user-sessions-revoke", `${actorSession.username} 强制下线用户 ${target.username}`, actorSession, target, {
@@ -256,7 +314,7 @@ function normalizeStoredSessions(input) {
   return Object.fromEntries(Object.entries(input).map(([token, session]) => {
     const source = session && typeof session === "object" ? session : {};
     const normalized = {};
-    for (const key of ["id", "userId", "username", "authVersion", "createdAt", "expiresAt", "lastSeenAt"]) {
+    for (const key of ["id", "userId", "username", "authVersion", "createdAt", "expiresAt", "lastSeenAt", "editingOwnerUserId"]) {
       if (source[key] !== undefined) normalized[key] = source[key];
     }
     return [token, normalized];
@@ -274,6 +332,7 @@ function normalizeStoredUser(item = {}) {
     passwordHash,
     displayName: normalizeDisplayName(item.displayName, username),
     avatar: String(item.avatar || ""),
+    role: item.role === USER_ROLES.SUPER_ADMIN ? USER_ROLES.SUPER_ADMIN : USER_ROLES.USER,
     status: item.status === "disabled" ? "disabled" : "active",
     authVersion: Math.max(1, Number(item.authVersion || 1)),
     createdAt: item.createdAt || now,
@@ -285,29 +344,12 @@ function normalizeStoredUser(item = {}) {
 }
 
 function loadBootstrapAccounts() {
-  const configured = parseBootstrapAccounts(process.env.SMARTQ_ADMIN_ACCOUNTS);
-  if (configured.length) return configured;
-  const username = String(process.env.SMARTQ_ADMIN_USER || defaultAdminUsername).trim() || defaultAdminUsername;
-  const password = String(process.env.SMARTQ_ADMIN_PASSWORD || "kongdao123");
-  return [{ username, password }];
-}
-
-function migrateBootstrapAdminUsername(state, users) {
-  if (users.some((user) => user.username.toLowerCase() === defaultAdminUsername)) return;
-  const target = users.find((user) => user.username.toLowerCase() === previousDefaultAdminUsername && user.createdBy === "bootstrap");
-  if (!target) return;
-  const previousUsername = target.username;
-  target.username = defaultAdminUsername;
-  target.authVersion += 1;
-  target.updatedAt = new Date().toISOString();
-  const revokedSessions = revokeAdminUserSessions(state, target.id);
-  state.auditLog = Array.isArray(state.auditLog) ? state.auditLog : [];
-  state.auditLog.push(logItem("admin-account-username-migrate", `${previousUsername} 登录账号已迁移为 ${defaultAdminUsername}`, {
-    userId: target.id,
-    previousUsername,
-    username: target.username,
-    revokedSessions,
-  }));
+  const username = String(process.env.SUPER_ADMIN_USER || defaultAdminUsername).trim() || defaultAdminUsername;
+  const password = String(process.env.SUPER_ADMIN_PASSWORD || "kongdao123");
+  const ordinaryAccounts = parseBootstrapAccounts(process.env.SMARTQ_ADMIN_ACCOUNTS)
+    .filter((item) => item.username.toLowerCase() !== username.toLowerCase())
+    .map((item) => ({ ...item, role: USER_ROLES.USER }));
+  return [{ username, password, role: USER_ROLES.SUPER_ADMIN }, ...ordinaryAccounts];
 }
 
 function parseBootstrapAccounts(raw = "") {

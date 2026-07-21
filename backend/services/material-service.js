@@ -6,6 +6,12 @@ import mammoth from "mammoth";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { logItem } from "../lib/audit.js";
 import { loadState, updateState } from "../lib/runtime-store.js";
+import {
+  accessibleResources,
+  canAccessResource,
+  decorateOwnedResource,
+  resourceOwnerUserId,
+} from "./access-control-service.js";
 
 const backendRoot = fileURLToPath(new URL("..", import.meta.url));
 const defaultDataFile = join(backendRoot, "data", "runtime.json");
@@ -21,13 +27,15 @@ const materialTextMaxChars = Math.max(
 );
 const allowedExtensions = new Set([".txt", ".md", ".pdf", ".docx"]);
 
-export function listMaterials(state, query = {}) {
+export function listMaterials(state, query = {}, actor = {}) {
   const keyword = String(query.search || query.keyword || "").trim().toLowerCase();
   const status = String(query.status || "").trim();
   const page = clampNumber(query.page, 1, 10_000, 1);
   const pageSize = clampNumber(query.pageSize, 1, 1000, 20);
-  const usages = materialUsageMap(state);
-  const rows = (state.sourceMaterials || [])
+  const ownerUserId = String(query.ownerUserId || "");
+  const usages = materialUsageMap(state, actor);
+  const rows = accessibleResources(state.sourceMaterials, actor)
+    .filter((item) => !ownerUserId || resourceOwnerUserId(item) === ownerUserId)
     .filter((item) => !status || item.status === status)
     .filter((item) => {
       if (!keyword) return true;
@@ -37,29 +45,29 @@ export function listMaterials(state, query = {}) {
         .includes(keyword);
     })
     .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
-    .map((item) => materialSummary(item, usages.get(item.id)));
+    .map((item) => materialSummary(item, usages.get(item.id), state));
   const start = (page - 1) * pageSize;
   return { items: rows.slice(start, start + pageSize), total: rows.length, page, pageSize };
 }
 
-export async function getMaterialDetail(state, id) {
-  const material = findMaterial(state, id);
+export async function getMaterialDetail(state, id, actor = {}) {
+  const material = findMaterial(state, id, actor);
   if (!material) return null;
-  const usage = materialUsageMap(state).get(material.id);
+  const usage = materialUsageMap(state, actor).get(material.id);
   let content = "";
   if (!material.parseError && material.textLength > 0) {
     content = await readRevisionText(material).catch(() => "");
   }
-  return { ...materialSummary(material, usage), revisions: material.revisions || [], content };
+  return { ...materialSummary(material, usage, state), revisions: material.revisions || [], content };
 }
 
-export async function createTextMaterial(body = {}, actor = "") {
+export async function createTextMaterial(body = {}, actor = {}) {
   const name = cleanRequired(body.name, "请输入资料名称", 80);
   const content = normalizeMaterialText(body.content);
   if (!content) throw badRequest("请输入资料正文");
   const id = createMaterialId();
   const now = new Date().toISOString();
-  const revision = await writeMaterialRevision({ id, version: 1, content, actor, now });
+  const revision = await writeMaterialRevision({ id, version: 1, content, actor: actor.username, actorUserId: actor.userId, now });
   return updateState((state) => {
     const material = {
       id,
@@ -75,17 +83,20 @@ export async function createTextMaterial(body = {}, actor = "") {
       textLength: revision.textLength,
       parseError: "",
       revisions: [revision],
-      createdBy: actor,
+      createdBy: actor.username,
+      ownerUserId: actor.userId,
+      createdByUserId: actor.userId,
+      updatedByUserId: actor.userId,
       createdAt: now,
       updatedAt: now,
     };
     state.sourceMaterials.unshift(material);
     state.auditLog.push(logItem("material-create", `新建出题资料：${material.name}`));
-    return materialSummary(material);
+    return materialSummary(material, {}, state);
   });
 }
 
-export async function createFileMaterial(fields = {}, file = {}, actor = "") {
+export async function createFileMaterial(fields = {}, file = {}, actor = {}) {
   const extension = extname(file.filename || "").toLowerCase();
   if (!allowedExtensions.has(extension)) throw badRequest("仅支持 TXT、MD、PDF 和 DOCX 文件");
   const name = cleanRequired(fields.name || basename(file.filename, extension), "请输入资料名称", 80);
@@ -103,7 +114,8 @@ export async function createFileMaterial(fields = {}, file = {}, actor = "") {
     id,
     version,
     content,
-    actor,
+    actor: actor.username,
+    actorUserId: actor.userId,
     now,
     filename: file.filename,
     mimeType: file.mimeType,
@@ -124,19 +136,22 @@ export async function createFileMaterial(fields = {}, file = {}, actor = "") {
       textLength: revision.textLength,
       parseError,
       revisions: [revision],
-      createdBy: actor,
+      createdBy: actor.username,
+      ownerUserId: actor.userId,
+      createdByUserId: actor.userId,
+      updatedByUserId: actor.userId,
       createdAt: now,
       updatedAt: now,
     };
     state.sourceMaterials.unshift(material);
     state.auditLog.push(logItem(parseError ? "material-parse-failed" : "material-upload", `${parseError ? "资料解析失败" : "上传出题资料"}：${material.name}`));
-    return materialSummary(material);
+    return materialSummary(material, {}, state);
   });
 }
 
-export async function updateMaterial(id, body = {}, actor = "") {
+export async function updateMaterial(id, body = {}, actor = {}) {
   const currentState = await loadState();
-  const current = findMaterial(currentState, id);
+  const current = findMaterial(currentState, id, actor);
   if (!current) return null;
 
   let revision = null;
@@ -147,12 +162,12 @@ export async function updateMaterial(id, body = {}, actor = "") {
     const existing = await readRevisionText(current).catch(() => "");
     if (content !== existing) {
       const now = new Date().toISOString();
-      revision = await writeMaterialRevision({ id, version: Number(current.version || 0) + 1, content, actor, now });
+      revision = await writeMaterialRevision({ id, version: Number(current.version || 0) + 1, content, actor: actor.username, actorUserId: actor.userId, now });
     }
   }
 
   return updateState((state) => {
-    const material = findMaterial(state, id);
+    const material = findMaterial(state, id, actor);
     if (!material) return null;
     if (body.name !== undefined) material.name = cleanRequired(body.name, "请输入资料名称", 80);
     if (body.description !== undefined) material.description = cleanText(body.description, 300);
@@ -169,25 +184,27 @@ export async function updateMaterial(id, body = {}, actor = "") {
       material.revisions = [...(material.revisions || []), revision];
     }
     material.updatedAt = new Date().toISOString();
-    state.auditLog.push(logItem("material-update", `更新出题资料：${material.name}`, { actor }));
-    return materialSummary(material);
+    material.updatedByUserId = actor.userId;
+    state.auditLog.push(logItem("material-update", `更新出题资料：${material.name}`, { actor: actor.username, ownerUserId: material.ownerUserId }));
+    return materialSummary(material, {}, state);
   });
 }
 
-export async function setMaterialArchived(id, archived, actor = "") {
+export async function setMaterialArchived(id, archived, actor = {}) {
   return updateState((state) => {
-    const material = findMaterial(state, id);
+    const material = findMaterial(state, id, actor);
     if (!material) return null;
     material.status = archived ? "archived" : (material.parseError ? "failed" : "ready");
     material.updatedAt = new Date().toISOString();
-    state.auditLog.push(logItem(archived ? "material-archive" : "material-restore", `${archived ? "归档" : "恢复"}出题资料：${material.name}`, { actor }));
-    return materialSummary(material);
+    material.updatedByUserId = actor.userId;
+    state.auditLog.push(logItem(archived ? "material-archive" : "material-restore", `${archived ? "归档" : "恢复"}出题资料：${material.name}`, { actor: actor.username, ownerUserId: material.ownerUserId }));
+    return materialSummary(material, {}, state);
   });
 }
 
-export async function reparseMaterial(id, actor = "") {
+export async function reparseMaterial(id, actor = {}) {
   const currentState = await loadState();
-  const current = findMaterial(currentState, id);
+  const current = findMaterial(currentState, id, actor);
   if (!current) return null;
   if (current.sourceType !== "file") throw badRequest("纯文本资料无需重新解析");
   const revision = latestRevision(current);
@@ -202,7 +219,7 @@ export async function reparseMaterial(id, actor = "") {
     parseError = error.message || "资料解析失败";
   }
   return updateState((state) => {
-    const material = findMaterial(state, id);
+    const material = findMaterial(state, id, actor);
     if (!material) return null;
     const targetRevision = latestRevision(material);
     targetRevision.textLength = content.length;
@@ -212,23 +229,24 @@ export async function reparseMaterial(id, actor = "") {
     material.parseError = parseError;
     material.status = parseError ? "failed" : "ready";
     material.updatedAt = new Date().toISOString();
-    state.auditLog.push(logItem(parseError ? "material-parse-failed" : "material-reparse", `${parseError ? "资料解析失败" : "重新解析资料"}：${material.name}`, { actor }));
-    return materialSummary(material);
+    material.updatedByUserId = actor.userId;
+    state.auditLog.push(logItem(parseError ? "material-parse-failed" : "material-reparse", `${parseError ? "资料解析失败" : "重新解析资料"}：${material.name}`, { actor: actor.username, ownerUserId: material.ownerUserId }));
+    return materialSummary(material, {}, state);
   });
 }
 
-export function materialUsages(state, id) {
+export function materialUsages(state, id, actor = {}) {
   const rows = [];
-  for (const paper of state.papers || []) {
+  for (const paper of accessibleResources(state.papers, actor)) {
     const count = (paper.questions || []).filter((question) => questionReferencesMaterial(question, id)).length;
     if (count) rows.push({ paperId: paper.id, paperName: paper.name, status: paper.status, questionCount: count, createdAt: paper.createdAt, publishedAt: paper.publishedAt });
   }
   return rows;
 }
 
-export async function resolveGenerationMaterials(state, sourcePlan = {}, spec = {}) {
+export async function resolveGenerationMaterials(state, sourcePlan = {}, spec = {}, actor = {}) {
   const ids = Array.isArray(sourcePlan.materialIds) ? [...new Set(sourcePlan.materialIds.map(String))] : [];
-  const materials = ids.map((id) => findMaterial(state, id)).filter(Boolean);
+  const materials = ids.map((id) => findMaterial(state, id, actor)).filter(Boolean);
   if (materials.length !== ids.length) throw badRequest("部分出题资料不存在，请重新选择");
   const unavailable = materials.find((item) => item.status !== "ready");
   if (unavailable) throw badRequest(`出题资料「${unavailable.name}」当前不可用`);
@@ -256,8 +274,8 @@ export async function resolveGenerationMaterials(state, sourcePlan = {}, spec = 
   return resolved;
 }
 
-function materialSummary(material, usage = {}) {
-  return {
+function materialSummary(material, usage = {}, state = {}) {
+  return decorateOwnedResource(state, {
     id: material.id,
     name: material.name,
     description: material.description || "",
@@ -275,12 +293,15 @@ function materialSummary(material, usage = {}) {
     createdBy: material.createdBy || "",
     createdAt: material.createdAt,
     updatedAt: material.updatedAt,
-  };
+    ownerUserId: material.ownerUserId,
+    createdByUserId: material.createdByUserId,
+    updatedByUserId: material.updatedByUserId,
+  });
 }
 
-function materialUsageMap(state) {
+function materialUsageMap(state, actor = {}) {
   const map = new Map();
-  for (const paper of state.papers || []) {
+  for (const paper of accessibleResources(state.papers, actor)) {
     const ids = new Set();
     for (const question of paper.questions || []) {
       const questionMaterialIds = new Set((question.origin?.materialRefs || []).map((ref) => ref.materialId).filter(Boolean));
@@ -304,11 +325,11 @@ function questionReferencesMaterial(question, id) {
   return (question.origin?.materialRefs || []).some((ref) => ref.materialId === id);
 }
 
-function findMaterial(state, id) {
-  return (state.sourceMaterials || []).find((item) => item.id === id) || null;
+function findMaterial(state, id, actor = {}) {
+  return (state.sourceMaterials || []).find((item) => item.id === id && canAccessResource(actor, item)) || null;
 }
 
-async function writeMaterialRevision({ id, version, content = "", actor = "", now, filename = "", mimeType = "", sourceBuffer = null }) {
+async function writeMaterialRevision({ id, version, content = "", actor = "", actorUserId = "", now, filename = "", mimeType = "", sourceBuffer = null }) {
   const directory = revisionDirectory(id, version);
   await mkdir(directory, { recursive: true });
   await writeFile(revisionTextPath(id, version), content, "utf8");
@@ -321,6 +342,7 @@ async function writeMaterialRevision({ id, version, content = "", actor = "", no
     textLength: content.length,
     contentHash: hashContent(content || sourceBuffer || ""),
     createdBy: actor,
+    createdByUserId: actorUserId,
     createdAt: now,
   };
 }

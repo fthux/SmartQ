@@ -22,8 +22,14 @@ import {
 import { paperSnapshotDetail, upsertPaperSnapshot } from "./paper-service.js";
 import { validateActiveLeafCategories } from "./question-bank-category-service.js";
 import { scopedAuthoringState } from "./authoring-workspace-service.js";
+import {
+  accessibleResources,
+  canAccessResource,
+  decorateOwnedResource,
+  resourceOwnerUserId,
+} from "./access-control-service.js";
 
-export function listQuestionBank(state, query = {}) {
+export function listQuestionBank(state, query = {}, actor = {}) {
   const search = String(query.search || "").trim().toLowerCase();
   const status = questionBankStatuses.includes(query.status) ? query.status : "";
   const type = questionTypes.includes(query.type) ? query.type : "";
@@ -31,9 +37,11 @@ export function listQuestionBank(state, query = {}) {
   const categoryId = String(query.categoryId || "all");
   const page = clampNumber(query.page, 1, 100_000, 1);
   const pageSize = clampNumber(query.pageSize, 1, 100, 20);
-  const usageMap = questionBankUsageMap(state);
-  const items = (state.questionBank || [])
+  const ownerUserId = String(query.ownerUserId || "");
+  const usageMap = questionBankUsageMap(state, actor);
+  const items = accessibleResources(state.questionBank, actor)
     .filter((item) => {
+      if (ownerUserId && resourceOwnerUserId(item) !== ownerUserId) return false;
       if (categoryId === "archived") {
         if (item.status !== "已归档") return false;
       } else if (categoryId === "unclassified") {
@@ -61,45 +69,48 @@ export function listQuestionBank(state, query = {}) {
   };
 }
 
-export function getQuestionBankDetail(state, id) {
-  const item = findQuestionBankItem(state, id);
+export function getQuestionBankDetail(state, id, actor = {}) {
+  const item = findQuestionBankItem(state, id, actor);
   if (!item) return null;
   return {
     ...item,
     categories: categorySummaries(state, item.categoryIds),
-    usages: questionBankUsages(state, id),
+    usages: questionBankUsages(state, id, actor),
+    ...decorateOwnedResource(state, item),
   };
 }
 
-export async function createQuestionBankItem(body = {}, actor = "") {
+export async function createQuestionBankItem(body = {}, actor = {}) {
   return updateState((state) => {
-    const categoryIds = validateActiveLeafCategories(state, body.categoryIds, true);
-    const candidate = buildQuestionBankCandidate({ ...body, categoryIds, status: "已校验" }, null, actor);
+    const ownerUserId = actor.userId;
+    const categoryIds = validateActiveLeafCategories(state, body.categoryIds, true, actor, ownerUserId);
+    const candidate = buildQuestionBankCandidate({ ...body, categoryIds, status: "已校验" }, null, actor, ownerUserId);
     ensureValidQuestion(candidate);
-    const duplicate = (state.questionBank || []).find((item) => item.contentHash === candidate.contentHash);
+    const duplicate = (state.questionBank || []).find((item) => resourceOwnerUserId(item) === ownerUserId && item.contentHash === candidate.contentHash);
     if (duplicate) throw conflict(`题库中已存在相同题目：${duplicate.id}`);
-    const stemConflict = findStemConflict(state, candidate);
+    const stemConflict = findStemConflict(state, candidate, "", ownerUserId);
     if (stemConflict) throw conflict(`题干相同但答案、选项或评分规则不同，请与题库题目 ${stemConflict.id} 对比处理`);
     state.questionBank.unshift(candidate);
-    state.auditLog.push(logItem("question-bank-create", `新建题库题目：${candidate.id}`, { actor }));
+    state.auditLog.push(logItem("question-bank-create", `新建题库题目：${candidate.id}`, { actor: actor.username, ownerUserId }));
     return questionBankSummary(candidate, null, state);
   });
 }
 
-export async function updateQuestionBankItem(id, body = {}, actor = "") {
+export async function updateQuestionBankItem(id, body = {}, actor = {}) {
   return updateState((state) => {
-    const item = findQuestionBankItem(state, id);
+    const item = findQuestionBankItem(state, id, actor);
     if (!item) return null;
-    const categoryIds = body.categoryIds === undefined ? item.categoryIds : validateActiveLeafCategories(state, body.categoryIds, true);
+    const ownerUserId = resourceOwnerUserId(item);
+    const categoryIds = body.categoryIds === undefined ? item.categoryIds : validateActiveLeafCategories(state, body.categoryIds, true, actor, ownerUserId);
     const candidate = buildQuestionBankCandidate({
       ...body,
       categoryIds,
       status: item.status === "已归档" ? "已归档" : "已校验",
-    }, item, actor);
+    }, item, actor, ownerUserId);
     ensureValidQuestion(candidate);
-    const duplicate = (state.questionBank || []).find((entry) => entry.id !== id && entry.contentHash === candidate.contentHash);
+    const duplicate = (state.questionBank || []).find((entry) => entry.id !== id && resourceOwnerUserId(entry) === ownerUserId && entry.contentHash === candidate.contentHash);
     if (duplicate) throw conflict(`修改后的题目与题库题目 ${duplicate.id} 重复`);
-    const stemConflict = findStemConflict(state, candidate, id);
+    const stemConflict = findStemConflict(state, candidate, id, ownerUserId);
     if (stemConflict) throw conflict(`修改后的题干与题库题目 ${stemConflict.id} 相同，但答案、选项或评分规则不同`);
     const contentChanged = candidate.contentHash !== item.contentHash;
     const now = new Date().toISOString();
@@ -110,18 +121,19 @@ export async function updateQuestionBankItem(id, body = {}, actor = "") {
       revisions: item.revisions || [],
       createdBy: item.createdBy,
       createdAt: item.createdAt,
-      updatedBy: actor,
+      updatedBy: actor.username,
+      updatedByUserId: actor.userId,
       updatedAt: now,
     });
-    if (contentChanged) item.revisions.push(questionBankRevision(item, actor, now));
-    state.auditLog.push(logItem("question-bank-update", `更新题库题目：${item.id}${contentChanged ? `，版本 v${item.version}` : ""}`, { actor }));
-    return questionBankSummary(item, questionBankUsageMap(state).get(item.id), state);
+    if (contentChanged) item.revisions.push(questionBankRevision(item, actor.username, now));
+    state.auditLog.push(logItem("question-bank-update", `更新题库题目：${item.id}${contentChanged ? `，版本 v${item.version}` : ""}`, { actor: actor.username, ownerUserId }));
+    return questionBankSummary(item, questionBankUsageMap(state, actor).get(item.id), state);
   });
 }
 
-export async function setQuestionBankArchived(id, archived, actor = "") {
+export async function setQuestionBankArchived(id, archived, actor = {}) {
   return updateState((state) => {
-    const item = findQuestionBankItem(state, id);
+    const item = findQuestionBankItem(state, id, actor);
     if (!item) return null;
     if (archived) {
       item.archivedFromStatus = "已校验";
@@ -129,20 +141,22 @@ export async function setQuestionBankArchived(id, archived, actor = "") {
     } else {
       item.status = "已校验";
     }
-    item.updatedBy = actor;
+    item.updatedBy = actor.username;
+    item.updatedByUserId = actor.userId;
     item.updatedAt = new Date().toISOString();
-    state.auditLog.push(logItem(archived ? "question-bank-archive" : "question-bank-restore", `${archived ? "归档" : "恢复"}题库题目：${item.id}`, { actor }));
-    return questionBankSummary(item, questionBankUsageMap(state).get(item.id), state);
+    state.auditLog.push(logItem(archived ? "question-bank-archive" : "question-bank-restore", `${archived ? "归档" : "恢复"}题库题目：${item.id}`, { actor: actor.username, ownerUserId: item.ownerUserId }));
+    return questionBankSummary(item, questionBankUsageMap(state, actor).get(item.id), state);
   });
 }
 
-export async function importQuestionsToBank(body = {}, actor = "", userId = "") {
+export async function importQuestionsToBank(body = {}, actor = {}, activeOwnerUserId = "") {
   return updateState((state) => {
-    const scopedState = scopedAuthoringState(state, userId);
     const paperId = String(body.paperId || "");
-    const paper = paperId ? (scopedState.papers || []).find((item) => item.id === paperId) : null;
+    const paper = paperId ? (state.papers || []).find((item) => item.id === paperId && canAccessResource(actor, item)) : null;
     if (paperId && !paper) return null;
-    const categoryId = resolveImportCategoryId(scopedState, body);
+    const ownerUserId = paper ? resourceOwnerUserId(paper) : String(activeOwnerUserId || actor.userId);
+    const scopedState = scopedAuthoringState(state, ownerUserId);
+    const categoryId = resolveImportCategoryId(scopedState, body, actor, ownerUserId);
     const sourceQuestions = paper ? paperSnapshotDetail(paper, scopedState.questions).questions : scopedState.questions;
     const selectedIds = new Set(Array.isArray(body.questionIds) ? body.questionIds.map(String) : []);
     const questions = selectedIds.size ? sourceQuestions.filter((item) => selectedIds.has(String(item.id))) : sourceQuestions;
@@ -150,14 +164,14 @@ export async function importQuestionsToBank(body = {}, actor = "", userId = "") 
     for (const question of questions) {
       const hash = questionContentHash(question);
       const linked = question.origin?.bankQuestionId
-        ? findQuestionBankItem(scopedState, question.origin.bankQuestionId)
+        ? (scopedState.questionBank || []).find((item) => item.id === question.origin.bankQuestionId && resourceOwnerUserId(item) === ownerUserId)
         : null;
       if (linked && linked.contentHash !== hash) {
         result.conflicts.push({ questionId: question.id, bankQuestionId: linked.id, message: "试卷题目已修改，与原题库版本内容不一致" });
         continue;
       }
-      const existing = linked || (scopedState.questionBank || []).find((item) => item.contentHash === hash);
-      const source = buildImportSource(question, paper, scopedState.paper, actor);
+      const existing = linked || (scopedState.questionBank || []).find((item) => resourceOwnerUserId(item) === ownerUserId && item.contentHash === hash);
+      const source = buildImportSource(question, paper, scopedState.paper, actor.username);
       if (existing) {
         addQuestionSource(existing, source);
         existing.categoryIds = [...new Set([...(existing.categoryIds || []), categoryId])];
@@ -166,7 +180,7 @@ export async function importQuestionsToBank(body = {}, actor = "", userId = "") 
         result.items.push(questionBankSummary(existing, null, scopedState));
         continue;
       }
-      const stemConflict = findStemConflict(scopedState, question);
+      const stemConflict = findStemConflict(scopedState, question, "", ownerUserId);
       if (stemConflict) {
         result.conflicts.push({ questionId: question.id, bankQuestionId: stemConflict.id, message: "题干相同但答案、选项或评分规则不同" });
         continue;
@@ -178,23 +192,23 @@ export async function importQuestionsToBank(body = {}, actor = "", userId = "") 
         origin: normalizeImportedOrigin(question.origin),
         sources: [source],
         categoryIds: [categoryId],
-      }, null, actor);
+      }, null, actor, ownerUserId);
       ensureValidQuestion(created);
       scopedState.questionBank.unshift(created);
       result.created += 1;
       result.items.push(questionBankSummary(created, null, scopedState));
     }
-    state.auditLog.push(logItem("question-bank-import", `题目入库完成：新增 ${result.created}，复用 ${result.reused}，跳过 ${result.skipped}，冲突 ${result.conflicts.length}`, { actor, paperId }));
+    state.auditLog.push(logItem("question-bank-import", `题目入库完成：新增 ${result.created}，复用 ${result.reused}，跳过 ${result.skipped}，冲突 ${result.conflicts.length}`, { actor: actor.username, paperId, ownerUserId }));
     return result;
   });
 }
 
-export async function importQuestionBankIntoAuthoring(body = {}, actor = "", userId = "") {
+export async function importQuestionBankIntoAuthoring(body = {}, actor = {}, ownerUserId = "") {
   const ids = [...new Set((Array.isArray(body.questionBankIds) ? body.questionBankIds : []).map(String))].slice(0, 100);
   if (!ids.length) throw badRequest("请选择需要加入试卷的题目");
   return updateState((state) => {
-    const scopedState = scopedAuthoringState(state, userId);
-    const selected = ids.map((id) => findQuestionBankItem(scopedState, id)).filter(Boolean);
+    const scopedState = scopedAuthoringState(state, ownerUserId);
+    const selected = ids.map((id) => findQuestionBankItem(scopedState, id, actor)).filter(Boolean);
     if (selected.length !== ids.length) throw badRequest("部分题库题目不存在，请刷新后重试");
     const unavailable = selected.find((item) => item.status !== "已校验");
     if (unavailable) throw badRequest(`题库题目 ${unavailable.id} 尚未审核通过或已归档`);
@@ -224,9 +238,9 @@ export async function importQuestionBankIntoAuthoring(body = {}, actor = "", use
         scopedState.paper.questionIds = scopedState.questions.map((item) => item.id);
         scopedState.paper.status = "草稿";
         scopedState.paper.publishedAt = null;
-        upsertPaperSnapshot(scopedState, buildPaper(scopedState.questions, scopedState.paper));
+        upsertPaperSnapshot(scopedState, buildPaper(scopedState.questions, scopedState.paper), actor, ownerUserId);
       }
-      state.auditLog.push(logItem("question-bank-add-to-paper", `从题库加入当前试卷 ${added.length} 道题`, { actor, questionBankIds: added.map((item) => item.origin.bankQuestionId), createdAt: now }));
+      state.auditLog.push(logItem("question-bank-add-to-paper", `从题库加入当前试卷 ${added.length} 道题`, { actor: actor.username, ownerUserId, questionBankIds: added.map((item) => item.origin.bankQuestionId), createdAt: now }));
     }
     return {
       added: added.length,
@@ -238,11 +252,11 @@ export async function importQuestionBankIntoAuthoring(body = {}, actor = "", use
   });
 }
 
-export function resolveGenerationQuestionBank(state, sourcePlan = {}, spec = {}) {
+export function resolveGenerationQuestionBank(state, sourcePlan = {}, spec = {}, actor = {}) {
   const ids = [...new Set((Array.isArray(sourcePlan.questionBankIds) ? sourcePlan.questionBankIds : []).map(String))].slice(0, 100);
   const typeTargets = generationTypeTargets(spec);
   if (ids.length) {
-    const selected = ids.map((id) => findQuestionBankItem(state, id)).filter(Boolean);
+    const selected = ids.map((id) => findQuestionBankItem(state, id, actor)).filter(Boolean);
     if (selected.length !== ids.length) throw badRequest("部分题库题目不存在，请重新选择");
     const unavailable = selected.find((item) => item.status !== "已校验");
     if (unavailable) throw badRequest(`题库题目 ${unavailable.id} 已归档，不能用于新的试卷`);
@@ -264,11 +278,11 @@ export function resolveGenerationQuestionBank(state, sourcePlan = {}, spec = {})
     allocations: [],
     availableCount: 0,
   });
-  const categoryIds = validateActiveLeafCategories(state, sourcePlan.questionBankCategoryIds, true);
+  const categoryIds = validateActiveLeafCategories(state, sourcePlan.questionBankCategoryIds, true, actor);
   const allocationMode = sourcePlan.questionBankAllocationMode === "manual" ? "manual" : "balanced";
   const allocations = normalizeGenerationAllocations(sourcePlan.questionBankAllocations, categoryIds, requestedCount, allocationMode);
   const categorySet = new Set(categoryIds);
-  const candidates = (state.questionBank || []).filter((item) => item.status === "已校验" && (item.categoryIds || []).some((id) => categorySet.has(id)));
+  const candidates = accessibleResources(state.questionBank, actor).filter((item) => item.status === "已校验" && (item.categoryIds || []).some((id) => categorySet.has(id)));
   const selected = selectQuestionBankCandidates(state, candidates, allocations, typeTargets, requestedCount, allocationMode, spec);
   return resolvedQuestionBankSelection(state, selected, spec, {
     requestedCount,
@@ -279,8 +293,8 @@ export function resolveGenerationQuestionBank(state, sourcePlan = {}, spec = {})
   });
 }
 
-export function previewGenerationQuestionBank(state, sourcePlan = {}, spec = {}) {
-  return resolveGenerationQuestionBank(state, sourcePlan, spec).selection;
+export function previewGenerationQuestionBank(state, sourcePlan = {}, spec = {}, actor = {}) {
+  return resolveGenerationQuestionBank(state, sourcePlan, spec, actor).selection;
 }
 
 function validateSelectedTypeCounts(selected, typeTargets) {
@@ -401,12 +415,12 @@ function categorySelectionSnapshot(state, id) {
   };
 }
 
-export function questionBankUsages(state, id) {
-  return [...(questionBankUsageMap(state).get(id)?.values() || [])]
+export function questionBankUsages(state, id, actor = {}) {
+  return [...(questionBankUsageMap(state, actor).get(id)?.values() || [])]
     .sort((a, b) => new Date(b.publishedAt || b.createdAt || 0) - new Date(a.publishedAt || a.createdAt || 0));
 }
 
-function buildQuestionBankCandidate(body, existing, actor) {
+function buildQuestionBankCandidate(body, existing, actor, ownerUserId) {
   const now = new Date().toISOString();
   const base = existing || {};
   const raw = {
@@ -418,15 +432,18 @@ function buildQuestionBankCandidate(body, existing, actor) {
     origin: body.origin || base.origin || { type: "manual", materialRefs: [] },
     sources: body.sources || base.sources || [],
     version: base.version || 1,
-    createdBy: base.createdBy || actor,
-    updatedBy: actor,
+    createdBy: base.createdBy || actor.username,
+    updatedBy: actor.username,
+    ownerUserId: base.ownerUserId || ownerUserId,
+    createdByUserId: base.createdByUserId || ownerUserId,
+    updatedByUserId: actor.userId,
     createdAt: base.createdAt || now,
     updatedAt: now,
   };
   const normalized = normalizeQuestionBankRecord(raw);
   normalized.contentHash = questionContentHash(normalized);
   normalized.revisions = base.revisions || normalized.revisions;
-  if (!existing) normalized.revisions = [questionBankRevision(normalized, actor, now)];
+  if (!existing) normalized.revisions = [questionBankRevision(normalized, actor.username, now)];
   return normalized;
 }
 
@@ -549,7 +566,7 @@ function normalizeImportedOrigin(origin = {}) {
 
 function questionBankSummary(item, usages, state) {
   const usageCount = usages instanceof Map ? usages.size : 0;
-  return {
+  return decorateOwnedResource(state, {
     id: item.id,
     type: item.type,
     stem: item.stem,
@@ -571,12 +588,16 @@ function questionBankSummary(item, usages, state) {
     createdBy: item.createdBy || "",
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
-  };
+    ownerUserId: item.ownerUserId,
+    createdByUserId: item.createdByUserId,
+    updatedByUserId: item.updatedByUserId,
+  });
 }
 
-function resolveImportCategoryId(state, body) {
+function resolveImportCategoryId(state, body, actor, ownerUserId) {
   const categoryId = String(body.categoryId || "");
-  if (!activeLeafCategory(state, categoryId)) {
+  const category = activeLeafCategory(state, categoryId);
+  if (!category || !canAccessResource(actor, category) || resourceOwnerUserId(category) !== ownerUserId) {
     throw badRequest("请选择有效的题库末级分类后再将题目加入题库");
   }
   return categoryId;
@@ -592,25 +613,28 @@ function categorySummaries(state, categoryIds = []) {
   }));
 }
 
-function questionBankUsageMap(state) {
+function questionBankUsageMap(state, actor = {}) {
   const map = new Map();
-  for (const item of state.questionBank || []) {
+  const visiblePapers = accessibleResources(state.papers, actor);
+  const visiblePaperIds = new Set(visiblePapers.map((item) => item.id));
+  for (const item of accessibleResources(state.questionBank, actor)) {
     const usages = new Map();
     for (const source of item.sources || []) {
       if (source.type !== "paper" || !source.paperId) continue;
+      if (!visiblePaperIds.has(source.paperId)) continue;
       usages.set(source.paperId, {
         paperId: source.paperId,
         paperName: source.paperName || source.paperId,
-        status: (state.papers || []).find((paper) => paper.id === source.paperId)?.status || "来源试卷已删除",
+        status: visiblePapers.find((paper) => paper.id === source.paperId)?.status || "来源试卷已删除",
         questionCount: 1,
         createdAt: source.addedAt,
-        publishedAt: (state.papers || []).find((paper) => paper.id === source.paperId)?.publishedAt || null,
+        publishedAt: visiblePapers.find((paper) => paper.id === source.paperId)?.publishedAt || null,
         relation: "入库来源",
       });
     }
     map.set(item.id, usages);
   }
-  for (const paper of state.papers || []) {
+  for (const paper of visiblePapers) {
     const counts = new Map();
     for (const question of paper.questions || []) {
       const bankId = question.origin?.bankQuestionId;
@@ -633,15 +657,15 @@ function questionBankUsageMap(state) {
   return map;
 }
 
-function findQuestionBankItem(state, id) {
-  return (state.questionBank || []).find((item) => item.id === id) || null;
+function findQuestionBankItem(state, id, actor = {}) {
+  return (state.questionBank || []).find((item) => item.id === id && canAccessResource(actor, item)) || null;
 }
 
-function findStemConflict(state, question, excludeId = "") {
+function findStemConflict(state, question, excludeId = "", ownerUserId = resourceOwnerUserId(question)) {
   const fingerprint = questionFingerprint(question);
   if (!fingerprint.stem) return null;
   return (state.questionBank || []).find((item) => {
-    if (item.id === excludeId || item.contentHash === questionContentHash(question)) return false;
+    if (resourceOwnerUserId(item) !== ownerUserId || item.id === excludeId || item.contentHash === questionContentHash(question)) return false;
     const existing = questionFingerprint(item);
     return existing.type === fingerprint.type && existing.stem === fingerprint.stem;
   }) || null;

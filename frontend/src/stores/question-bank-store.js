@@ -22,6 +22,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
       if (model.status) params.set("status", model.status);
       if (model.type) params.set("type", model.type);
       if (model.difficulty) params.set("difficulty", model.difficulty);
+      if (target === "page" && management.ownerUserId) params.set("ownerUserId", management.ownerUserId);
       const categoryId = String(management.selectedCategoryId || "all");
       if (categoryId) params.set("categoryId", categoryId);
       const result = await request(`/api/question-bank?${params}`);
@@ -87,7 +88,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
 
   function openCreateQuestionBankItem() {
     resetQuestionBankForm();
-    const selected = state.questionBankManagement.categories.find((item) => item.id === state.questionBankManagement.selectedCategoryId && item.status === "active" && item.isLeaf);
+    const selected = state.questionBankManagement.categories.find((item) => item.id === state.questionBankManagement.selectedCategoryId && item.status === "active" && item.isLeaf && item.ownerUserId === state.admin.user?.id);
     if (selected) state.questionBankManagement.form.categoryIds = [selected.id];
     state.questionBankManagement.editorOpen = true;
   }
@@ -117,6 +118,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
         knowledgeText: (item.knowledge || []).join("，"),
         tagsText: (item.tags || []).join("，"),
         categoryIds: [...(item.categoryIds || [])],
+        ownerUserId: item.ownerUserId || "",
       };
       management.formInitial = questionBankFormFingerprint(management.form);
       management.formError = "";
@@ -346,9 +348,10 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
 
   function openCreateQuestionBankCategory(parentId = "") {
     const management = state.questionBankManagement;
+    const parent = management.categories.find((item) => item.id === String(parentId || ""));
     management.categoryEditorMode = "create";
     management.categoryEditingId = "";
-    management.categoryForm = { name: "", parentId: String(parentId || ""), sortOrder: 0 };
+    management.categoryForm = { name: "", parentId: String(parentId || ""), sortOrder: 0, ownerUserId: parent?.ownerUserId || state.admin.user?.id || "" };
     management.categoryFormInitial = questionBankFormFingerprint(management.categoryForm);
     management.categoryFormError = "";
     management.categoryEditorOpen = true;
@@ -358,7 +361,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     const management = state.questionBankManagement;
     management.categoryEditorMode = "edit";
     management.categoryEditingId = category.id;
-    management.categoryForm = { name: category.name, parentId: category.parentId || "", sortOrder: Number(category.sortOrder || 0) };
+    management.categoryForm = { name: category.name, parentId: category.parentId || "", sortOrder: Number(category.sortOrder || 0), ownerUserId: category.ownerUserId || "" };
     management.categoryFormInitial = questionBankFormFingerprint(management.categoryForm);
     management.categoryFormError = "";
     management.categoryEditorOpen = true;
@@ -539,6 +542,7 @@ function emptyQuestionBankForm() {
     knowledgeText: "",
     tagsText: "",
     categoryIds: [],
+    ownerUserId: "",
   };
 }
 

@@ -86,6 +86,7 @@ function clearAdminUserFilters() {
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="角色" width="125"><template #default="{ row }"><el-tag :type="row.role === 'super_admin' ? 'danger' : 'info'" effect="plain">{{ row.roleLabel || (row.role === 'super_admin' ? '超级管理员' : '普通用户') }}</el-tag></template></el-table-column>
         <el-table-column label="状态" width="130">
           <template #default="{ row }">
             <div class="flex items-center gap-2">

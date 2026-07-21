@@ -11,18 +11,25 @@ import {
   normalizeQuestionBankCategory,
 } from "../lib/question-bank-categories.js";
 import { updateState } from "../lib/runtime-store.js";
+import {
+  accessibleResources,
+  canAccessResource,
+  decorateOwnedResource,
+  resourceOwnerUserId,
+} from "./access-control-service.js";
 
-export function listQuestionBankCategories(state) {
-  const categories = [...(state.questionBankCategories || [])].sort(categorySort);
+export function listQuestionBankCategories(state, actor = {}) {
+  const scopedState = scopedCategoryState(state, actor);
+  const categories = [...scopedState.questionBankCategories].sort(categorySort);
   const byParent = new Map();
   categories.forEach((item) => {
     const list = byParent.get(item.parentId || "") || [];
     list.push(item);
     byParent.set(item.parentId || "", list);
   });
-  const activeQuestions = (state.questionBank || []).filter((item) => item.status !== "已归档");
+  const activeQuestions = scopedState.questionBank.filter((item) => item.status !== "已归档");
   const rows = categories.map((item) => {
-    const descendants = categoryDescendantIds(state, item.id);
+    const descendants = categoryDescendantIds(scopedState, item.id);
     const directCount = activeQuestions.filter((question) => question.categoryIds?.includes(item.id)).length;
     const categoryQuestions = activeQuestions.filter((question) => question.categoryIds?.some((id) => descendants.has(id)));
     const count = categoryQuestions.length;
@@ -31,10 +38,10 @@ export function listQuestionBankCategories(state) {
       return result;
     }, {});
     return {
-      ...item,
-      depth: categoryDepth(state, item.id),
-      isLeaf: isLeafCategory(state, item.id, { activeOnly: true }),
-      path: categoryPath(state, item.id),
+      ...decorateOwnedResource(state, item),
+      depth: categoryDepth(scopedState, item.id),
+      isLeaf: isLeafCategory(scopedState, item.id, { activeOnly: true }),
+      path: categoryPath(scopedState, item.id),
       directCount,
       count,
       typeCounts,
@@ -52,18 +59,21 @@ export function listQuestionBankCategories(state) {
       all: activeQuestions.length,
       unclassified: activeQuestions.filter((item) => !(item.categoryIds || []).length).length,
       multi: activeQuestions.filter((item) => (item.categoryIds || []).length > 1).length,
-      archived: (state.questionBank || []).filter((item) => item.status === "已归档").length,
+      archived: scopedState.questionBank.filter((item) => item.status === "已归档").length,
     },
   };
 }
 
-export async function createQuestionBankCategory(body = {}, actor = "") {
+export async function createQuestionBankCategory(body = {}, actor = {}) {
   return updateState((state) => {
     const name = cleanName(body.name);
     const parentId = String(body.parentId || "");
-    validateParent(state, parentId);
-    ensureUniqueSiblingName(state, name, parentId);
-    if (parentId && (state.questionBank || []).some((item) => item.categoryIds?.includes(parentId))) {
+    const parent = parentId ? categoryMap(state).get(parentId) : null;
+    if (parentId && (!parent || !canAccessResource(actor, parent))) throw badRequest("上级分类不存在或已归档");
+    const ownerUserId = parent ? resourceOwnerUserId(parent) : actor.userId;
+    validateParent(state, parentId, "", actor, ownerUserId);
+    ensureUniqueSiblingName(state, name, parentId, "", ownerUserId);
+    if (parentId && (state.questionBank || []).some((item) => resourceOwnerUserId(item) === ownerUserId && item.categoryIds?.includes(parentId))) {
       throw conflict("该分类已有题目，请先将题目移动到其他分类后再创建子分类");
     }
     const now = new Date().toISOString();
@@ -73,27 +83,31 @@ export async function createQuestionBankCategory(body = {}, actor = "") {
       parentId,
       status: "active",
       sortOrder: body.sortOrder,
-      createdBy: actor,
-      updatedBy: actor,
+      createdBy: actor.username,
+      updatedBy: actor.username,
+      ownerUserId,
+      createdByUserId: ownerUserId,
+      updatedByUserId: actor.userId,
       createdAt: now,
       updatedAt: now,
     });
     state.questionBankCategories.push(category);
-    state.auditLog.push(logItem("question-bank-category-create", `新建题库分类：${categoryPath(state, category.id).map((item) => item.name).join(" / ")}`, { actor, categoryId: category.id }));
-    return listQuestionBankCategories(state);
+    state.auditLog.push(logItem("question-bank-category-create", `新建题库分类：${categoryPath(state, category.id).map((item) => item.name).join(" / ")}`, { actor: actor.username, categoryId: category.id, ownerUserId }));
+    return listQuestionBankCategories(state, actor);
   });
 }
 
-export async function updateQuestionBankCategory(id, body = {}, actor = "") {
+export async function updateQuestionBankCategory(id, body = {}, actor = {}) {
   return updateState((state) => {
     const category = categoryMap(state).get(String(id || ""));
-    if (!category) return null;
+    if (!category || !canAccessResource(actor, category)) return null;
+    const ownerUserId = resourceOwnerUserId(category);
     const name = body.name === undefined ? category.name : cleanName(body.name);
     const parentId = body.parentId === undefined ? category.parentId : String(body.parentId || "");
     if (parentId === category.id || categoryDescendantIds(state, category.id).has(parentId)) throw badRequest("分类不能移动到自身或子分类下");
-    validateParent(state, parentId, category.id);
-    ensureUniqueSiblingName(state, name, parentId, category.id);
-    if (parentId !== category.parentId && parentId && (state.questionBank || []).some((item) => item.categoryIds?.includes(parentId))) {
+    validateParent(state, parentId, category.id, actor, ownerUserId);
+    ensureUniqueSiblingName(state, name, parentId, category.id, ownerUserId);
+    if (parentId !== category.parentId && parentId && (state.questionBank || []).some((item) => resourceOwnerUserId(item) === ownerUserId && item.categoryIds?.includes(parentId))) {
       throw conflict("目标上级分类已有题目，请先将题目移动到其他分类");
     }
     const subtreeDepth = maxSubtreeDepth(state, category.id);
@@ -103,21 +117,24 @@ export async function updateQuestionBankCategory(id, body = {}, actor = "") {
       name,
       parentId,
       sortOrder: body.sortOrder === undefined ? category.sortOrder : Number(body.sortOrder || 0),
-      updatedBy: actor,
+      updatedBy: actor.username,
+      updatedByUserId: actor.userId,
       updatedAt: new Date().toISOString(),
     });
-    state.auditLog.push(logItem("question-bank-category-update", `更新题库分类：${categoryPath(state, category.id).map((item) => item.name).join(" / ")}`, { actor, categoryId: category.id }));
-    return listQuestionBankCategories(state);
+    state.auditLog.push(logItem("question-bank-category-update", `更新题库分类：${categoryPath(state, category.id).map((item) => item.name).join(" / ")}`, { actor: actor.username, categoryId: category.id, ownerUserId }));
+    return listQuestionBankCategories(state, actor);
   });
 }
 
-export async function setQuestionBankCategoryArchived(id, archived, actor = "") {
+export async function setQuestionBankCategoryArchived(id, archived, actor = {}) {
   return updateState((state) => {
     const category = categoryMap(state).get(String(id || ""));
-    if (!category) return null;
+    if (!category || !canAccessResource(actor, category)) return null;
+    const ownerUserId = resourceOwnerUserId(category);
     const ids = categoryDescendantIds(state, category.id);
     for (const item of state.questionBankCategories || []) {
       if (!ids.has(item.id)) continue;
+      if (resourceOwnerUserId(item) !== ownerUserId) continue;
       const sources = new Set(item.archivedByCategoryIds || []);
       if (archived) {
         if (item.status === "active" || item.id === category.id) sources.add(category.id);
@@ -127,57 +144,65 @@ export async function setQuestionBankCategoryArchived(id, archived, actor = "") 
         item.status = sources.size ? "archived" : "active";
       }
       item.archivedByCategoryIds = [...sources];
-      item.updatedBy = actor;
+      item.updatedBy = actor.username;
+      item.updatedByUserId = actor.userId;
       item.updatedAt = new Date().toISOString();
     }
-    state.auditLog.push(logItem(archived ? "question-bank-category-archive" : "question-bank-category-restore", `${archived ? "归档" : "恢复"}题库分类：${category.name}`, { actor, categoryId: category.id }));
-    return listQuestionBankCategories(state);
+    state.auditLog.push(logItem(archived ? "question-bank-category-archive" : "question-bank-category-restore", `${archived ? "归档" : "恢复"}题库分类：${category.name}`, { actor: actor.username, categoryId: category.id, ownerUserId }));
+    return listQuestionBankCategories(state, actor);
   });
 }
 
-export async function bulkUpdateQuestionCategories(body = {}, actor = "") {
+export async function bulkUpdateQuestionCategories(body = {}, actor = {}) {
   const questionIds = normalizeCategoryIds(body.questionIds, 500);
   const categoryIds = normalizeCategoryIds(body.categoryIds);
   const mode = ["add", "remove", "replace"].includes(body.mode) ? body.mode : "add";
   if (!questionIds.length) throw badRequest("请选择需要归类的题目");
   return updateState((state) => {
-    const selected = (state.questionBank || []).filter((item) => questionIds.includes(item.id));
+    const selected = (state.questionBank || []).filter((item) => questionIds.includes(item.id) && canAccessResource(actor, item));
     if (selected.length !== questionIds.length) throw badRequest("部分题库题目不存在，请刷新后重试");
-    if (mode !== "remove") validateActiveLeafCategories(state, categoryIds, true);
+    const ownerIds = new Set(selected.map(resourceOwnerUserId));
+    if (ownerIds.size !== 1) throw badRequest("批量归类的题目必须属于同一用户");
+    const [ownerUserId] = ownerIds;
+    if (mode !== "remove") validateActiveLeafCategories(state, categoryIds, true, actor, ownerUserId);
     const knownIds = categoryMap(state);
-    if (mode === "remove" && categoryIds.some((id) => !knownIds.has(id))) throw badRequest("部分分类不存在");
+    if (mode === "remove" && categoryIds.some((id) => !knownIds.has(id) || !canAccessResource(actor, knownIds.get(id)) || resourceOwnerUserId(knownIds.get(id)) !== ownerUserId)) throw badRequest("部分分类不存在");
     const now = new Date().toISOString();
     selected.forEach((item) => {
       const current = new Set(item.categoryIds || []);
       if (mode === "replace") item.categoryIds = [...categoryIds];
       else if (mode === "add") item.categoryIds = [...new Set([...current, ...categoryIds])];
       else item.categoryIds = [...current].filter((id) => !categoryIds.includes(id));
-      item.updatedBy = actor;
+      item.updatedBy = actor.username;
+      item.updatedByUserId = actor.userId;
       item.updatedAt = now;
     });
-    state.auditLog.push(logItem("question-bank-category-bulk", `批量${mode === "add" ? "添加" : mode === "remove" ? "移除" : "替换"}题库分类：${selected.length} 道题`, { actor, questionIds, categoryIds, mode }));
+    state.auditLog.push(logItem("question-bank-category-bulk", `批量${mode === "add" ? "添加" : mode === "remove" ? "移除" : "替换"}题库分类：${selected.length} 道题`, { actor: actor.username, ownerUserId, questionIds, categoryIds, mode }));
     return { updated: selected.length, questionIds, categoryIds, mode };
   });
 }
 
-export function validateActiveLeafCategories(state, categoryIds, required = false) {
+export function validateActiveLeafCategories(state, categoryIds, required = false, actor = {}, ownerUserId = "") {
   const ids = normalizeCategoryIds(categoryIds);
   if (required && !ids.length) throw badRequest("请选择至少一个题库分类");
-  const invalid = ids.find((id) => !activeLeafCategory(state, id));
+  const invalid = ids.find((id) => {
+    const category = activeLeafCategory(state, id);
+    return !category || !canAccessResource(actor, category) || (ownerUserId && resourceOwnerUserId(category) !== ownerUserId);
+  });
   if (invalid) throw badRequest(`分类 ${invalid} 不存在、已归档或不是末级分类`);
   return ids;
 }
 
-function validateParent(state, parentId, movingId = "") {
+function validateParent(state, parentId, movingId = "", actor = {}, ownerUserId = "") {
   if (!parentId) return;
   const parent = categoryMap(state).get(parentId);
-  if (!parent || parent.status !== "active") throw badRequest("上级分类不存在或已归档");
+  if (!parent || parent.status !== "active" || !canAccessResource(actor, parent) || resourceOwnerUserId(parent) !== ownerUserId) throw badRequest("上级分类不存在或已归档");
   const depth = categoryDepth(state, parentId);
   if (depth >= 3 && parentId !== movingId) throw badRequest("题库分类最多支持 3 级");
 }
 
-function ensureUniqueSiblingName(state, name, parentId, excludeId = "") {
-  const duplicate = (state.questionBankCategories || []).find((item) => item.id !== excludeId && item.parentId === parentId && item.name === name);
+function ensureUniqueSiblingName(state, name, parentId, excludeId = "", ownerUserId = "") {
+  const duplicate = (state.questionBankCategories || []).find((item) => item.id !== excludeId && resourceOwnerUserId(item) === ownerUserId && item.parentId === parentId && item.name === name);
   if (duplicate) throw conflict("同级分类名称已存在");
 }
 
@@ -200,6 +225,14 @@ function categorySort(a, b) {
 
 function createCategoryId() {
   return `bank-category-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
+}
+
+function scopedCategoryState(state, actor) {
+  return {
+    ...state,
+    questionBank: accessibleResources(state.questionBank, actor),
+    questionBankCategories: accessibleResources(state.questionBankCategories, actor),
+  };
 }
 
 function badRequest(message) {

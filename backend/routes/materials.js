@@ -10,11 +10,12 @@ import {
   setMaterialArchived,
   updateMaterial,
 } from "../services/material-service.js";
+import { actorFromAuth } from "../services/access-control-service.js";
 
 export async function handleMaterialRoutes(req, res, url, state, auth) {
-  const actor = auth?.user?.username || "";
+  const actor = actorFromAuth(auth);
   if (req.method === "GET" && url.pathname === "/api/materials") {
-    sendJson(res, 200, listMaterials(state, Object.fromEntries(url.searchParams.entries())));
+    sendJson(res, 200, listMaterials(state, Object.fromEntries(url.searchParams.entries()), actor));
     return true;
   }
 
@@ -45,7 +46,9 @@ export async function handleMaterialRoutes(req, res, url, state, auth) {
   const usagesMatch = url.pathname.match(/^\/api\/materials\/([^/]+)\/usages$/);
   if (req.method === "GET" && usagesMatch) {
     const id = decodeURIComponent(usagesMatch[1]);
-    sendJson(res, 200, { items: materialUsages(state, id) });
+    const detail = await getMaterialDetail(state, id, actor);
+    if (!detail) sendJson(res, 404, { error: "出题资料不存在" });
+    else sendJson(res, 200, { items: materialUsages(state, id, actor) });
     return true;
   }
 
@@ -53,7 +56,7 @@ export async function handleMaterialRoutes(req, res, url, state, auth) {
   if (materialMatch) {
     const id = decodeURIComponent(materialMatch[1]);
     if (req.method === "GET") {
-      const result = await getMaterialDetail(state, id);
+      const result = await getMaterialDetail(state, id, actor);
       if (!result) sendJson(res, 404, { error: "出题资料不存在" });
       else sendJson(res, 200, result);
       return true;

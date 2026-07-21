@@ -1,8 +1,9 @@
-export function upsertPaperSnapshot(state, paper) {
+export function upsertPaperSnapshot(state, paper, actor = {}, ownerUserId = "") {
   state.papers = Array.isArray(state.papers) ? state.papers : [];
   const index = state.papers.findIndex((item) => item.id === paper.id);
   const existing = index >= 0 ? state.papers[index] : null;
   const now = new Date().toISOString();
+  const ownerId = String(existing?.ownerUserId || ownerUserId || actor.userId || "");
   const snapshot = {
     id: paper.id,
     name: paper.name,
@@ -16,6 +17,9 @@ export function upsertPaperSnapshot(state, paper) {
     sourcePlanSnapshot: paper.sourcePlanSnapshot || paper.buildSpec?.sourcePlanSnapshot || null,
     generationSpecSnapshot: paper.generationSpecSnapshot || null,
     publishedAt: paper.publishedAt,
+    ownerUserId: ownerId,
+    createdByUserId: existing?.createdByUserId || ownerId,
+    updatedByUserId: String(actor.userId || existing?.updatedByUserId || ownerId),
     createdAt: existing?.createdAt || paper.buildSpec?.savedAt || paper.buildSpec?.builtAt || now,
     updatedAt: now,
   };

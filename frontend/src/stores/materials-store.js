@@ -11,6 +11,7 @@ export function createMaterialsStore({ state, notify, go }) {
       const params = new URLSearchParams({ page: String(management.page), pageSize: String(management.pageSize) });
       if (management.search.trim()) params.set("search", management.search.trim());
       if (management.status) params.set("status", management.status);
+      if (management.ownerUserId) params.set("ownerUserId", management.ownerUserId);
       const result = await request(`/api/materials?${params}`);
       management.items = result.items || [];
       management.total = Number(result.total || 0);

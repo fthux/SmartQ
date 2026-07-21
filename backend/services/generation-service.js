@@ -7,7 +7,7 @@ import { resolveGenerationQuestionBank } from "./question-bank-service.js";
 const generationJobs = new Map();
 const generationJobTtlMs = 30 * 60 * 1000;
 
-export function startGenerationJob(spec = {}, ownerUserId = "") {
+export function startGenerationJob(spec = {}, actor = {}) {
   cleanupGenerationJobs();
   const now = new Date().toISOString();
   const job = {
@@ -19,7 +19,12 @@ export function startGenerationJob(spec = {}, ownerUserId = "") {
     updatedAt: now,
     result: null,
     error: null,
-    ownerUserId: String(ownerUserId || ""),
+    ownerUserId: String(actor.userId || ""),
+    actor: {
+      userId: String(actor.userId || ""),
+      username: String(actor.username || ""),
+      role: String(actor.role || "user"),
+    },
   };
   generationJobs.set(job.id, job);
   runGenerationJob(job, spec);
@@ -36,10 +41,10 @@ async function runGenerationJob(job, spec) {
   updateGenerationJob(job, { progress: 18, stage: "正在检查题库题" });
   try {
     const state = await loadState();
-    const questionBank = resolveGenerationQuestionBank(state, spec?.sourcePlan, spec);
+    const questionBank = resolveGenerationQuestionBank(state, spec?.sourcePlan, spec, job.actor);
     const requestedMaterialCount = Number(spec?.sourcePlan?.materialQuestionCount || 0);
     const materialSources = requestedMaterialCount > 0 || (spec?.sourcePlan?.mode === "materials-only" && !Array.isArray(spec?.sourcePlan?.questionBankIds))
-      ? await resolveGenerationMaterials(state, spec.sourcePlan, spec)
+      ? await resolveGenerationMaterials(state, spec.sourcePlan, spec, job.actor)
       : [];
     const result = await generateQuestions(spec, {
       questionBankQuestions: questionBank.questions,

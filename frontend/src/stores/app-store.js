@@ -99,6 +99,7 @@ export function createAppStore() {
         pageSize: 20,
         search: "",
         status: "",
+        ownerUserId: "",
         loading: false,
         optionsLoading: false,
         error: "",
@@ -128,7 +129,7 @@ export function createAppStore() {
         categoryEditorOpen: false,
         categoryEditorMode: "create",
         categoryEditingId: "",
-        categoryForm: { name: "", parentId: "", sortOrder: 0 },
+        categoryForm: { name: "", parentId: "", sortOrder: 0, ownerUserId: "" },
         categoryFormInitial: "",
         categoryFormError: "",
         categorySaving: false,
@@ -146,6 +147,7 @@ export function createAppStore() {
         status: "",
         type: "",
         difficulty: "",
+        ownerUserId: "",
         loading: false,
         error: "",
         actionId: null,
@@ -197,6 +199,7 @@ export function createAppStore() {
       paperDetailMode: "compact",
       paperSearch: "",
       paperStatusFilter: "all",
+      paperOwnerFilter: "",
       paperSort: "latest",
       paperPage: 1,
       paperPageSize: 20,
@@ -237,11 +240,13 @@ export function createAppStore() {
     ];
 
     const adminDisplayName = computed(() => state.admin.user?.displayName || state.admin.user?.username || state.admin.username || "admin");
+    const isSuperAdmin = computed(() => state.admin.user?.role === "super_admin");
+    const contentCreators = computed(() => Array.isArray(state.dashboard?.creators) ? state.dashboard.creators : []);
     const adminAccountMenuItems = computed(() => [
       { key: "profile", label: "个人资料", icon: "user-round", action: openAdminProfile },
       { key: "logout", label: "退出登录", icon: "log-out", tone: "danger", action: logoutAdmin },
     ]);
-    const visibleNavItems = computed(() => navItems.filter((item) => item.showInNav !== false));
+    const visibleNavItems = computed(() => navItems.filter((item) => item.showInNav !== false && (item.key !== "users" || isSuperAdmin.value)));
     const currentNavItem = computed(() => navItems.find((item) => item.key === state.route) || navItems[0]);
     const questions = computed(() => state.dashboard?.questions || []);
     const paper = computed(() => state.dashboard?.paper || {});
@@ -344,8 +349,9 @@ export function createAppStore() {
       const keyword = String(state.paperSearch || "").trim().toLowerCase();
       const status = state.paperStatusFilter;
       return paperRows.value.filter((item) => {
-        const text = [item.name, item.status, item.id].join(" ").toLowerCase();
+        const text = [item.name, item.status, item.id, item.creator?.displayName, item.creator?.username].join(" ").toLowerCase();
         if (keyword && !text.includes(keyword)) return false;
+        if (state.paperOwnerFilter && item.ownerUserId !== state.paperOwnerFilter) return false;
         if (status === "published") return item.status === "已发布";
         if (status === "unpublished") return ["草稿", "未发布", "已保存", "已组卷"].includes(item.status);
         return true;
@@ -723,7 +729,7 @@ export function createAppStore() {
     }
 
     function canAccessRoute(route) {
-      return navItems.some((entry) => entry.key === route);
+      return navItems.some((entry) => entry.key === route && (route !== "users" || isSuperAdmin.value));
     }
 
     watch(documentTitle, (title) => {
@@ -827,6 +833,8 @@ export function createAppStore() {
       visibleNavItems,
       currentNavItem,
       adminDisplayName,
+      isSuperAdmin,
+      contentCreators,
       adminAccountMenuItems,
       themeOptions,
       questions,

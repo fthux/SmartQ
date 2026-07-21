@@ -51,6 +51,9 @@ export function normalizeQuestionBankRecord(item = {}) {
     revisions: normalizeRevisions(item.revisions),
     createdBy: String(item.createdBy || ""),
     updatedBy: String(item.updatedBy || item.createdBy || ""),
+    ownerUserId: String(item.ownerUserId || ""),
+    createdByUserId: String(item.createdByUserId || ""),
+    updatedByUserId: String(item.updatedByUserId || item.createdByUserId || ""),
     createdAt: item.createdAt || now,
     updatedAt: item.updatedAt || item.createdAt || now,
   };

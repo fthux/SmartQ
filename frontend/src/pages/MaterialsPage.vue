@@ -15,6 +15,8 @@ import { computed } from "vue";
 
 const {
   state,
+  isSuperAdmin,
+  contentCreators,
   applyMaterialFilters,
   changeMaterialPage,
   changeMaterialPageSize,
@@ -39,7 +41,7 @@ const materialFileMaxLabel = computed(() => {
   const megabytes = Number(state.systemLimits.materialFileMaxBytes || 0) / 1024 / 1024;
   return `${Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)} MB`;
 });
-const hasMaterialFilters = computed(() => Boolean(state.materialManagement.search || state.materialManagement.status));
+const hasMaterialFilters = computed(() => Boolean(state.materialManagement.search || state.materialManagement.status || state.materialManagement.ownerUserId));
 
 function statusLabel(status) {
   return { ready: "可用", failed: "解析失败", archived: "已归档" }[status] || status;
@@ -57,6 +59,7 @@ function formatTextLength(value) {
 function clearMaterialFilters() {
   state.materialManagement.search = "";
   state.materialManagement.status = "";
+  state.materialManagement.ownerUserId = "";
   applyMaterialFilters();
 }
 </script>
@@ -83,10 +86,13 @@ function clearMaterialFilters() {
     </div>
 
     <el-card shadow="never" class="material-list-card">
-      <div class="grid gap-3 border-b border-slate-200 pb-4 lg:grid-cols-[minmax(260px,1fr)_180px_auto] dark:border-night-border">
+      <div class="grid gap-3 border-b border-slate-200 pb-4 dark:border-night-border" :class="isSuperAdmin ? 'lg:grid-cols-[minmax(240px,1fr)_170px_190px_auto]' : 'lg:grid-cols-[minmax(260px,1fr)_180px_auto]'">
         <el-input v-model="state.materialManagement.search" clearable :prefix-icon="Search" placeholder="搜索名称、标签或文件名" @keyup.enter="applyMaterialFilters" @clear="applyMaterialFilters" />
         <el-select v-model="state.materialManagement.status" clearable placeholder="全部状态" @change="applyMaterialFilters">
           <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+        <el-select v-if="isSuperAdmin" v-model="state.materialManagement.ownerUserId" clearable filterable placeholder="全部创建者" @change="applyMaterialFilters">
+          <el-option v-for="creator in contentCreators" :key="creator.id" :label="`${creator.displayName} (${creator.username})`" :value="creator.id" />
         </el-select>
         <div class="flex gap-2">
           <el-button type="primary" :icon="Search" @click="applyMaterialFilters">查询</el-button>
@@ -116,6 +122,7 @@ function clearMaterialFilters() {
           </template>
         </el-table-column>
         <el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="statusType(row.status)" effect="plain">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
+        <el-table-column label="创建者" min-width="150"><template #default="{ row }"><span class="font-semibold">{{ row.creator?.displayName || row.createdBy || '-' }}</span><div v-if="row.creator?.username" class="mt-1 text-xs text-slate-400">{{ row.creator.username }}</div></template></el-table-column>
         <el-table-column label="正文" width="110"><template #default="{ row }">{{ formatTextLength(row.textLength) }}</template></el-table-column>
         <el-table-column label="使用情况" width="130"><template #default="{ row }">{{ row.paperUsageCount }} 卷 / {{ row.questionUsageCount }} 题</template></el-table-column>
         <el-table-column label="更新时间" min-width="165"><template #default="{ row }">{{ formatDateTime(row.updatedAt) }}</template></el-table-column>

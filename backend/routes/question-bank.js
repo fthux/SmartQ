@@ -15,12 +15,13 @@ import {
   setQuestionBankCategoryArchived,
   updateQuestionBankCategory,
 } from "../services/question-bank-category-service.js";
+import { activeAuthoringOwnerId, actorFromAuth } from "../services/access-control-service.js";
 
 export async function handleQuestionBankRoutes(req, res, url, state, auth) {
-  const actor = auth?.user?.username || "";
-  const userId = auth?.user?.id || "";
+  const actor = actorFromAuth(auth);
+  const ownerUserId = activeAuthoringOwnerId(auth);
   if (req.method === "GET" && url.pathname === "/api/question-bank/categories") {
-    sendJson(res, 200, listQuestionBankCategories(state));
+    sendJson(res, 200, listQuestionBankCategories(state, actor));
     return true;
   }
   if (req.method === "POST" && url.pathname === "/api/question-bank/categories") {
@@ -46,7 +47,7 @@ export async function handleQuestionBankRoutes(req, res, url, state, auth) {
     return true;
   }
   if (req.method === "GET" && url.pathname === "/api/question-bank") {
-    sendJson(res, 200, listQuestionBank(state, Object.fromEntries(url.searchParams.entries())));
+    sendJson(res, 200, listQuestionBank(state, Object.fromEntries(url.searchParams.entries()), actor));
     return true;
   }
   if (req.method === "POST" && url.pathname === "/api/question-bank") {
@@ -54,14 +55,14 @@ export async function handleQuestionBankRoutes(req, res, url, state, auth) {
     return true;
   }
   if (req.method === "POST" && url.pathname === "/api/question-bank/import") {
-    const result = await importQuestionsToBank(await readJson(req), actor, userId);
+    const result = await importQuestionsToBank(await readJson(req), actor, ownerUserId);
     if (!result) sendJson(res, 404, { error: "试卷不存在" });
     else sendJson(res, 200, result);
     return true;
   }
   if (req.method === "POST" && url.pathname === "/api/question-bank/selection-preview") {
     const body = await readJson(req);
-    sendJson(res, 200, previewGenerationQuestionBank(state, body.sourcePlan, body.spec));
+    sendJson(res, 200, previewGenerationQuestionBank(state, body.sourcePlan, body.spec, actor));
     return true;
   }
   const actionMatch = url.pathname.match(/^\/api\/question-bank\/([^/]+)\/(archive|restore)$/);
@@ -73,7 +74,7 @@ export async function handleQuestionBankRoutes(req, res, url, state, auth) {
   }
   const usagesMatch = url.pathname.match(/^\/api\/question-bank\/([^/]+)\/usages$/);
   if (req.method === "GET" && usagesMatch) {
-    const result = getQuestionBankDetail(state, decodeURIComponent(usagesMatch[1]));
+    const result = getQuestionBankDetail(state, decodeURIComponent(usagesMatch[1]), actor);
     if (!result) sendJson(res, 404, { error: "题库题目不存在" });
     else sendJson(res, 200, { items: result.usages || [] });
     return true;
@@ -82,7 +83,7 @@ export async function handleQuestionBankRoutes(req, res, url, state, auth) {
   if (itemMatch) {
     const id = decodeURIComponent(itemMatch[1]);
     if (req.method === "GET") {
-      const result = getQuestionBankDetail(state, id);
+      const result = getQuestionBankDetail(state, id, actor);
       if (!result) sendJson(res, 404, { error: "题库题目不存在" });
       else sendJson(res, 200, result);
       return true;

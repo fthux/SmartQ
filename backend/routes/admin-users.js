@@ -8,10 +8,12 @@ import {
   updateAdminUser,
 } from "../services/admin-user-service.js";
 import { authenticateAdmin } from "../services/auth-service.js";
+import { forbiddenResult, isSuperAdmin } from "../services/access-control-service.js";
 
 export async function handleAdminUserRoutes(req, res, url, state, auth, token) {
   if (req.method === "GET" && url.pathname === "/api/admin/users") {
-    sendJson(res, 200, listAdminUsers(state, Object.fromEntries(url.searchParams.entries())));
+    if (!isSuperAdmin(auth?.user)) sendJson(res, 403, forbiddenResult());
+    else sendJson(res, 200, listAdminUsers(state, Object.fromEntries(url.searchParams.entries())));
     return true;
   }
 
@@ -65,5 +67,7 @@ export async function handleAdminUserRoutes(req, res, url, state, auth, token) {
 }
 
 function authorizeUsers(state, token) {
-  return authenticateAdmin(state, token);
+  const auth = authenticateAdmin(state, token);
+  if (auth.error) return auth;
+  return isSuperAdmin(auth.user) ? auth : forbiddenResult();
 }

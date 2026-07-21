@@ -8,6 +8,7 @@ import { exam } from "../data/store.js";
 import { normalizeQuestionBankRecord } from "./question-utils.js";
 import { normalizeCategoryIds, normalizeQuestionBankCategory } from "./question-bank-categories.js";
 import { initializeAdminUsers } from "../services/admin-user-service.js";
+import { initializeContentOwnership } from "../services/access-control-service.js";
 import {
   emptyAuthoringPaper,
   initializeAuthoringWorkspaces,
@@ -40,6 +41,7 @@ export async function loadState() {
       state = normalizeState(loaded);
       if (await initializeAdminUsers(state)) normalizedStateNeedsSave = true;
       if (initializeAuthoringWorkspaces(state)) normalizedStateNeedsSave = true;
+      if (initializeContentOwnership(state)) normalizedStateNeedsSave = true;
       if (consumeNormalizedStateNeedsSave()) {
         await saveState({ forceBackup: true, reason: "normalize-runtime" });
       }
@@ -52,6 +54,7 @@ export async function loadState() {
     state = normalizeState(JSON.parse(raw));
     if (await initializeAdminUsers(state)) normalizedStateNeedsSave = true;
     if (initializeAuthoringWorkspaces(state)) normalizedStateNeedsSave = true;
+    if (initializeContentOwnership(state)) normalizedStateNeedsSave = true;
     if (consumeNormalizedStateNeedsSave()) {
       await saveState({ forceBackup: true, reason: "normalize-runtime" });
     }
@@ -59,6 +62,7 @@ export async function loadState() {
     state = normalizeState(defaultState());
     await initializeAdminUsers(state);
     initializeAuthoringWorkspaces(state);
+    initializeContentOwnership(state);
     consumeNormalizedStateNeedsSave();
     await saveState();
   }
@@ -524,6 +528,9 @@ function normalizeSourceMaterial(item) {
     parseError: String(item.parseError || ""),
     revisions: Array.isArray(item.revisions) ? item.revisions : [],
     createdBy: String(item.createdBy || ""),
+    ownerUserId: String(item.ownerUserId || ""),
+    createdByUserId: String(item.createdByUserId || ""),
+    updatedByUserId: String(item.updatedByUserId || item.createdByUserId || ""),
     createdAt: item.createdAt || new Date().toISOString(),
     updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
   };
@@ -595,6 +602,9 @@ function normalizePaperSnapshot(item) {
     sourcePlanSnapshot: item.sourcePlanSnapshot || item.buildSpec?.sourcePlanSnapshot || null,
     generationSpecSnapshot: stripPaperCategory(item.generationSpecSnapshot),
     publishedAt: item.publishedAt || null,
+    ownerUserId: String(item.ownerUserId || ""),
+    createdByUserId: String(item.createdByUserId || ""),
+    updatedByUserId: String(item.updatedByUserId || item.createdByUserId || ""),
     createdAt: item.createdAt || item.buildSpec?.builtAt || new Date().toISOString(),
     updatedAt: item.updatedAt || item.publishedAt || item.createdAt || item.buildSpec?.builtAt || new Date().toISOString(),
     publishedVersions: Array.isArray(item.publishedVersions)
@@ -618,6 +628,9 @@ function normalizePublishedPaperVersion(item) {
     sourcePlanSnapshot: item.sourcePlanSnapshot || item.buildSpec?.sourcePlanSnapshot || null,
     generationSpecSnapshot: stripPaperCategory(item.generationSpecSnapshot),
     publishedAt: item.publishedAt,
+    ownerUserId: String(item.ownerUserId || ""),
+    createdByUserId: String(item.createdByUserId || ""),
+    updatedByUserId: String(item.updatedByUserId || item.createdByUserId || ""),
     createdAt: item.createdAt || item.publishedAt,
     updatedAt: item.updatedAt || item.publishedAt,
   };

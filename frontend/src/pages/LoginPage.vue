@@ -1,5 +1,6 @@
 <script setup>
 import { InfoFilled, Lock, User } from "@element-plus/icons-vue";
+import { SMARTQ_BRAND } from "../core/brand.js";
 import { useSmartQ } from "../stores/context.js";
 
 const { state, loginAdmin, publicUrl } = useSmartQ();
@@ -16,9 +17,10 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
       <div class="flex min-h-[600px] flex-col items-center justify-center bg-[#f7f9fd]/95 px-6 py-10 sm:px-10 lg:min-h-0 dark:bg-night-surface/95">
         <div class="mb-9 flex flex-col items-center text-center">
           <div class="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg bg-white p-2 shadow-lg ring-1 ring-emerald-100">
-            <img :src="publicUrl('/assets/favicon.svg')" alt="SmartQ" class="h-full w-full object-contain" />
+            <img :src="publicUrl('/assets/favicon.svg')" :alt="SMARTQ_BRAND.name" class="h-full w-full object-contain" />
           </div>
-          <div class="mt-2 text-[11px] font-black text-slate-400">SmartQ 内容管理控制台</div>
+          <div class="mt-3 text-base font-black text-ink dark:text-slate-100">{{ SMARTQ_BRAND.name }}</div>
+          <div class="mt-1 text-[11px] font-semibold text-slate-400">{{ SMARTQ_BRAND.slogan }}</div>
         </div>
 
         <el-card class="w-full max-w-[360px]" shadow="always">
@@ -42,11 +44,10 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
               <el-checkbox v-model="state.admin.rememberUsername">记住账号</el-checkbox>
               <span class="inline-flex items-center gap-1 text-xs font-bold text-leaf"><el-icon><InfoFilled /></el-icon>仅限授权用户</span>
             </div>
-            <div class="mt-5 border-t border-slate-100 pt-4 text-center text-xs font-black text-leaf dark:border-night-border">SmartQ 内容管理控制台</div>
           </el-form>
         </el-card>
 
-        <div class="mt-auto pt-8 text-center text-[11px] font-bold text-slate-500 dark:text-slate-400">© 2026 SmartQ</div>
+        <div class="mt-auto pt-8 text-center text-[11px] font-bold text-slate-500 dark:text-slate-400">© 2026 {{ SMARTQ_BRAND.name }}</div>
       </div>
 
       <div class="relative hidden min-h-[600px] overflow-hidden bg-[#e7faf1] lg:block dark:bg-night-sidebar">
@@ -62,10 +63,9 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
         </div>
         <div class="relative z-10 flex h-full min-h-[600px] items-center px-12">
           <div class="max-w-md text-ink dark:text-slate-100">
-            <div class="text-2xl font-medium">欢迎来到 <span class="font-black">SmartQ</span></div>
+            <div class="text-2xl font-medium">欢迎来到 <span class="font-black">{{ SMARTQ_BRAND.name }}</span></div>
             <div class="mt-4 h-px w-80 max-w-full bg-leaf/35"></div>
             <p class="mt-6 text-base font-semibold leading-7 text-slate-600 dark:text-slate-300">面向 AI 命题、题目编辑与试卷管理的一体化控制台，让内容生产流程清晰、稳定、可追踪。</p>
-            <el-tag class="mt-7" type="success" effect="plain" size="large">内容管理入口</el-tag>
           </div>
         </div>
       </div>

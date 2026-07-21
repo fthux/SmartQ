@@ -21,7 +21,7 @@ export function createAuthStore({ state, request, notify, refresh, canAccessRout
 
   function handleAdminAuthError(error) {
     const message = String(error?.message || "");
-    if (error?.status === 401 || message.includes("控制台登录") || message.includes("请先登录内容管理控制台")) {
+    if (error?.status === 401 || message.includes("控制台登录") || message.includes("请先登录控制台")) {
       state.admin.token = "";
       state.admin.user = null;
       state.admin.menuOpen = false;

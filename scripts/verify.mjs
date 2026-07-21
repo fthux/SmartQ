@@ -63,6 +63,7 @@ try {
     "frontend/src/components/PaperDetailDrawer.vue",
     "frontend/src/components/QuestionBankPicker.vue",
     "frontend/src/components/QuestionEditorDialog.vue",
+    "frontend/src/core/brand.js",
     "frontend/src/core/public-path.js",
     "frontend/src/core/router.js",
     "frontend/src/pages/AuthoringPage.vue",
@@ -84,6 +85,8 @@ try {
   ];
   const frontendSources = await Promise.all(frontendFiles.map((path) => readFile(path, "utf8")));
   const frontend = frontendSources.join("\n");
+  const consoleShell = frontendSources[frontendFiles.indexOf("frontend/src/components/ConsoleShell.vue")];
+  const loginPage = frontendSources[frontendFiles.indexOf("frontend/src/pages/LoginPage.vue")];
   const backendFiles = [
     "backend/server.js",
     "backend/lib/ai.js",
@@ -106,8 +109,10 @@ try {
   assert(frontend.includes("<script setup>") && frontend.includes("<el-form") && frontend.includes("<el-button"), "frontend pages use Vue SFC and Element Plus controls");
   assert(frontend.includes("<el-table") && frontend.includes("<el-drawer") && frontend.includes("<el-dialog"), "tables, drawers, and dialogs use Element Plus components");
   assert(frontend.includes('aria-label="管理功能导航"') && frontend.includes('data-admin-route-content'), "frontend keeps the management sidebar layout");
-  assert(frontend.includes("智能命题与试卷管理") && frontend.includes("智能命题工作台") && !frontend.includes("考试与测评管理平台"), "product positioning matches the authoring and paper-management scope");
-  assert(frontend.includes("SmartQ 内容管理控制台") && frontend.includes("内容管理入口") && !/SmartQ 运营控制台|运营管理入口|管理运营控制台/.test(frontend), "control-panel wording does not imply retired operations capabilities");
+  assert((frontend.match(/智能命题与试卷管理/g) || []).length === 1 && frontend.includes('slogan: "智能命题与试卷管理"') && frontend.includes("智能命题工作台") && !frontend.includes("考试与测评管理平台"), "product positioning uses one centrally managed slogan");
+  assert((consoleShell.match(/SMARTQ_BRAND\.slogan/g) || []).length === 1 && (loginPage.match(/SMARTQ_BRAND\.slogan/g) || []).length === 1, "sidebar and login page reuse the shared slogan");
+  assert(!/SmartQ 内容管理控制台|内容管理入口|SmartQ 运营控制台|运营管理入口|管理运营控制台/.test(frontend), "retired control-panel positioning does not reappear");
+  assert(backend.includes("登录控制台") && backend.includes("退出控制台") && !backend.includes("内容管理控制台"), "authentication wording uses control panel only as an action term");
   assert(frontend.includes("toggleSidebar") && frontend.includes("smartqSidebarCollapsed"), "desktop sidebar can collapse and persist its state");
   assert(frontend.includes("requestFullscreen") && frontend.includes("fullscreenchange"), "header exposes synchronized fullscreen controls");
   assert(frontend.includes('value: "system"') && frontend.includes("prefers-color-scheme: dark"), "theme defaults to the system preference");
@@ -204,13 +209,13 @@ try {
   assert(backend.includes("questionBankCategories") && backend.includes("validateActiveLeafCategories") && backend.includes("questionBankRequestedCount"), "backend implements hierarchical bank categories and category-based sampling");
 
   const blockedDashboard = await getJson("/api/dashboard", { expectedStatus: 401 });
-  assert(blockedDashboard.error.includes("内容管理控制台"), "dashboard requires admin login");
+  assert(blockedDashboard.error === "请先登录控制台", "dashboard requires admin login");
   const blockedProfile = await putJson("/api/admin/profile", { displayName: "unauthorized" }, { expectedStatus: 401 });
-  assert(blockedProfile.error.includes("内容管理控制台"), "profile updates require admin login");
+  assert(blockedProfile.error === "请先登录控制台", "profile updates require admin login");
   const blockedAvatarReset = await requestJson("/api/admin/profile/avatar", { method: "DELETE", expectedStatus: 401 });
-  assert(blockedAvatarReset.error.includes("内容管理控制台"), "avatar reset requires admin login");
+  assert(blockedAvatarReset.error === "请先登录控制台", "avatar reset requires admin login");
   const blockedUsers = await getJson("/api/admin/users", { expectedStatus: 401 });
-  assert(blockedUsers.error.includes("内容管理控制台"), "user management requires login");
+  assert(blockedUsers.error === "请先登录控制台", "user management requires login");
   const oversizedLogin = await postJson("/api/admin/login", { username: "x".repeat(140 * 1024), password: "x" }, { expectedStatus: 413 });
   assert(oversizedLogin.error.includes("请求体过大"), "oversized JSON is rejected");
 

@@ -64,7 +64,7 @@ export async function loginAdmin(state, body = {}, req = {}) {
   };
   state.adminSessions[token] = session;
   user.lastLoginAt = now;
-  state.auditLog.push(logItem("admin-login", `${username} 登录内容管理控制台`));
+  state.auditLog.push(logItem("admin-login", `${username} 登录控制台`));
   return { token, expiresAt, admin: publicAdminSession(session, user) };
 }
 
@@ -74,14 +74,14 @@ export function logoutAdmin(state, token = "") {
   if (value && state.adminSessions[value]) {
     const username = state.adminSessions[value].username || "admin";
     delete state.adminSessions[value];
-    state.auditLog.push(logItem("admin-logout", `${username} 退出内容管理控制台`));
+    state.auditLog.push(logItem("admin-logout", `${username} 退出控制台`));
   }
   return { loggedOut: true };
 }
 
 export function authenticateAdmin(state, token = "") {
   const value = String(token || "").trim();
-  if (!value) return { error: "请先登录内容管理控制台", statusCode: 401 };
+  if (!value) return { error: "请先登录控制台", statusCode: 401 };
   state.adminSessions = pruneAdminSessions(state.adminSessions || {});
   const session = state.adminSessions[value];
   if (!session) return { error: "控制台登录已失效，请重新登录", statusCode: 401 };

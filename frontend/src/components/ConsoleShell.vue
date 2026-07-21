@@ -18,6 +18,7 @@ import {
   SwitchButton,
   User,
 } from "@element-plus/icons-vue";
+import { SMARTQ_BRAND } from "../core/brand.js";
 import AuthoringPage from "../pages/AuthoringPage.vue";
 import MaterialsPage from "../pages/MaterialsPage.vue";
 import PapersPage from "../pages/PapersPage.vue";
@@ -76,13 +77,13 @@ function handleThemePreference(theme) {
       :class="state.ui.sidebarCollapsed ? '' : 'border-r border-slate-200 dark:border-night-border'"
     >
       <div class="flex h-14 items-center px-3" :class="state.ui.sidebarCollapsed ? 'justify-center' : ''">
-        <el-button text class="brand-button min-w-0" title="SmartQ" @click="go('papers')">
+        <el-button text class="brand-button min-w-0" :title="SMARTQ_BRAND.name" @click="go('papers')">
           <span class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-emerald-50 p-1.5 shadow-sm dark:bg-white">
-            <img :src="publicUrl('/assets/favicon.svg')" alt="SmartQ" class="h-full w-full object-contain" />
+            <img :src="publicUrl('/assets/favicon.svg')" :alt="SMARTQ_BRAND.name" class="h-full w-full object-contain" />
           </span>
           <span v-if="!state.ui.sidebarCollapsed" class="min-w-0">
-            <span class="block truncate text-base font-black">SmartQ</span>
-            <span class="block truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400">智能命题与试卷管理</span>
+            <span class="block truncate text-base font-black">{{ SMARTQ_BRAND.name }}</span>
+            <span class="block truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400">{{ SMARTQ_BRAND.slogan }}</span>
           </span>
         </el-button>
       </div>
@@ -116,10 +117,7 @@ function handleThemePreference(theme) {
           <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-primary text-emerald-950 lg:hidden">
             <el-icon><component :is="iconMap[currentNavItem.icon]" /></el-icon>
           </span>
-          <div class="min-w-0">
-            <div class="truncate text-sm font-black sm:text-base">{{ currentNavItem.label }}</div>
-            <div class="hidden text-[11px] font-semibold text-slate-400 sm:block">SmartQ 内容管理控制台</div>
-          </div>
+          <div class="min-w-0 truncate text-sm font-black sm:text-base">{{ currentNavItem.label }}</div>
         </div>
 
         <div class="flex shrink-0 items-center gap-1.5">

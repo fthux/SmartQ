@@ -1,5 +1,5 @@
 <script setup>
-import { Collection, Edit } from "@element-plus/icons-vue";
+import { Collection, Edit, Printer } from "@element-plus/icons-vue";
 import { computed } from "vue";
 import { useSmartQ } from "../stores/context.js";
 
@@ -7,6 +7,8 @@ const {
   state,
   clearSelectedPaper,
   editPaper,
+  canPrintPaper,
+  openPaperPrint,
   addPaperQuestionsToBank,
   displayPaperStatus,
   displayQuestionOptions,
@@ -43,6 +45,7 @@ function questionSourceLabel(question) {
         <div class="min-w-0"><div class="text-base font-black">试卷详情</div><div class="mt-0.5 truncate text-xs font-semibold text-slate-500 dark:text-slate-400">{{ state.selectedPaperDetail?.name || '正在加载试卷内容' }}</div></div>
         <div v-if="state.selectedPaperDetail" class="flex shrink-0 gap-2">
           <el-button :icon="Collection" :loading="state.questionBankManagement.importingPaperId === state.selectedPaperDetail.id" @click="addPaperQuestionsToBank(state.selectedPaperDetail)">全部题目入库</el-button>
+          <el-button v-if="canPrintPaper(state.selectedPaperDetail)" :icon="Printer" @click="openPaperPrint(state.selectedPaperDetail)">打印</el-button>
           <el-button type="primary" :icon="Edit" @click="editPaper(state.selectedPaperDetail)">编辑</el-button>
         </div>
       </div>

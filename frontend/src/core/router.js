@@ -2,7 +2,7 @@ export const ADMIN_LOGIN_HASH = "#/login";
 
 export function currentRoute(hash) {
   const { route } = parseHashRoute(hash);
-  return ["authoring", "papers", "question-bank", "materials", "users", "profile"].includes(route) ? route : "papers";
+  return ["authoring", "papers", "question-bank", "materials", "users", "profile", "paper-print"].includes(route) ? route : "papers";
 }
 
 export function currentAuthoringPaperId(hash) {

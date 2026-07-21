@@ -206,6 +206,7 @@ export function createAppStore() {
       paperActionMenuId: null,
       confirmDeletePaper: null,
       deletingPaperId: null,
+      paperPrint: freshPaperPrintState(),
       editingQuestion: null,
       questionEditForm: null,
       questionEditErrors: {},
@@ -237,6 +238,7 @@ export function createAppStore() {
       { key: "materials", label: "出题资料", icon: "folder" },
       { key: "users", label: "用户管理", icon: "users" },
       { key: "profile", label: "个人资料", icon: "user-round", showInNav: false },
+      { key: "paper-print", label: "打印试卷", icon: "files", showInNav: false },
     ];
 
     const adminDisplayName = computed(() => state.admin.user?.displayName || state.admin.user?.username || state.admin.username || "admin");
@@ -467,10 +469,14 @@ export function createAppStore() {
     const {
       activatePaper,
       askDeletePaper,
+      canPrintPaper,
       changePaperPage,
+      closePaperPrint,
       clearSelectedPaper,
+      confirmPaperPrint,
       deletePaper,
       editPaper,
+      openPaperPrint,
       resetPaperPage,
       selectPaper,
       togglePaperActionMenu,
@@ -691,6 +697,7 @@ export function createAppStore() {
         paperActionMenuId: null,
         confirmDeletePaper: null,
         deletingPaperId: null,
+        paperPrint: freshPaperPrintState(),
         editingQuestion: null,
         questionEditForm: null,
         questionEditErrors: {},
@@ -806,6 +813,10 @@ export function createAppStore() {
       }
       await loadAdminSession();
       if (!state.admin.token) return;
+      if (state.route === "paper-print") {
+        state.loading = false;
+        return;
+      }
       if (isAdminLoginRoute()) {
         await resumeAdminRoute();
         return;
@@ -944,13 +955,17 @@ export function createAppStore() {
       publishPaper,
       activatePaper,
       selectPaper,
+      canPrintPaper,
       clearSelectedPaper,
       changePaperPage,
+      closePaperPrint,
+      confirmPaperPrint,
       resetPaperPage,
       togglePaperActionMenu,
       askDeletePaper,
       deletePaper,
       editPaper,
+      openPaperPrint,
       openQuestionEditor,
       closeQuestionEditor,
       requestCloseQuestionEditor,
@@ -975,6 +990,20 @@ export function createAppStore() {
       escapeHtml,
       publicUrl,
     };
+}
+
+function freshPaperPrintState() {
+  return {
+    dialogOpen: false,
+    loading: false,
+    paperId: "",
+    paperName: "",
+    versions: [],
+    publishedAt: "",
+    mode: "paper",
+    showScores: true,
+    reserveSpace: true,
+  };
 }
 
 function freshSpec(overrides = {}) {

@@ -59,7 +59,9 @@ try {
     "frontend/src/App.vue",
     "frontend/src/components/ConfirmDeleteDialog.vue",
     "frontend/src/components/ConsoleShell.vue",
+    "frontend/src/components/GlobalOverlays.vue",
     "frontend/src/components/PaperDetailDrawer.vue",
+    "frontend/src/components/PaperPrintDialog.vue",
     "frontend/src/components/QuestionBankPicker.vue",
     "frontend/src/components/QuestionEditorDialog.vue",
     "frontend/src/core/brand.js",
@@ -69,6 +71,7 @@ try {
     "frontend/src/pages/LoginPage.vue",
     "frontend/src/pages/MaterialsPage.vue",
     "frontend/src/pages/PapersPage.vue",
+    "frontend/src/pages/PaperPrintPage.vue",
     "frontend/src/pages/ProfilePage.vue",
     "frontend/src/pages/QuestionBankPage.vue",
     "frontend/src/pages/UsersPage.vue",
@@ -97,6 +100,7 @@ try {
     "backend/routes/question-bank.js",
     "backend/services/generation-service.js",
     "backend/services/material-service.js",
+    "backend/services/paper-service.js",
     "backend/services/question-bank-service.js",
     "backend/services/question-bank-category-service.js",
     "backend/lib/question-bank-categories.js",
@@ -154,7 +158,7 @@ try {
   assert(frontend.includes('window.scrollTo({ top: 0, left: 0, behavior: "auto" });'), "frontend resets scroll on module switches");
   assert(frontend.includes("出题制卷") && frontend.includes("试卷管理") && !frontend.includes("已出卷子"), "frontend uses consistent authoring and paper-management wording");
   assert(frontend.indexOf('{ key: "papers"') < frontend.indexOf('{ key: "authoring"'), "paper management is the first navigation item");
-  assert(frontend.includes('return ["authoring", "papers", "question-bank", "materials", "users", "profile"].includes(route) ? route : "papers";'), "papers is the default route and content-management routes are routable");
+  assert(frontend.includes('return ["authoring", "papers", "question-bank", "materials", "users", "profile", "paper-print"].includes(route) ? route : "papers";'), "papers is the default route and content-management routes are routable");
   assert(frontend.includes('if (route === "papers") return "";'), "papers uses the root URL");
   assert(frontend.includes('ADMIN_LOGIN_HASH = "#/login"') && frontend.includes("ADMIN_LOGIN_RETURN_KEY") && frontend.includes("resumeAdminRoute"), "expired sessions use a distinct login URL and restore the protected route after login");
   assert(frontend.includes("sessionStorage.setItem(ADMIN_LOGIN_RETURN_KEY") && frontend.includes("Object.fromEntries(parsed.params.entries())"), "login redirects retain protected route parameters such as authoring paperid across refreshes");
@@ -191,6 +195,13 @@ try {
       && !frontend.includes("state.selectedPaperDetail.status !== '已发布'"),
     "draft and published papers share edit, preview, and delete actions in the wider drawer flow",
   );
+  assert(frontend.includes("PaperPrintDialog") && frontend.includes("PaperPrintPage") && frontend.includes("openPaperPrint(row)"), "published papers expose print settings and a dedicated print page");
+  assert(frontend.includes("@page") && frontend.includes("size: A4 portrait") && frontend.includes("window.print()"), "paper printing uses the browser print dialog with an A4 print stylesheet");
+  assert(!frontend.includes('autoPrint: "1"') && !frontend.includes("settings.autoPrint"), "opening the print preview does not automatically invoke the browser print dialog");
+  assert(frontend.includes("page-break-before: always") && frontend.includes("answer-sheet--separate"), "combined printing starts answer analysis on a new A4 page");
+  assert(!frontend.includes("candidate-fields") && !frontend.includes("姓名：") && !frontend.includes("班级：") && !frontend.includes("学号："), "question paper omits candidate identity fields");
+  assert(frontend.includes("min-width: 0 !important") && frontend.includes("overflow: visible !important") && !frontend.includes("width: 1080px"), "print layout removes fixed wide-page constraints that cause horizontal clipping");
+  assert(backend.includes("paperPrintPayload") && backend.includes("指定的试卷发布版本不存在"), "backend resolves immutable published versions for printing");
   assert((frontend.match(/if \(state\.selectedPaperId\) clearSelectedPaper\(\);/g) || []).length >= 2, "route changes close an open paper detail drawer");
   assert(frontend.includes("出题资料管理") && frontend.includes("/api/materials/upload") && frontend.includes("data-question-source-plan"), "frontend exposes material management and source allocation");
   assert(frontend.includes("questionBankQuestionCount") && frontend.includes("不引用题库或资料，按命题要求自动补齐") && frontend.includes("资料依据"), "authoring config and editing expose unified source allocation and traceability");
@@ -557,6 +568,7 @@ try {
   assert(Array.isArray(quality.failures) && Number.isFinite(quality.schemaPassRate), "quality check remains available");
   const builtDraft = await postJson("/api/papers/build", {}, { headers: contentUserHeaders });
   assert(builtDraft.status === "草稿" && builtDraft.questionCount === 4, "paper build saves all valid questions without manual review");
+  await getJson(`/api/papers/${builtDraft.id}/print`, { headers: contentUserHeaders, expectedStatus: 409 });
   const builtDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
   assert(builtDashboard.questions.every((question) => question.status === "待确认"), "building a paper does not require or fabricate review status");
 
@@ -605,6 +617,10 @@ try {
   assert(paperDetail.questions.length === 4 && paperDetail.status === "已发布", "paper detail returns the published snapshot");
   assert(!("categoryId" in paperDetail) && !("categorySnapshot" in paperDetail), "paper snapshots no longer expose paper classification");
   assert(paperDetail.sourcePlanSnapshot.materialQuestionCount === 2 && paperDetail.sourcePlanSnapshot.materials.length === 2, "paper snapshot preserves source allocation and material versions");
+  const printablePaper = await getJson(`/api/papers/${paper.id}/print`, { headers: contentUserHeaders });
+  assert(printablePaper.selectedVersion.publishedAt === paperDetail.publishedAt && printablePaper.selectedVersion.questions.length === 4, "print endpoint selects the latest published version by default");
+  assert(printablePaper.versions.length === 1 && !("origin" in printablePaper.selectedVersion.questions[0]) && !("buildSpec" in printablePaper.selectedVersion), "print endpoint returns compact version summaries and printable question fields only");
+  await getJson(`/api/papers/${paper.id}/print?publishedAt=${encodeURIComponent("2000-01-01T00:00:00.000Z")}`, { headers: contentUserHeaders, expectedStatus: 404 });
   const usages = await getJson(`/api/materials/${materialOne.id}/usages`, { headers: contentUserHeaders });
   assert(usages.items.some((item) => item.paperId === paper.id && item.questionCount >= 1), "material usage links back to published papers");
   const archivedMaterial = await postJson(`/api/materials/${materialOne.id}/archive`, {}, { headers: contentUserHeaders });
@@ -697,6 +713,8 @@ try {
     paperAAfterEdit.publishedVersions.some((version) => version.publishedAt === paperABeforeEdit.publishedAt && version.questions[0].stem === paperAEditTarget.stem),
     "editing a published paper preserves its immutable published version",
   );
+  const printablePublishedVersion = await getJson(`/api/papers/${paper.id}/print?publishedAt=${encodeURIComponent(paperABeforeEdit.publishedAt)}`, { headers: contentUserHeaders });
+  assert(printablePublishedVersion.selectedVersion.questions[0].stem === paperAEditTarget.stem && printablePublishedVersion.selectedVersion.questions[0].stem !== paperAAfterEdit.questions[0].stem, "draft edits keep printing the selected immutable published version");
   await postJson(`/api/papers/${paperB.id}/activate`, {}, { headers: contentUserHeaders });
 
   const adminSpec = { ...generated.spec, paperName: "管理员独立试卷" };
@@ -943,6 +961,7 @@ async function verifyFrontendRouting() {
   const { ADMIN_LOGIN_HASH, currentAuthoringPaperId, currentRoute, formatRouteHash, isAdminLoginRoute } = await import("../frontend/src/core/router.js");
   assert(ADMIN_LOGIN_HASH === "#/login" && isAdminLoginRoute(ADMIN_LOGIN_HASH), "frontend exposes a distinct admin login route");
   assert(currentRoute("#/authoring?paperid=paper-1784530028213") === "authoring", "authoring remains a protected routable destination");
+  assert(currentRoute("#/paper-print?paperId=paper-1784530028213") === "paper-print", "paper print preview remains a protected hidden route");
   assert(currentAuthoringPaperId("#/authoring?paperid=paper-1784530028213") === "paper-1784530028213", "authoring paperid survives login return-route parsing");
   assert(formatRouteHash("authoring", { paperid: "paper-1784530028213" }) === "#/authoring?paperid=paper-1784530028213", "authoring login return routes restore the canonical hash");
 }

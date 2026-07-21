@@ -1,5 +1,5 @@
 <script setup>
-import { Delete, Edit, Plus, Search, View } from "@element-plus/icons-vue";
+import { Delete, Edit, Plus, Printer, Search, View } from "@element-plus/icons-vue";
 import { useSmartQ } from "../stores/context.js";
 
 const {
@@ -14,6 +14,8 @@ const {
   go,
   selectPaper,
   editPaper,
+  canPrintPaper,
+  openPaperPrint,
   askDeletePaper,
   resetPaperPage,
   displayPaperStatus,
@@ -100,10 +102,11 @@ function clearPaperFilters() {
         <el-table-column label="题数" prop="questionCount" width="90"><template #default="{ row }">{{ row.questionCount || 0 }} 题</template></el-table-column>
         <el-table-column label="总分" prop="score" width="90"><template #default="{ row }">{{ row.score || 0 }} 分</template></el-table-column>
         <el-table-column label="更新时间" min-width="150"><template #default="{ row }">{{ formatDateTime(row.updatedAt || row.publishedAt || row.createdAt) }}</template></el-table-column>
-        <el-table-column label="操作" fixed="right" width="230" align="right">
+        <el-table-column label="操作" fixed="right" width="300" align="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="Edit" @click="editPaper(row)">编辑</el-button>
             <el-button link :icon="View" @click="selectPaper(row.id)">预览</el-button>
+            <el-button v-if="canPrintPaper(row)" link :icon="Printer" @click="openPaperPrint(row)">打印</el-button>
             <el-button link type="danger" :icon="Delete" @click="askDeletePaper(row)">删除</el-button>
           </template>
         </el-table-column>

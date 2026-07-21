@@ -2,7 +2,7 @@ import { buildPaper, saveFormalPaper, validateGenerationSpec, validateQuestions 
 import { logItem } from "../lib/audit.js";
 import { readJson, sendJson } from "../lib/http.js";
 import { updateState } from "../lib/runtime-store.js";
-import { paperSnapshotDetail, upsertPaperSnapshot } from "../services/paper-service.js";
+import { paperPrintPayload, paperSnapshotDetail, upsertPaperSnapshot } from "../services/paper-service.js";
 import {
   clearPaperFromAllAuthoringWorkspaces,
   scopedAuthoringState,
@@ -145,6 +145,18 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
     });
     if (!paper) sendJson(res, 404, { error: "试卷不存在或已被删除，请刷新后重试" });
     else sendJson(res, 200, paper);
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname.startsWith("/api/papers/") && url.pathname.endsWith("/print")) {
+    const id = url.pathname.split("/").at(-2);
+    const target = (state.papers || []).find((item) => item.id === id && canAccessResource(actor, item));
+    if (!target) {
+      sendJson(res, 404, { error: "试卷不存在或已被删除，请刷新后重试" });
+    } else {
+      const payload = paperPrintPayload(target, url.searchParams.get("publishedAt") || "");
+      sendJson(res, payload.statusCode || 200, payload);
+    }
     return true;
   }
 

@@ -41,6 +41,40 @@ export function paperSnapshotDetail(paper, sourceQuestions = []) {
   return { ...paper, questions };
 }
 
+export function paperPrintPayload(paper, requestedPublishedAt = "") {
+  const versions = publishedPaperVersions(paper);
+  if (!versions.length) {
+    return { error: "该试卷还没有可打印的发布版本", statusCode: 409 };
+  }
+  const publishedAt = String(requestedPublishedAt || "").trim();
+  const selected = publishedAt
+    ? versions.find((item) => item.publishedAt === publishedAt)
+    : versions[0];
+  if (!selected) {
+    return { error: "指定的试卷发布版本不存在，请刷新后重试", statusCode: 404 };
+  }
+  const questions = Array.isArray(selected.questions) ? selected.questions.map(printableQuestion) : [];
+  return {
+    paperId: paper.id,
+    versions: versions.map((item) => ({
+      publishedAt: item.publishedAt,
+      name: item.name,
+      questionCount: Number(item.questionCount || item.questions?.length || 0),
+      score: Number(item.score || 0),
+    })),
+    selectedVersion: {
+      id: selected.id,
+      name: selected.name,
+      status: "已发布",
+      score: Number(selected.score || 0),
+      questionCount: Number(selected.questionCount || questions.length),
+      typeGroups: selected.typeGroups && typeof selected.typeGroups === "object" ? selected.typeGroups : {},
+      publishedAt: selected.publishedAt,
+      questions,
+    },
+  };
+}
+
 export function questionContentChanged(beforeJson, after) {
   try {
     const before = JSON.parse(beforeJson);
@@ -56,4 +90,32 @@ function appendPublishedVersion(versions, paper) {
   if (versions.some((item) => item.publishedAt === paper.publishedAt)) return;
   const { publishedVersions: _publishedVersions, ...version } = structuredClone(paper);
   versions.push(version);
+}
+
+function publishedPaperVersions(paper = {}) {
+  const versions = [];
+  const seen = new Set();
+  for (const item of Array.isArray(paper.publishedVersions) ? paper.publishedVersions : []) {
+    if (!item?.publishedAt || seen.has(item.publishedAt)) continue;
+    seen.add(item.publishedAt);
+    versions.push(structuredClone(item));
+  }
+  if (paper.status === "已发布" && paper.publishedAt && !seen.has(paper.publishedAt)) {
+    const { publishedVersions: _publishedVersions, ...current } = structuredClone(paper);
+    versions.push(current);
+  }
+  return versions.sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
+}
+
+function printableQuestion(question = {}) {
+  return {
+    id: String(question.id || ""),
+    type: String(question.type || ""),
+    stem: String(question.stem || ""),
+    options: Array.isArray(question.options) ? question.options.map(String) : [],
+    answer: Array.isArray(question.answer) ? question.answer.map(String) : String(question.answer ?? ""),
+    score: Number(question.score || 0),
+    explanation: String(question.explanation || ""),
+    rubric: Array.isArray(question.rubric) ? question.rubric.map(String) : [],
+  };
 }

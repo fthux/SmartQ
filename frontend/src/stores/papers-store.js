@@ -60,6 +60,62 @@ export function createPapersStore({ state, request, refresh, notify, mountIcons,
     state.confirmDeletePaper = item;
   }
 
+  function canPrintPaper(item = {}) {
+    return item.status === "已发布" || Boolean(item.publishedAt) || Boolean(item.publishedVersions?.length);
+  }
+
+  async function openPaperPrint(item = {}) {
+    if (!item.id || state.paperPrint.loading) return;
+    state.paperPrint = {
+      ...freshPaperPrintState(),
+      dialogOpen: true,
+      loading: true,
+      paperId: item.id,
+      paperName: item.name || "未命名试卷",
+    };
+    try {
+      const payload = await request(`/api/papers/${encodeURIComponent(item.id)}/print`);
+      state.paperPrint.versions = payload.versions || [];
+      state.paperPrint.publishedAt = payload.selectedVersion?.publishedAt || payload.versions?.[0]?.publishedAt || "";
+      state.paperPrint.paperName = payload.selectedVersion?.name || state.paperPrint.paperName;
+    } catch (error) {
+      state.paperPrint.dialogOpen = false;
+      notify(`无法打印试卷：${error.message}`, "error");
+    } finally {
+      state.paperPrint.loading = false;
+      mountIcons();
+    }
+  }
+
+  function closePaperPrint() {
+    if (state.paperPrint.loading) return;
+    state.paperPrint = freshPaperPrintState();
+  }
+
+  function confirmPaperPrint() {
+    const settings = state.paperPrint;
+    if (!settings.paperId || !settings.publishedAt) {
+      notify("请选择可打印的发布版本", "warning");
+      return;
+    }
+    const params = new URLSearchParams({
+      paperId: settings.paperId,
+      publishedAt: settings.publishedAt,
+      mode: settings.mode,
+      showScores: settings.showScores ? "1" : "0",
+      reserveSpace: settings.reserveSpace ? "1" : "0",
+    });
+    const target = new URL(location.href);
+    target.hash = `/paper-print?${params.toString()}`;
+    const previewWindow = window.open(target.toString(), "_blank");
+    if (!previewWindow) {
+      notify("浏览器阻止了预览窗口，请允许本站打开新窗口", "warning");
+      return;
+    }
+    previewWindow.opener = null;
+    state.paperPrint = freshPaperPrintState();
+  }
+
   async function deletePaper() {
     const target = state.confirmDeletePaper;
     if (!target || state.deletingPaperId) return;
@@ -97,12 +153,30 @@ export function createPapersStore({ state, request, refresh, notify, mountIcons,
   return {
     activatePaper,
     askDeletePaper,
+    canPrintPaper,
     changePaperPage,
+    closePaperPrint,
     clearSelectedPaper,
+    confirmPaperPrint,
     deletePaper,
     editPaper,
+    openPaperPrint,
     resetPaperPage,
     selectPaper,
     togglePaperActionMenu,
+  };
+}
+
+function freshPaperPrintState() {
+  return {
+    dialogOpen: false,
+    loading: false,
+    paperId: "",
+    paperName: "",
+    versions: [],
+    publishedAt: "",
+    mode: "paper",
+    showScores: true,
+    reserveSpace: true,
   };
 }

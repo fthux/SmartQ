@@ -19,6 +19,7 @@ import {
 import { cleanupLegacyServiceWorkers, publicUrl } from "../core/public-path.js";
 import { ADMIN_LOGIN_HASH, currentAuthoringPaperId, currentRoute, formatRouteHash, isAdminLoginRoute, parseHashRoute } from "../core/router.js";
 import { createAuthStore } from "./auth-store.js";
+import { createAssistantStore, freshAssistantState } from "./assistant-store.js";
 import { createAuthoringStore } from "./authoring-store.js";
 import { createPapersStore } from "./papers-store.js";
 import { createUiStore } from "./ui-store.js";
@@ -40,6 +41,7 @@ export function createAppStore() {
       loading: true,
       systemLimits: { materialFileMaxBytes: 8 * 1024 * 1024 },
       toast: null,
+      assistant: freshAssistantState(),
       admin: {
         token: localStorage.getItem("smartqAdminToken") || "",
         user: null,
@@ -230,6 +232,7 @@ export function createAppStore() {
       spec: freshSpec(),
       specFormErrors: {},
     });
+    let resetAssistantSession = () => {};
     let dashboardRequestSequence = 0;
 
     const navItems = [
@@ -522,6 +525,16 @@ export function createAppStore() {
       computedSpecTotalScore,
       go: (...args) => go(...args),
     });
+    const assistantStore = createAssistantStore({
+      state,
+      notify,
+      go: (...args) => go(...args),
+      selectPaper,
+      openQuestionBankDetail,
+      openMaterialDetail,
+      selectQuestionBankCategory,
+    });
+    resetAssistantSession = assistantStore.resetAssistantSession;
     async function refresh() {
       if (!state.admin.token) {
         state.loading = false;
@@ -738,6 +751,7 @@ export function createAppStore() {
       Object.assign(state.userManagement, {
         items: [], total: 0, editorOpen: false, editingId: null, resetOpen: false, resetUser: null, sessionRevokingId: null,
       });
+      resetAssistantSession();
     }
 
     function canAccessRoute(route) {
@@ -951,6 +965,7 @@ export function createAppStore() {
       setTheme,
       toggleTheme,
       toggleFullscreen,
+      ...assistantStore,
       setWorkflowStep,
       generateDraft,
       saveDraft,

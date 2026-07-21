@@ -26,6 +26,7 @@ import QuestionBankPage from "../pages/QuestionBankPage.vue";
 import ProfilePage from "../pages/ProfilePage.vue";
 import UsersPage from "../pages/UsersPage.vue";
 import PaperDetailDrawer from "./PaperDetailDrawer.vue";
+import SmartQAssistantTrigger from "./SmartQAssistantTrigger.vue";
 import { useSmartQ } from "../stores/context.js";
 
 const {
@@ -43,6 +44,7 @@ const {
   toggleFullscreen,
   runAdminAccountMenuItem,
   publicUrl,
+  openAssistant,
 } = useSmartQ();
 
 const iconMap = {
@@ -203,6 +205,13 @@ function handleThemePreference(theme) {
         </div>
       </main>
     </div>
+
+    <SmartQAssistantTrigger
+      :active="state.assistant.open"
+      :busy="state.assistant.loading || state.assistant.sending"
+      :error="Boolean(state.assistant.error)"
+      @activate="openAssistant"
+    />
   </div>
 </template>
 

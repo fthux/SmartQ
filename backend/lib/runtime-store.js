@@ -451,6 +451,7 @@ function defaultState() {
     questionBankCategories: [],
     sourceMaterials: [],
     generationTask: null,
+    assistantConversations: [],
     adminSessions: {},
     adminUsers: [],
     auditLog: [
@@ -489,6 +490,7 @@ function normalizeState(input) {
     questionBankCategories: Array.isArray(input.questionBankCategories) ? input.questionBankCategories.map(normalizeQuestionBankCategory).filter(Boolean) : [],
     sourceMaterials: Array.isArray(input.sourceMaterials) ? input.sourceMaterials.map(normalizeSourceMaterial).filter(Boolean) : [],
     generationTask: input.generationTask || null,
+    assistantConversations: normalizeAssistantConversations(input.assistantConversations),
     adminSessions: input.adminSessions && typeof input.adminSessions === "object" ? input.adminSessions : {},
     adminUsers: Array.isArray(input.adminUsers) ? input.adminUsers : [],
     ...(input.adminProfiles && typeof input.adminProfiles === "object" ? { adminProfiles: normalizeAdminProfiles(input.adminProfiles) } : {}),
@@ -509,6 +511,34 @@ function normalizeState(input) {
     workspace.generationTask = stripPaperCategory(workspace.generationTask);
   });
   return stripLegacyQuestionSeed(normalized);
+}
+
+function normalizeAssistantConversations(input) {
+  if (!Array.isArray(input)) return [];
+  return input.map((conversation) => {
+    if (!conversation?.id || !conversation?.ownerUserId) return null;
+    const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+    return {
+      id: String(conversation.id),
+      ownerUserId: String(conversation.ownerUserId),
+      title: String(conversation.title || "新对话").slice(0, 80),
+      scope: conversation.scope === "all" ? "all" : "mine",
+      mode: ["auto", "system", "web"].includes(conversation.mode) ? conversation.mode : "auto",
+      createdAt: conversation.createdAt || new Date().toISOString(),
+      updatedAt: conversation.updatedAt || conversation.createdAt || new Date().toISOString(),
+      messages: messages.slice(-100).map((message) => {
+        if (!message?.id || !["user", "assistant"].includes(message?.role)) return null;
+        return {
+          id: String(message.id),
+          role: message.role,
+          content: String(message.content || "").slice(0, 30_000),
+          sources: Array.isArray(message.sources) ? message.sources.slice(0, 40) : [],
+          status: ["done", "interrupted", "error"].includes(message.status) ? message.status : "done",
+          createdAt: message.createdAt || new Date().toISOString(),
+        };
+      }).filter(Boolean),
+    };
+  }).filter(Boolean);
 }
 
 function normalizeSourceMaterial(item) {

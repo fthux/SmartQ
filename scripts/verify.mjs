@@ -15,6 +15,8 @@ const retiredInitialPasswordFlag = ["must", "ChangePassword"].join("");
 
 await verifyFrontendRouting();
 await verifyLegacyAdminNormalization();
+await verifyAssistantToolPayloadBoundary();
+await verifyAssistantMarkdownRendering();
 
 const server = spawn(process.execPath, ["backend/server.js"], {
   stdio: ["ignore", "pipe", "pipe"],
@@ -65,6 +67,11 @@ try {
     "frontend/src/components/PaperPrintDialog.vue",
     "frontend/src/components/QuestionBankPicker.vue",
     "frontend/src/components/QuestionEditorDialog.vue",
+    "frontend/src/components/AssistantMessageContent.vue",
+    "frontend/src/components/SmartQAssistantDrawer.vue",
+    "frontend/src/components/SmartQAssistantTrigger.vue",
+    "frontend/src/core/api-client.js",
+    "frontend/src/core/assistant-markdown.js",
     "frontend/src/core/brand.js",
     "frontend/src/core/public-path.js",
     "frontend/src/core/router.js",
@@ -77,6 +84,7 @@ try {
     "frontend/src/pages/QuestionBankPage.vue",
     "frontend/src/pages/UsersPage.vue",
     "frontend/src/stores/app-store.js",
+    "frontend/src/stores/assistant-store.js",
     "frontend/src/stores/authoring-store.js",
     "frontend/src/stores/auth-store.js",
     "frontend/src/stores/layout-store.js",
@@ -90,18 +98,26 @@ try {
   const frontendSources = await Promise.all(frontendFiles.map((path) => readFile(path, "utf8")));
   const frontend = frontendSources.join("\n");
   const consoleShell = frontendSources[frontendFiles.indexOf("frontend/src/components/ConsoleShell.vue")];
+  const assistantTrigger = frontendSources[frontendFiles.indexOf("frontend/src/components/SmartQAssistantTrigger.vue")];
+  const assistantDrawer = frontendSources[frontendFiles.indexOf("frontend/src/components/SmartQAssistantDrawer.vue")];
+  const assistantMessageContent = frontendSources[frontendFiles.indexOf("frontend/src/components/AssistantMessageContent.vue")];
   const loginPage = frontendSources[frontendFiles.indexOf("frontend/src/pages/LoginPage.vue")];
   const paperPrintDialog = frontendSources[frontendFiles.indexOf("frontend/src/components/PaperPrintDialog.vue")];
   const paperPrintPage = frontendSources[frontendFiles.indexOf("frontend/src/pages/PaperPrintPage.vue")];
   const backendFiles = [
     "backend/server.js",
     "backend/lib/ai.js",
+    "backend/lib/runtime-store.js",
+    "backend/routes/assistant.js",
     "backend/routes/index.js",
     "backend/routes/authoring.js",
     "backend/routes/materials.js",
     "backend/routes/papers.js",
     "backend/routes/question-bank.js",
     "backend/services/generation-service.js",
+    "backend/services/assistant-conversation-service.js",
+    "backend/services/assistant-service.js",
+    "backend/services/assistant-tools.js",
     "backend/services/material-service.js",
     "backend/services/paper-service.js",
     "backend/services/question-bank-service.js",
@@ -151,6 +167,25 @@ try {
   assert(frontend.includes('active-value="active"') && frontend.includes('inactive-value="disabled"') && frontend.includes("statusUpdatingId"), "user status switches use Element Plus active, inactive, disabled, and loading states");
   assert(frontend.includes("/api/admin/password"), "profile page keeps voluntary password changes");
   assert(frontend.includes('notify("登录密码已更新")') && frontend.includes('notify(state.password.error, "error")'), "password changes show typed Element Plus messages for success and validation or request failures");
+  assert(
+    frontend.includes("SmartQ 小助手")
+      && frontend.includes("SmartQAssistantDrawer")
+      && consoleShell.includes("<SmartQAssistantTrigger")
+      && assistantTrigger.includes('aria-label="打开 SmartQ 小助手"')
+      && assistantTrigger.includes("position: fixed")
+      && assistantTrigger.includes("requestAnimationFrame")
+      && assistantTrigger.includes("props.busy ? 1.9 : 1.15")
+      && !assistantTrigger.includes("interactionBoost")
+      && assistantTrigger.includes("prefers-reduced-motion: reduce"),
+    "the fixed bottom-right assistant trigger keeps flowing without hover and opens the drawer",
+  );
+  assert(frontend.includes("streamRequest") && frontend.includes("text/event-stream") === false && backend.includes("text/event-stream"), "assistant messages use an authenticated SSE response channel");
+  assert(frontend.includes("系统+联网") && frontend.includes("我的数据") && frontend.includes("全系统"), "assistant UI exposes query mode and super-administrator data scope controls");
+  assert(assistantDrawer.includes("state.admin.user?.avatar") && assistantDrawer.includes("adminDisplayName") && !assistantDrawer.includes("default_avatar.jpg"), "assistant user messages use the signed-in user's real avatar without the default image");
+  assert(assistantDrawer.includes("<AssistantMessageContent") && assistantMessageContent.includes("markdown-table") && !assistantMessageContent.includes("v-html"), "assistant answers render safe structured Markdown tables without raw HTML injection");
+  assert(backend.includes("executeAssistantTool") && backend.includes("accessibleResources") && !backend.includes("query_database"), "assistant uses permission-scoped read-only tools instead of arbitrary database queries");
+  assert(backend.includes("web_search") && backend.includes("SMARTQ_WEB_SEARCH_ENDPOINT") && backend.includes("SMARTQ_ASSISTANT_NATIVE_WEB_SEARCH"), "assistant supports native and configured external web search");
+  assert(backend.includes("assistantConversations") && backend.includes("maxMessagesPerConversation") && backend.includes("assistant-query"), "assistant conversations are bounded, persisted, and audited");
   assert(!frontend.includes(retiredInitialPasswordFlag) && !/首次登录.*修改.*密码|初始密码/.test(frontend), "frontend removes the initial-password change policy and UI");
   assert(!backend.includes(retiredInitialPasswordFlag) && !backend.includes("请先修改初始密码"), "backend removes the initial-password field and API gate");
   assert(!backend.includes("SMARTQ_LOGIN_") && !backend.includes("登录失败次数过多") && !backend.includes("admin-login-blocked"), "backend removes failed-login lockout configuration and responses");
@@ -247,6 +282,8 @@ try {
   assert(blockedAvatarReset.error === "请先登录控制台", "avatar reset requires admin login");
   const blockedUsers = await getJson("/api/admin/users", { expectedStatus: 401 });
   assert(blockedUsers.error === "请先登录控制台", "user management requires login");
+  const blockedAssistant = await getJson("/api/assistant/conversations", { expectedStatus: 401 });
+  assert(blockedAssistant.error === "请先登录控制台", "assistant conversations require login");
   const oversizedLogin = await postJson("/api/admin/login", { username: "x".repeat(140 * 1024), password: "x" }, { expectedStatus: 413 });
   assert(oversizedLogin.error.includes("请求体过大"), "oversized JSON is rejected");
 
@@ -834,6 +871,24 @@ try {
   assert(globalBank.items.some((item) => item.id === isolatedQuestion.id && item.creator?.username === "managed-user"), "super administrator sees all question bank items with creator information");
   assert(globalMaterials.items.some((item) => item.id === isolatedMaterial.id && item.creator?.username === "managed-user"), "super administrator sees all materials with creator information");
 
+  const contentConversation = await postJson("/api/assistant/conversations", { scope: "all", mode: "system" }, { headers: contentUserHeaders, expectedStatus: 201 });
+  assert(contentConversation.scope === "mine" && contentConversation.mode === "system", "ordinary-user assistant conversations cannot enable the all-system scope");
+  const contentAssistant = await postSse(`/api/assistant/conversations/${contentConversation.id}/messages`, { content: "列出我能访问的试卷", scope: "all", mode: "system" }, contentUserHeaders);
+  const contentAssistantDone = contentAssistant.find((event) => event.event === "done")?.data;
+  assert(contentAssistantDone?.message?.role === "assistant" && contentAssistantDone.message.sources.some((source) => source.entityType === "paper"), "ordinary users receive persisted assistant answers with internal paper sources");
+  assert(!contentAssistantDone.message.sources.some((source) => source.id === isolatedPaper.id), "ordinary-user assistant sources exclude another user's paper");
+
+  const adminConversation = await postJson("/api/assistant/conversations", { scope: "all", mode: "system" }, { headers: adminHeaders, expectedStatus: 201 });
+  const adminAssistant = await postSse(`/api/assistant/conversations/${adminConversation.id}/messages`, { content: "列出系统中的试卷", scope: "all", mode: "system" }, adminHeaders);
+  const adminAssistantDone = adminAssistant.find((event) => event.event === "done")?.data;
+  assert(adminAssistantDone?.message?.sources.some((source) => source.id === isolatedPaper.id), "super-administrator assistant all-system scope includes another user's paper");
+  const persistedAssistantConversation = await getJson(`/api/assistant/conversations/${adminConversation.id}`, { headers: adminHeaders });
+  assert(persistedAssistantConversation.messages.length === 2 && persistedAssistantConversation.messages[1].role === "assistant", "assistant conversation messages persist after the SSE response completes");
+  persistedRuntime = JSON.parse(await readFile(runtimeFile, "utf8"));
+  assert(persistedRuntime.assistantConversations.some((item) => item.id === adminConversation.id) && persistedRuntime.auditLog.some((item) => item.type === "assistant-query"), "assistant conversations and audit metadata persist in runtime storage");
+  assert(!JSON.stringify(persistedRuntime.assistantConversations).includes("passwordHash") && !JSON.stringify(adminAssistantDone.message).includes("adminSessions"), "assistant persistence and responses exclude password hashes and session data");
+  await requestJson(`/api/assistant/conversations/${contentConversation.id}`, { method: "DELETE", headers: contentUserHeaders });
+
   await postJson(`/api/question-bank/${isolatedQuestion.id}/archive`, {}, { headers: adminHeaders });
   const restoredIsolatedQuestion = await postJson(`/api/question-bank/${isolatedQuestion.id}/restore`, {}, { headers: adminHeaders });
   assert(restoredIsolatedQuestion.ownerUserId === isolatedLogin.admin.id, "super administrator can archive and restore another user's question without changing ownership");
@@ -986,6 +1041,65 @@ async function verifyLegacyAdminNormalization() {
   }
 }
 
+async function verifyAssistantToolPayloadBoundary() {
+  const { createAssistantToolContext, executeAssistantTool } = await import("../backend/services/assistant-tools.js");
+  const { assistantFailureCode, assistantPublicError } = await import("../backend/services/assistant-service.js");
+  const ownerUserId = "assistant-payload-owner";
+  const oversizedAvatar = `data:image/png;base64,${"A".repeat(70 * 1024)}`;
+  const oversizedName = "超长试卷".repeat(1_200);
+  const user = {
+    id: ownerUserId,
+    username: "assistant-payload-user",
+    displayName: "助手结果测试用户",
+    role: "super_admin",
+    status: "active",
+    avatar: oversizedAvatar,
+    passwordHash: "must-not-reach-the-model",
+  };
+  const state = {
+    adminUsers: [user],
+    papers: Array.from({ length: 50 }, (_, index) => ({
+      id: `assistant-payload-paper-${index + 1}`,
+      name: `${oversizedName}-${index + 1}`,
+      status: "草稿",
+      questionCount: index + 1,
+      score: 100,
+      createdAt: "2026-07-20T00:00:00.000Z",
+      updatedAt: new Date(Date.UTC(2026, 6, 21, 0, index)).toISOString(),
+      ownerUserId,
+      createdByUserId: ownerUserId,
+      updatedByUserId: ownerUserId,
+    })),
+  };
+  const auth = { user, session: { userId: ownerUserId, username: user.username } };
+  const context = createAssistantToolContext(state, auth, { scope: "mine" });
+  const result = await executeAssistantTool("search_papers", { status: "草稿", limit: 50 }, context);
+  const serialized = JSON.stringify(result);
+
+  assert(!serialized.includes("data:image") && !serialized.includes("must-not-reach-the-model"), "assistant tool results remove avatars and sensitive account fields");
+  assert(Buffer.byteLength(serialized) <= 32 * 1024, "assistant tool results stay within the default model payload budget");
+  assert(result.truncated === true && result.notice && result.data.total === 50, "oversized assistant tool results retain totals and report truncation");
+
+  const contextError = Object.assign(new Error("Your input exceeds the context window of this model."), { statusCode: 502, providerStatus: 502 });
+  assert(assistantFailureCode(contextError) === "context_limit", "assistant classifies provider context-window failures without persisting raw provider details");
+  assert(assistantPublicError(contextError) === "查询结果较多，请缩小范围后重试", "assistant returns an actionable message for context-window failures");
+}
+
+async function verifyAssistantMarkdownRendering() {
+  const { parseAssistantMarkdown, parseInlineMarkdown } = await import("../frontend/src/core/assistant-markdown.js");
+  const blocks = parseAssistantMarkdown([
+    "**| 试卷名称 | 状态 | 题目数 | 总分 | 最近更新 |**",
+    "**|---|---:|---:|---:|---|**",
+    "**| C++ 工程能力测评 A 卷11 | 草稿 | 12 | 50 | 2026-07-21 14:45:04 UTC |**",
+    "",
+    "**尚未发布**按状态为`草稿`判断。",
+  ].join("\n"));
+  assert(blocks[0]?.type === "table" && blocks[0].header.length === 5 && blocks[0].rows[0][0] === "C++ 工程能力测评 A 卷11", "assistant Markdown parser recognizes bold-wrapped pipe tables");
+  assert(blocks[0].aligns[1] === "right" && blocks[1]?.type === "paragraph", "assistant Markdown parser keeps table alignment and following paragraphs");
+  const inline = parseInlineMarkdown("**尚未发布**按状态为`草稿`判断。");
+  assert(inline.some((item) => item.type === "strong") && inline.some((item) => item.type === "code"), "assistant Markdown parser supports bold and inline code");
+}
+
 async function verifyFrontendRouting() {
   const { ADMIN_LOGIN_HASH, currentAuthoringPaperId, currentRoute, formatRouteHash, isAdminLoginRoute } = await import("../frontend/src/core/router.js");
   assert(ADMIN_LOGIN_HASH === "#/login" && isAdminLoginRoute(ADMIN_LOGIN_HASH), "frontend exposes a distinct admin login route");
@@ -1044,6 +1158,28 @@ async function requestJson(path, options = {}) {
     throw new Error(`${options.method || "GET"} ${path} expected ${expectedStatus}, received ${response.status}: ${JSON.stringify(payload)}`);
   }
   return payload;
+}
+
+async function postSse(path, body, headers) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(headers || {}) },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`POST ${path} expected 200, received ${response.status}: ${await response.text()}`);
+  const text = await response.text();
+  return text.split(/\r?\n\r?\n/).map((block) => {
+    if (!block.trim()) return null;
+    let event = "message";
+    const data = [];
+    block.split(/\r?\n/).forEach((line) => {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+    });
+    let payload = data.join("\n");
+    try { payload = JSON.parse(payload); } catch {}
+    return { event, data: payload };
+  }).filter(Boolean);
 }
 
 async function getText(path) {

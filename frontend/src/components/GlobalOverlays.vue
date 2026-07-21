@@ -4,6 +4,7 @@ import PaperRenameDialog from "./PaperRenameDialog.vue";
 import PaperPrintDialog from "./PaperPrintDialog.vue";
 import QuestionEditorDialog from "./QuestionEditorDialog.vue";
 import QuestionBankPicker from "./QuestionBankPicker.vue";
+import SmartQAssistantDrawer from "./SmartQAssistantDrawer.vue";
 </script>
 
 <template>
@@ -12,4 +13,5 @@ import QuestionBankPicker from "./QuestionBankPicker.vue";
   <PaperPrintDialog />
   <QuestionEditorDialog />
   <QuestionBankPicker />
+  <SmartQAssistantDrawer />
 </template>

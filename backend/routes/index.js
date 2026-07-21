@@ -7,6 +7,7 @@ import {
 } from "../services/auth-service.js";
 import { handleAdminLoginRoute, handleAdminRoutes } from "./admin.js";
 import { handleAdminUserRoutes } from "./admin-users.js";
+import { handleAssistantRoutes } from "./assistant.js";
 import { handleAuthoringRoutes } from "./authoring.js";
 import { handlePaperRoutes } from "./papers.js";
 import { handleMaterialRoutes } from "./materials.js";
@@ -31,6 +32,7 @@ export async function handleApi(req, res, url) {
 
   if (await handleAdminRoutes(req, res, url, state, auth, token)) return;
   if (await handleAdminUserRoutes(req, res, url, state, auth, token)) return;
+  if (await handleAssistantRoutes(req, res, url, state, auth)) return;
   if (handleDashboardRoute(req, res, url, state, auth)) return;
   if (await handleQuestionBankRoutes(req, res, url, state, auth)) return;
   if (await handleMaterialRoutes(req, res, url, state, auth)) return;

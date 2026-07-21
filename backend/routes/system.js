@@ -3,6 +3,7 @@ import { maxRequestBytes, sendJson } from "../lib/http.js";
 import { storageInfo } from "../lib/runtime-store.js";
 import { materialFileMaxBytes } from "../services/material-service.js";
 import { scopedAuthoringState } from "../services/authoring-workspace-service.js";
+import { assistantStatus } from "../services/assistant-service.js";
 import {
   accessibleResources,
   activeAuthoringOwnerId,
@@ -22,6 +23,7 @@ export async function handlePublicSystemRoutes(req, res, url) {
       time: new Date().toISOString(),
       mode: config.mockMode ? "mock" : "provider",
       aiReady: config.mockMode || Boolean(config.apiKey),
+      assistant: assistantStatus(),
       storage: {
         adapter: storage.adapter,
         requestedAdapter: storage.requestedAdapter,
@@ -49,6 +51,7 @@ export async function handlePublicSystemRoutes(req, res, url) {
       automationStatus: mockMode ? "AI mock 模式正常" : providerReady ? "AI 服务配置正常" : "AI 服务未配置密钥",
       mode: mockMode ? "mock" : "provider",
       mockMode,
+      assistant: assistantStatus(),
     });
     return true;
   }

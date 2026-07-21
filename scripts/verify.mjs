@@ -14,6 +14,7 @@ let output = "";
 const retiredInitialPasswordFlag = ["must", "ChangePassword"].join("");
 
 await verifyFrontendRouting();
+await verifyUserPasswordResetFlow();
 await verifyLegacyAdminNormalization();
 await verifyAssistantToolPayloadBoundary();
 await verifyAssistantMarkdownRendering();
@@ -1107,6 +1108,56 @@ async function verifyFrontendRouting() {
   assert(currentRoute("#/paper-print?paperId=paper-1784530028213") === "paper-print", "paper print preview remains a protected hidden route");
   assert(currentAuthoringPaperId("#/authoring?paperid=paper-1784530028213") === "paper-1784530028213", "authoring paperid survives login return-route parsing");
   assert(formatRouteHash("authoring", { paperid: "paper-1784530028213" }) === "#/authoring?paperid=paper-1784530028213", "authoring login return routes restore the canonical hash");
+}
+
+async function verifyUserPasswordResetFlow() {
+  const { createUsersStore } = await import("../frontend/src/stores/users-store.js");
+  const targetUser = { id: "managed-user-id", username: "managed-user", displayName: "受管用户" };
+  const requests = [];
+  const notifications = [];
+  const state = {
+    admin: { user: { id: "super-admin-id" } },
+    userManagement: {
+      error: "",
+      items: [],
+      loading: false,
+      page: 1,
+      pageSize: 20,
+      resetError: "",
+      resetOpen: false,
+      resetPassword: "",
+      resetPasswordConfirm: "",
+      resetting: false,
+      resetUser: null,
+      search: "",
+      status: "",
+      total: 0,
+    },
+  };
+  const request = async (path, options = {}) => {
+    requests.push({ path, options });
+    if (path.includes("/reset-password")) return { user: targetUser, revokedSessions: 1 };
+    if (path.startsWith("/api/admin/users?")) return { users: [], total: 0 };
+    throw new Error(`Unexpected user-store request: ${path}`);
+  };
+  const store = createUsersStore({ state, request, notify: (message) => notifications.push(message) });
+
+  store.openResetAdminPassword(targetUser);
+  assert(state.userManagement.resetOpen === true && state.userManagement.resetUser === targetUser, "password reset action opens the dialog before password validation");
+
+  await store.resetManagedAdminPassword();
+  assert(state.userManagement.resetError === "请输入密码" && requests.length === 0, "empty reset password is rejected without sending a request");
+
+  state.userManagement.resetPassword = "Reset@2028";
+  state.userManagement.resetPasswordConfirm = "Reset@2029";
+  await store.resetManagedAdminPassword();
+  assert(state.userManagement.resetError === "两次输入的密码不一致" && requests.length === 0, "mismatched reset passwords are rejected without sending a request");
+
+  state.userManagement.resetPasswordConfirm = "Reset@2028";
+  await store.resetManagedAdminPassword();
+  const resetRequest = requests.find((item) => item.path.includes("/reset-password"));
+  assert(resetRequest?.options.method === "POST" && JSON.parse(resetRequest.options.body).password === "Reset@2028", "valid reset password is submitted to the managed-user endpoint");
+  assert(state.userManagement.resetOpen === false && notifications.includes("密码已重置"), "successful password reset closes the dialog and notifies the administrator");
 }
 
 function restoreEnv(name, value) {

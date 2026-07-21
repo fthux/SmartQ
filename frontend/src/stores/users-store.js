@@ -181,11 +181,6 @@ export function createUsersStore({ state, request, notify }) {
     state.userManagement.resetPassword = "";
     state.userManagement.resetPasswordConfirm = "";
     state.userManagement.resetError = "";
-    const passwordError = validatePassword(state.userManagement.resetPassword);
-    if (passwordError) {
-      state.userManagement.resetError = passwordError;
-      return;
-    }
     state.userManagement.resetOpen = true;
   }
 
@@ -193,6 +188,11 @@ export function createUsersStore({ state, request, notify }) {
     const user = state.userManagement.resetUser;
     if (!user) return;
     state.userManagement.resetError = "";
+    const passwordError = validatePassword(state.userManagement.resetPassword);
+    if (passwordError) {
+      state.userManagement.resetError = passwordError;
+      return;
+    }
     if (state.userManagement.resetPassword !== state.userManagement.resetPasswordConfirm) {
       state.userManagement.resetError = "两次输入的密码不一致";
       return;

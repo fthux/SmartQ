@@ -207,7 +207,7 @@ export function createAssistantStore({ state, notify, go, selectPaper, openQuest
   async function copyAssistantMessage(message) {
     try {
       await navigator.clipboard.writeText(String(message?.content || ""));
-      notify("回答已复制");
+      notify(message?.role === "user" ? "问题已复制" : "回答已复制");
     } catch {
       notify("复制失败，请手动选择文本", "error");
     }

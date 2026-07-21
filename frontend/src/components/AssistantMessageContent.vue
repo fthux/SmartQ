@@ -149,7 +149,9 @@ const blocks = computed(() => parseAssistantMarkdown(props.content));
   border-right: 1px solid #e2e8f0;
   border-bottom: 1px solid #e2e8f0;
   vertical-align: top;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-table th:last-child,
@@ -196,6 +198,8 @@ const blocks = computed(() => parseAssistantMarkdown(props.content));
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 :global(.dark) .markdown-heading {

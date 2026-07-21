@@ -28,7 +28,8 @@ const {
   openAssistantSource,
   copyAssistantMessage,
   isAssistantSourceNavigable,
-  formatDateTime,
+  formatDateTimeWithYear,
+  publicUrl,
 } = useSmartQ();
 
 const messageList = ref(null);
@@ -97,7 +98,7 @@ function sourceIcon(source) {
                 <el-dropdown-item v-for="item in state.assistant.conversations" :key="item.id" :command="item.id" :disabled="state.assistant.sending">
                   <div class="min-w-0 py-1">
                     <div class="truncate text-sm font-bold">{{ item.title }}</div>
-                    <div class="mt-0.5 truncate text-[11px] text-slate-400">{{ formatDateTime(item.updatedAt) }} · {{ item.messageCount }} 条消息</div>
+                    <div class="mt-0.5 truncate text-[11px] text-slate-400">{{ formatDateTimeWithYear(item.updatedAt) }} · {{ item.messageCount }} 条消息</div>
                   </div>
                 </el-dropdown-item>
               </el-dropdown-menu>
@@ -142,13 +143,29 @@ function sourceIcon(source) {
                 </template>
                 <span v-else class="inline-flex items-center text-slate-400"><el-icon class="is-loading mr-2"><Loading /></el-icon>正在生成回答</span>
               </div>
-              <div v-if="message.role === 'assistant' && message.sources?.length" class="mt-3 flex flex-wrap gap-1.5">
-                <el-button v-for="source in message.sources" :key="source.key || `${source.type}-${source.id}`" size="small" plain :icon="sourceIcon(source)" :disabled="!isAssistantSourceNavigable(source)" @click="openAssistantSource(source)">
+              <div v-if="message.role === 'assistant' && message.sources?.length" class="mt-3 flex min-w-0 flex-wrap gap-1.5">
+                <el-button v-for="source in message.sources" :key="source.key || `${source.type}-${source.id}`" class="assistant-source-button" size="small" plain :icon="sourceIcon(source)" :disabled="!isAssistantSourceNavigable(source)" @click="openAssistantSource(source)">
                   {{ source.title }}
                 </el-button>
               </div>
-              <div v-if="message.role === 'assistant' && message.content" class="mt-1 flex items-center gap-1">
-                <el-tooltip content="复制回答"><el-button link circle size="small" :icon="CopyDocument" aria-label="复制回答" @click="copyAssistantMessage(message)" /></el-tooltip>
+              <div
+                v-if="message.content"
+                class="mt-1 flex items-center gap-1"
+                :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
+              >
+                <span v-if="message.createdAt" class="text-[11px] font-medium tabular-nums text-slate-400">
+                  {{ formatDateTimeWithYear(message.createdAt) }}
+                </span>
+                <el-tooltip :content="message.role === 'user' ? '复制问题' : '复制回答'">
+                  <el-button
+                    link
+                    circle
+                    size="small"
+                    :icon="CopyDocument"
+                    :aria-label="message.role === 'user' ? '复制问题' : '复制回答'"
+                    @click="copyAssistantMessage(message)"
+                  />
+                </el-tooltip>
                 <span v-if="message.status === 'interrupted'" class="text-[11px] font-semibold text-amber-600">已停止</span>
                 <span v-else-if="message.status === 'error'" class="text-[11px] font-semibold text-red-500">回答失败</span>
               </div>
@@ -157,7 +174,7 @@ function sourceIcon(source) {
               v-if="message.role === 'user'"
               :size="32"
               shape="square"
-              :src="state.admin.user?.avatar || ''"
+              :src="state.admin.user?.avatar || publicUrl('/assets/default_avatar.jpg')"
               class="shrink-0 bg-primary text-xs font-black text-emerald-950"
             >
               {{ adminDisplayName.slice(0, 1).toUpperCase() }}
@@ -194,6 +211,22 @@ function sourceIcon(source) {
 
 .assistant-message {
   overflow-wrap: anywhere;
+}
+
+.assistant-source-button {
+  max-width: 100%;
+  height: auto;
+  min-height: 32px;
+  white-space: normal;
+}
+
+.assistant-source-button :deep(span) {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: left;
+  line-height: 1.4;
 }
 
 .suggestion-button {

@@ -60,6 +60,57 @@ export function createPapersStore({ state, request, refresh, notify, mountIcons,
     state.confirmDeletePaper = item;
   }
 
+  function openPaperRename(item) {
+    if (!item?.id) return;
+    state.paperRename = {
+      open: true,
+      target: item,
+      name: String(item.name || ""),
+      saving: false,
+      error: "",
+    };
+    mountIcons();
+  }
+
+  function closePaperRename() {
+    if (state.paperRename.saving) return;
+    state.paperRename = freshPaperRenameState();
+  }
+
+  async function renamePaper() {
+    const rename = state.paperRename;
+    const target = rename.target;
+    const name = String(rename.name || "").trim();
+    if (!target?.id || rename.saving) return;
+    if (!name) {
+      rename.error = "请输入试卷名称";
+      return;
+    }
+    if (name.length > 80) {
+      rename.error = "试卷名称不能超过 80 个字符";
+      return;
+    }
+    if (name === String(target.name || "").trim()) return;
+    rename.saving = true;
+    rename.error = "";
+    try {
+      const updated = await request(`/api/papers/${encodeURIComponent(target.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      });
+      if (state.selectedPaperId === updated.id && state.selectedPaperDetail) {
+        state.selectedPaperDetail = { ...state.selectedPaperDetail, ...updated };
+      }
+      state.paperRename = freshPaperRenameState();
+      await refresh();
+      notify("试卷名称已修改");
+    } catch (error) {
+      rename.error = error.message;
+    } finally {
+      if (state.paperRename.open) state.paperRename.saving = false;
+    }
+  }
+
   function canPrintPaper(item = {}) {
     return item.status === "已发布" || Boolean(item.publishedAt) || Boolean(item.publishedVersions?.length);
   }
@@ -152,15 +203,28 @@ export function createPapersStore({ state, request, refresh, notify, mountIcons,
     askDeletePaper,
     canPrintPaper,
     changePaperPage,
+    closePaperRename,
     closePaperPrint,
     clearSelectedPaper,
     confirmPaperPrint,
     deletePaper,
     editPaper,
+    openPaperRename,
     openPaperPrint,
+    renamePaper,
     resetPaperPage,
     selectPaper,
     togglePaperActionMenu,
+  };
+}
+
+function freshPaperRenameState() {
+  return {
+    open: false,
+    target: null,
+    name: "",
+    saving: false,
+    error: "",
   };
 }
 

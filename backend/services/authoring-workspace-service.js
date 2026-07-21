@@ -88,6 +88,18 @@ export function clearPaperFromAllAuthoringWorkspaces(state, paperId) {
   }
 }
 
+export function renamePaperInAllAuthoringWorkspaces(state, paperId, name) {
+  for (const workspace of Object.values(state.authoringWorkspaces || {})) {
+    if (workspace?.paper?.id !== paperId) continue;
+    workspace.paper = {
+      ...workspace.paper,
+      name,
+      generationSpecSnapshot: withPaperName(workspace.paper.generationSpecSnapshot, name),
+    };
+    workspace.generationTask = withPaperName(workspace.generationTask, name);
+  }
+}
+
 function hasLegacyAuthoringData(state = {}) {
   return Boolean(
     (Array.isArray(state.questions) && state.questions.length)
@@ -102,4 +114,9 @@ function stripPaperCategory(value) {
   if (!value || typeof value !== "object") return value || null;
   const { categoryId: _categoryId, categorySnapshot: _categorySnapshot, ...rest } = value;
   return rest;
+}
+
+function withPaperName(value, name) {
+  if (!value || typeof value !== "object") return value || null;
+  return { ...value, paperName: name };
 }

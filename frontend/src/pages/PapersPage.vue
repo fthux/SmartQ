@@ -1,5 +1,5 @@
 <script setup>
-import { Delete, Edit, Plus, Printer, Search, View } from "@element-plus/icons-vue";
+import { Delete, Edit, EditPen, Plus, Printer, Search, View } from "@element-plus/icons-vue";
 import { useSmartQ } from "../stores/context.js";
 
 const {
@@ -16,6 +16,7 @@ const {
   editPaper,
   canPrintPaper,
   openPaperPrint,
+  openPaperRename,
   askDeletePaper,
   resetPaperPage,
   displayPaperStatus,
@@ -91,7 +92,12 @@ function clearPaperFilters() {
         </template>
         <el-table-column label="试卷名称" min-width="250">
           <template #default="{ row }">
-            <div class="font-black text-ink dark:text-slate-100">{{ row.name }}</div>
+            <div class="flex min-w-0 items-center gap-1">
+              <div class="truncate font-black text-ink dark:text-slate-100">{{ row.name }}</div>
+              <el-tooltip content="修改名称" placement="top">
+                <el-button link circle :icon="EditPen" :aria-label="`修改试卷名称：${row.name}`" @click.stop="openPaperRename(row)" @dblclick.stop />
+              </el-tooltip>
+            </div>
             <div class="mt-1 text-xs font-semibold text-slate-400">{{ row.id }}</div>
           </template>
         </el-table-column>

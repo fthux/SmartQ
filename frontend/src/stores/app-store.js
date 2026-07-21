@@ -206,6 +206,7 @@ export function createAppStore() {
       paperActionMenuId: null,
       confirmDeletePaper: null,
       deletingPaperId: null,
+      paperRename: freshPaperRenameState(),
       paperPrint: freshPaperPrintState(),
       editingQuestion: null,
       questionEditForm: null,
@@ -471,12 +472,15 @@ export function createAppStore() {
       askDeletePaper,
       canPrintPaper,
       changePaperPage,
+      closePaperRename,
       closePaperPrint,
       clearSelectedPaper,
       confirmPaperPrint,
       deletePaper,
       editPaper,
+      openPaperRename,
       openPaperPrint,
+      renamePaper,
       resetPaperPage,
       selectPaper,
       togglePaperActionMenu,
@@ -697,6 +701,7 @@ export function createAppStore() {
         paperActionMenuId: null,
         confirmDeletePaper: null,
         deletingPaperId: null,
+        paperRename: freshPaperRenameState(),
         paperPrint: freshPaperPrintState(),
         editingQuestion: null,
         questionEditForm: null,
@@ -958,6 +963,7 @@ export function createAppStore() {
       canPrintPaper,
       clearSelectedPaper,
       changePaperPage,
+      closePaperRename,
       closePaperPrint,
       confirmPaperPrint,
       resetPaperPage,
@@ -965,7 +971,9 @@ export function createAppStore() {
       askDeletePaper,
       deletePaper,
       editPaper,
+      openPaperRename,
       openPaperPrint,
+      renamePaper,
       openQuestionEditor,
       closeQuestionEditor,
       requestCloseQuestionEditor,
@@ -1003,6 +1011,16 @@ function freshPaperPrintState() {
     mode: "paper",
     showScores: true,
     reserveSpace: true,
+  };
+}
+
+function freshPaperRenameState() {
+  return {
+    open: false,
+    target: null,
+    name: "",
+    saving: false,
+    error: "",
   };
 }
 

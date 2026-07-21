@@ -5,6 +5,7 @@ import { updateState } from "../lib/runtime-store.js";
 import { paperPrintPayload, paperSnapshotDetail, upsertPaperSnapshot } from "../services/paper-service.js";
 import {
   clearPaperFromAllAuthoringWorkspaces,
+  renamePaperInAllAuthoringWorkspaces,
   scopedAuthoringState,
 } from "../services/authoring-workspace-service.js";
 import {
@@ -157,6 +158,44 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
       const payload = paperPrintPayload(target, url.searchParams.get("publishedAt") || "");
       sendJson(res, payload.statusCode || 200, payload);
     }
+    return true;
+  }
+
+  if (req.method === "PATCH" && /^\/api\/papers\/[^/]+$/.test(url.pathname)) {
+    const id = url.pathname.split("/").pop();
+    const body = await readJson(req);
+    const name = String(body.name ?? "").trim();
+    if (!name) {
+      sendJson(res, 400, { error: "请输入试卷名称" });
+      return true;
+    }
+    if (name.length > 80) {
+      sendJson(res, 400, { error: "试卷名称不能超过 80 个字符" });
+      return true;
+    }
+    const result = await updateState((current) => {
+      const target = (current.papers || []).find((item) => item.id === id && canAccessResource(actor, item));
+      if (!target) return { notFound: true };
+      const previousName = String(target.name || "未命名试卷");
+      if (previousName === name) return { paper: decorateOwnedResource(current, target) };
+      target.name = name;
+      target.updatedAt = new Date().toISOString();
+      target.updatedByUserId = String(actor.userId || target.updatedByUserId || target.ownerUserId || "");
+      if (target.generationSpecSnapshot && typeof target.generationSpecSnapshot === "object") {
+        target.generationSpecSnapshot = { ...target.generationSpecSnapshot, paperName: name };
+      }
+      renamePaperInAllAuthoringWorkspaces(current, id, name);
+      current.auditLog.push(logItem("paper-rename", `修改试卷名称：${previousName} -> ${name}`, {
+        actor: actor.username,
+        paperId: id,
+        ownerUserId: resourceOwnerUserId(target),
+        previousName,
+        name,
+      }));
+      return { paper: decorateOwnedResource(current, target) };
+    });
+    if (result.notFound) sendJson(res, 404, { error: "试卷不存在或已被删除，请刷新后重试" });
+    else sendJson(res, 200, result.paper);
     return true;
   }
 

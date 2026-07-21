@@ -218,6 +218,7 @@ function editPublishIssue(issue) {
           :key="step.key"
           class="workflow-button"
           :class="{ 'is-current': state.activeWorkflowStep === step.key }"
+          :aria-current="state.activeWorkflowStep === step.key ? 'step' : undefined"
           :type="workflowButtonType(step)"
           :plain="step.status !== 'active'"
           :disabled="!step.clickable"
@@ -664,6 +665,12 @@ function editPublishIssue(issue) {
 
 .workflow-button.is-current {
   box-shadow: 0 0 0 2px var(--el-color-primary-light-5);
+}
+
+.workflow-button.is-current .workflow-index {
+  background: #fff;
+  color: #166534;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 75%);
 }
 
 .workflow-content {

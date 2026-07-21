@@ -1,5 +1,5 @@
 <script setup>
-import { Collection, Edit, Printer } from "@element-plus/icons-vue";
+import { Collection, Edit, EditPen, Printer } from "@element-plus/icons-vue";
 import { computed } from "vue";
 import { useSmartQ } from "../stores/context.js";
 
@@ -9,6 +9,7 @@ const {
   editPaper,
   canPrintPaper,
   openPaperPrint,
+  openPaperRename,
   addPaperQuestionsToBank,
   displayPaperStatus,
   displayQuestionOptions,
@@ -54,7 +55,15 @@ function questionSourceLabel(question) {
     <div v-loading="state.paperDetailLoading" class="min-h-[260px]">
       <template v-if="state.selectedPaperDetail">
         <div class="grid grid-cols-2 gap-3 border-b border-slate-200 pb-4 sm:grid-cols-[minmax(0,1fr)_100px_100px_100px] sm:items-center dark:border-night-border">
-          <div class="col-span-2 min-w-0 sm:col-span-1"><div class="truncate text-lg font-black">{{ state.selectedPaperDetail.name }}</div><div class="mt-1 truncate text-xs font-semibold text-slate-400">{{ state.selectedPaperDetail.id }}</div></div>
+          <div class="col-span-2 min-w-0 sm:col-span-1">
+            <div class="flex min-w-0 items-center gap-1">
+              <div class="truncate text-lg font-black">{{ state.selectedPaperDetail.name }}</div>
+              <el-tooltip content="修改名称" placement="top">
+                <el-button link circle :icon="EditPen" :aria-label="`修改试卷名称：${state.selectedPaperDetail.name}`" @click.stop="openPaperRename(state.selectedPaperDetail)" />
+              </el-tooltip>
+            </div>
+            <div class="mt-1 truncate text-xs font-semibold text-slate-400">{{ state.selectedPaperDetail.id }}</div>
+          </div>
           <el-statistic title="题目" :value="state.selectedPaperDetail.questionCount || 0" />
           <el-statistic title="总分" :value="state.selectedPaperDetail.score || 0" />
           <el-tag :type="statusType(state.selectedPaperDetail.status)">{{ displayPaperStatus(state.selectedPaperDetail.status) }}</el-tag>

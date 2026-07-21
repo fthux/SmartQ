@@ -61,6 +61,7 @@ try {
     "frontend/src/components/ConsoleShell.vue",
     "frontend/src/components/GlobalOverlays.vue",
     "frontend/src/components/PaperDetailDrawer.vue",
+    "frontend/src/components/PaperRenameDialog.vue",
     "frontend/src/components/PaperPrintDialog.vue",
     "frontend/src/components/QuestionBankPicker.vue",
     "frontend/src/components/QuestionEditorDialog.vue",
@@ -176,10 +177,13 @@ try {
   assert(frontend.includes("generationStageForProgress") && !frontend.includes("连接 AI 出题服务"), "generation progress uses stable progress-based stage text");
   assert(frontend.includes("dashboardRequestSequence") && frontend.includes("detailRequestSequence"), "dashboard and paper detail responses ignore stale requests");
   assert(frontend.includes("smartq:unauthorized") && frontend.includes("resetSessionState"), "global unauthorized responses clear session-scoped application state");
+  assert(frontend.includes("openPaperRename") && frontend.includes("修改试卷名称") && frontend.includes("历史发布版本的名称不会随本次修改变化"), "paper management exposes a dedicated rename dialog for draft and published papers");
+  assert(frontend.includes('method: "PATCH"') && frontend.includes("paperRename: freshPaperRenameState()") && backend.includes("paper-rename") && backend.includes("renamePaperInAllAuthoringWorkspaces"), "paper renames flow through a metadata-only API and synchronized authoring state");
   assert(frontend.includes('paperId: state.authoringPaperId || ""') && !frontend.includes('paperId: state.authoringPaperId || state.dashboard?.paper?.id'), "new-paper saves never fall back to the active paper id");
   assert(frontend.includes("pageSize=1000") && !frontend.includes("filter((id) => validIds.has(id))"), "material selector loads beyond the first 100 items without dropping retained selections");
   assert(frontend.includes("publishQualityFailures") && frontend.includes("暂未发布") && frontend.includes("editPublishIssue"), "publish failures stay visible with actionable wording and link to question editing");
   assert(frontend.includes("data-authoring-workbench") && frontend.includes("data-authoring-summary") && frontend.includes("data-authoring-action-bar"), "authoring uses the dense workbench, summary, and action bar layout");
+  assert(frontend.includes(':aria-current="state.activeWorkflowStep === step.key ? \'step\' : undefined"') && frontend.includes(".workflow-button.is-current .workflow-index") && frontend.includes("color: #166534"), "the active authoring step exposes its state and keeps the step number legible");
   assert(frontend.includes("data-question-type-matrix") && frontend.includes("typeMatrixRows") && frontend.includes("试卷编辑"), "authoring keeps the compact type matrix and direct question editing flow");
   assert(frontend.includes('key: "edit"') && !/人工审核|待审核|通过并继续|取消审核|确认并审核/.test(frontend), "authoring removes per-question review controls and wording");
   assert(frontend.includes("按原来源重新生成") && frontend.includes("重新生成干扰项") && frontend.includes("自定义 AI 修改") && frontend.includes("应用修改"), "question editor exposes clear AI regeneration, distractor, custom prompt, and candidate application controls");
@@ -645,8 +649,23 @@ try {
   assert(frontendBank.total === 5 && frontendBank.items.every((item) => item.categoryIds.includes(frontendCategory.id)), "question bank list filters by the selected category subtree");
 
   await patchJson(`/api/question-bank/categories/${frontendCategory.id}`, { name: "前端工程" }, { headers: contentUserHeaders });
-  const renamedPaperDetail = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
-  assert(!("categoryId" in renamedPaperDetail), "renaming a question-bank category does not add classification back to papers");
+  const categoryRenamedPaperDetail = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
+  assert(!("categoryId" in categoryRenamedPaperDetail), "renaming a question-bank category does not add classification back to papers");
+
+  await patchJson(`/api/papers/${paper.id}`, { name: "   " }, { headers: contentUserHeaders, expectedStatus: 400 });
+  await patchJson(`/api/papers/${paper.id}`, { name: "试".repeat(81) }, { headers: contentUserHeaders, expectedStatus: 400 });
+  const publishedVersionsBeforeRename = JSON.stringify(categoryRenamedPaperDetail.publishedVersions);
+  const renamedPaperName = "核心能力测评 A 卷（管理名称）";
+  const renamedPaper = await patchJson(`/api/papers/${paper.id}`, { name: `  ${renamedPaperName}  ` }, { headers: contentUserHeaders });
+  assert(renamedPaper.name === renamedPaperName && renamedPaper.createdAt === categoryRenamedPaperDetail.createdAt && renamedPaper.updatedAt !== categoryRenamedPaperDetail.updatedAt, "paper rename trims the name, preserves creation time, and advances update time");
+  assert(renamedPaper.status === categoryRenamedPaperDetail.status && renamedPaper.publishedAt === categoryRenamedPaperDetail.publishedAt && JSON.stringify(renamedPaper.questions) === JSON.stringify(categoryRenamedPaperDetail.questions), "paper rename leaves status, publish time, and questions unchanged");
+  assert(JSON.stringify(renamedPaper.publishedVersions) === publishedVersionsBeforeRename, "paper rename never rewrites immutable published versions");
+  const renamedDashboard = await getJson("/api/dashboard", { headers: contentUserHeaders });
+  assert(renamedDashboard.paper.name === renamedPaperName && renamedDashboard.generationTask.paperName === renamedPaperName, "paper rename synchronizes the active paper and generation task");
+  const printableAfterRename = await getJson(`/api/papers/${paper.id}/print?publishedAt=${encodeURIComponent(categoryRenamedPaperDetail.publishedAt)}`, { headers: contentUserHeaders });
+  assert(printableAfterRename.selectedVersion.name === printablePaper.selectedVersion.name && printableAfterRename.selectedVersion.name !== renamedPaperName, "renaming a published paper keeps the historical print title unchanged");
+  const renamedSourceQuestion = await getJson(`/api/question-bank/${importedPaperA.items[0].id}`, { headers: contentUserHeaders });
+  assert(renamedSourceQuestion.usages.some((item) => item.paperId === paper.id && item.paperName === renamedPaperName), "question-bank usage resolves the current paper name after rename");
 
   const secondSpec = { ...generated.spec, paperName: "核心能力测评 B 卷" };
   await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: secondSpec }, { headers: contentUserHeaders });
@@ -715,6 +734,7 @@ try {
   await patchJson(`/api/questions/${paperAEditTarget.id}`, { stem: `${paperAEditTarget.stem}（编辑稿）` }, { headers: contentUserHeaders });
   const paperAAfterEdit = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
   assert(paperAAfterEdit.createdAt === paperABeforeEdit.createdAt && paperAAfterEdit.updatedAt !== paperABeforeEdit.updatedAt, "paper edits preserve createdAt and advance updatedAt");
+  assert(paperAAfterEdit.name === renamedPaperName, "saving later paper edits does not restore the previous paper name");
   assert(
     paperAAfterEdit.publishedVersions.some((version) => version.publishedAt === paperABeforeEdit.publishedAt && version.questions[0].stem === paperAEditTarget.stem),
     "editing a published paper preserves its immutable published version",
@@ -800,6 +820,7 @@ try {
   assert(!contentUserBank.items.some((item) => item.id === isolatedQuestion.id), "ordinary users cannot list another user's question bank items");
   assert(!contentUserMaterials.items.some((item) => item.id === isolatedMaterial.id), "ordinary users cannot list another user's materials");
   await getJson(`/api/papers/${isolatedPaper.id}`, { headers: contentUserHeaders, expectedStatus: 404 });
+  await patchJson(`/api/papers/${isolatedPaper.id}`, { name: "越权改名" }, { headers: contentUserHeaders, expectedStatus: 404 });
   await getJson(`/api/question-bank/${isolatedQuestion.id}`, { headers: contentUserHeaders, expectedStatus: 404 });
   await getJson(`/api/materials/${isolatedMaterial.id}`, { headers: contentUserHeaders, expectedStatus: 404 });
   await getJson(`/api/papers/${paper.id}`, { headers: isolatedHeaders, expectedStatus: 404 });
@@ -820,10 +841,12 @@ try {
   const restoredIsolatedMaterial = await postJson(`/api/materials/${isolatedMaterial.id}/restore`, {}, { headers: adminHeaders });
   assert(restoredIsolatedMaterial.ownerUserId === isolatedLogin.admin.id, "super administrator can archive and restore another user's material without changing ownership");
   await postJson(`/api/papers/${isolatedPaper.id}/activate`, {}, { headers: adminHeaders });
+  const adminRenamedIsolatedPaper = await patchJson(`/api/papers/${isolatedPaper.id}`, { name: "管理员修改的隔离试卷" }, { headers: adminHeaders });
+  assert(adminRenamedIsolatedPaper.ownerUserId === isolatedLogin.admin.id && adminRenamedIsolatedPaper.name === "管理员修改的隔离试卷", "super administrator can rename another user's paper without transferring ownership");
   const isolatedPaperBeforeAdminEdit = await getJson(`/api/papers/${isolatedPaper.id}`, { headers: adminHeaders });
   await patchJson(`/api/questions/${isolatedPaperBeforeAdminEdit.questions[0].id}`, { stem: `${isolatedPaperBeforeAdminEdit.questions[0].stem}（管理员编辑）` }, { headers: adminHeaders });
   const isolatedPaperAfterAdminEdit = await getJson(`/api/papers/${isolatedPaper.id}`, { headers: adminHeaders });
-  assert(isolatedPaperAfterAdminEdit.ownerUserId === isolatedLogin.admin.id && isolatedPaperAfterAdminEdit.createdByUserId === isolatedLogin.admin.id, "super administrator edits another user's paper in the owner's workspace and preserves creator metadata");
+  assert(isolatedPaperAfterAdminEdit.ownerUserId === isolatedLogin.admin.id && isolatedPaperAfterAdminEdit.createdByUserId === isolatedLogin.admin.id && isolatedPaperAfterAdminEdit.name === adminRenamedIsolatedPaper.name, "super administrator edits another user's paper in the owner's workspace and preserves creator metadata and renamed title");
   await requestJson(`/api/papers/${isolatedPaper.id}`, { method: "DELETE", headers: adminHeaders });
   await getJson(`/api/papers/${isolatedPaper.id}`, { headers: isolatedHeaders, expectedStatus: 404 });
 

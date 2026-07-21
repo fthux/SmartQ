@@ -622,13 +622,14 @@ function questionBankUsageMap(state, actor = {}) {
     for (const source of item.sources || []) {
       if (source.type !== "paper" || !source.paperId) continue;
       if (!visiblePaperIds.has(source.paperId)) continue;
+      const sourcePaper = visiblePapers.find((paper) => paper.id === source.paperId);
       usages.set(source.paperId, {
         paperId: source.paperId,
-        paperName: source.paperName || source.paperId,
-        status: visiblePapers.find((paper) => paper.id === source.paperId)?.status || "来源试卷已删除",
+        paperName: sourcePaper?.name || source.paperName || source.paperId,
+        status: sourcePaper?.status || "来源试卷已删除",
         questionCount: 1,
         createdAt: source.addedAt,
-        publishedAt: visiblePapers.find((paper) => paper.id === source.paperId)?.publishedAt || null,
+        publishedAt: sourcePaper?.publishedAt || null,
         relation: "入库来源",
       });
     }

@@ -90,6 +90,8 @@ try {
   const frontend = frontendSources.join("\n");
   const consoleShell = frontendSources[frontendFiles.indexOf("frontend/src/components/ConsoleShell.vue")];
   const loginPage = frontendSources[frontendFiles.indexOf("frontend/src/pages/LoginPage.vue")];
+  const paperPrintDialog = frontendSources[frontendFiles.indexOf("frontend/src/components/PaperPrintDialog.vue")];
+  const paperPrintPage = frontendSources[frontendFiles.indexOf("frontend/src/pages/PaperPrintPage.vue")];
   const backendFiles = [
     "backend/server.js",
     "backend/lib/ai.js",
@@ -196,6 +198,10 @@ try {
     "draft and published papers share edit, preview, and delete actions in the wider drawer flow",
   );
   assert(frontend.includes("PaperPrintDialog") && frontend.includes("PaperPrintPage") && frontend.includes("openPaperPrint(row)"), "published papers expose print settings and a dedicated print page");
+  assert(!paperPrintDialog.includes("打印内容") && !paperPrintDialog.includes("显示题目分值") && !paperPrintDialog.includes("预留答题空间"), "published-version dialog does not contain print style controls");
+  assert(paperPrintPage.includes('aria-label="打印样式设置"') && paperPrintPage.includes("printModes") && paperPrintPage.includes("syncPreviewSettings"), "print preview owns reactive print style controls and persists them in the URL");
+  assert(paperPrintPage.includes("position: fixed") && paperPrintPage.includes("--print-toolbar-offset") && paperPrintPage.includes("@media (max-width: 860px)"), "print preview keeps its full operation area fixed without covering desktop or narrow layouts");
+  assert((paperPrintPage.match(/题数：/g) || []).length === 2, "question and answer preview headers both display the question count");
   assert(frontend.includes("@page") && frontend.includes("size: A4 portrait") && frontend.includes("window.print()"), "paper printing uses the browser print dialog with an A4 print stylesheet");
   assert(!frontend.includes('autoPrint: "1"') && !frontend.includes("settings.autoPrint"), "opening the print preview does not automatically invoke the browser print dialog");
   assert(frontend.includes("page-break-before: always") && frontend.includes("answer-sheet--separate"), "combined printing starts answer analysis on a new A4 page");

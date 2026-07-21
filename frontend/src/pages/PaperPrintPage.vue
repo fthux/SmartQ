@@ -1,18 +1,23 @@
 <script setup>
 import { ArrowLeft, Printer } from "@element-plus/icons-vue";
-import { computed, nextTick, onMounted, reactive } from "vue";
+import { computed, nextTick, onMounted, reactive, watch } from "vue";
 import { request } from "../core/api-client.js";
 import { displayQuestionOptions, formatDateTimeWithYear } from "../core/presentation.js";
 import { parseHashRoute } from "../core/router.js";
 
 const params = parseHashRoute().params;
-const settings = {
+const printModes = [
+  { label: "试题卷", value: "paper" },
+  { label: "答案解析", value: "answers" },
+  { label: "试题及答案", value: "combined" },
+];
+const settings = reactive({
   paperId: params.get("paperId") || "",
   publishedAt: params.get("publishedAt") || "",
   mode: ["paper", "answers", "combined"].includes(params.get("mode")) ? params.get("mode") : "paper",
   showScores: params.get("showScores") !== "0",
   reserveSpace: params.get("reserveSpace") !== "0",
-};
+});
 const state = reactive({ loading: true, error: "", paper: null });
 const showQuestionPaper = computed(() => ["paper", "combined"].includes(settings.mode));
 const showAnswerPaper = computed(() => ["answers", "combined"].includes(settings.mode));
@@ -52,6 +57,25 @@ function leavePrintPage() {
   }, 120);
 }
 
+function syncPreviewSettings() {
+  const query = new URLSearchParams({
+    paperId: settings.paperId,
+    publishedAt: settings.publishedAt,
+    mode: settings.mode,
+    showScores: settings.showScores ? "1" : "0",
+    reserveSpace: settings.reserveSpace ? "1" : "0",
+  });
+  const target = new URL(location.href);
+  target.hash = `/paper-print?${query.toString()}`;
+  history.replaceState(history.state, "", target);
+  if (state.paper) document.title = `${state.paper.name} - ${modeLabel.value} - SmartQ`;
+}
+
+watch(
+  () => [settings.mode, settings.showScores, settings.reserveSpace],
+  syncPreviewSettings,
+);
+
 onMounted(async () => {
   if (!settings.paperId) {
     state.error = "缺少试卷编号，无法打开打印页面";
@@ -74,12 +98,29 @@ onMounted(async () => {
 <template>
   <div class="print-root">
     <header class="print-toolbar">
-      <el-button :icon="ArrowLeft" @click="leavePrintPage">返回试卷管理</el-button>
-      <div class="toolbar-title">
-        <div>{{ state.paper?.name || '打印试卷' }}</div>
-        <span>{{ modeLabel }}</span>
+      <div class="toolbar-main">
+        <el-button :icon="ArrowLeft" aria-label="返回试卷管理" @click="leavePrintPage">
+          <span class="toolbar-action-label">返回试卷管理</span>
+        </el-button>
+        <div class="toolbar-title">
+          <div>{{ state.paper?.name || '打印试卷' }}</div>
+          <span>{{ modeLabel }}</span>
+        </div>
+        <el-button type="primary" :icon="Printer" aria-label="打印" :disabled="state.loading || !state.paper" @click="printNow">
+          <span class="toolbar-action-label">打印</span>
+        </el-button>
       </div>
-      <el-button type="primary" :icon="Printer" :disabled="state.loading || !state.paper" @click="printNow">打印</el-button>
+      <div v-if="state.paper" class="print-settings" aria-label="打印样式设置">
+        <el-segmented v-model="settings.mode" :options="printModes" class="print-mode-control" aria-label="打印内容" />
+        <label class="print-setting-toggle">
+          <span>显示题目分值</span>
+          <el-switch v-model="settings.showScores" aria-label="显示题目分值" />
+        </label>
+        <label class="print-setting-toggle">
+          <span>预留答题空间</span>
+          <el-switch v-model="settings.reserveSpace" :disabled="settings.mode === 'answers'" aria-label="预留答题空间" />
+        </label>
+      </div>
     </header>
 
     <section v-if="state.loading" class="print-state">正在加载发布版本...</section>
@@ -136,6 +177,7 @@ onMounted(async () => {
           <h1>{{ state.paper.name }} · 答案解析</h1>
           <div class="paper-meta">
             <span>满分：{{ state.paper.score }} 分</span>
+            <span>题数：{{ state.paper.questionCount }} 题</span>
             <span>发布时间：{{ formatDateTimeWithYear(state.paper.publishedAt) }}</span>
           </div>
         </header>
@@ -176,8 +218,9 @@ onMounted(async () => {
 }
 
 .print-root {
+  --print-toolbar-offset: 121px;
   min-height: 100vh;
-  padding: 72px 16px 32px;
+  padding: var(--print-toolbar-offset) 16px 32px;
   overflow-x: hidden;
   background: #eef2f1;
   color: #111827;
@@ -189,6 +232,12 @@ onMounted(async () => {
   top: 0;
   right: 0;
   left: 0;
+  border-bottom: 1px solid #dbe3e0;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+}
+
+.toolbar-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -196,8 +245,32 @@ onMounted(async () => {
   min-width: 0;
   min-height: 56px;
   padding: 8px 16px;
-  border-bottom: 1px solid #dbe3e0;
-  background: rgba(255, 255, 255, 0.96);
+}
+
+.print-settings {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 20px;
+  padding: 8px 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.print-mode-control {
+  width: min(360px, 100%);
+  flex: 0 1 360px;
+}
+
+.print-setting-toggle {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .toolbar-title {
@@ -374,19 +447,41 @@ onMounted(async () => {
   padding-left: 6mm;
 }
 
+@media (max-width: 860px) {
+  .print-root {
+    --print-toolbar-offset: 164px;
+  }
+
+  .print-settings {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 16px;
+    padding: 8px;
+  }
+
+  .print-mode-control {
+    width: 100%;
+    flex-basis: 100%;
+  }
+}
+
 @media (max-width: 640px) {
   .print-root {
     padding-right: 0;
     padding-left: 0;
   }
 
-  .print-toolbar {
+  .toolbar-main {
     gap: 8px;
     padding: 8px;
   }
 
+  .toolbar-action-label {
+    display: none;
+  }
+
   .toolbar-title {
-    text-align: left;
+    text-align: center;
   }
 
   .paper-sheet {

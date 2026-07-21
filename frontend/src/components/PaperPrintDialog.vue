@@ -3,12 +3,6 @@ import { View } from "@element-plus/icons-vue";
 import { useSmartQ } from "../stores/context.js";
 
 const { state, closePaperPrint, confirmPaperPrint, formatDateTimeWithYear } = useSmartQ();
-
-const printModes = [
-  { label: "试题卷", value: "paper" },
-  { label: "答案解析", value: "answers" },
-  { label: "试题及答案", value: "combined" },
-];
 </script>
 
 <template>
@@ -19,7 +13,7 @@ const printModes = [
     title="打印发布试卷"
     @update:model-value="(value) => !value && closePaperPrint()"
   >
-    <div v-loading="state.paperPrint.loading" class="min-h-52 space-y-5">
+    <div v-loading="state.paperPrint.loading" class="min-h-28 space-y-4">
       <div>
         <div class="text-base font-black">{{ state.paperPrint.paperName }}</div>
       </div>
@@ -36,20 +30,6 @@ const printModes = [
           </el-select>
         </el-form-item>
 
-        <el-form-item label="打印内容">
-          <el-segmented v-model="state.paperPrint.mode" :options="printModes" class="w-full" aria-label="打印内容" />
-        </el-form-item>
-
-        <div class="grid gap-3 sm:grid-cols-2">
-          <div class="flex h-12 items-center justify-between rounded border border-slate-200 px-3 dark:border-night-border">
-            <span class="text-sm font-bold">显示题目分值</span>
-            <el-switch v-model="state.paperPrint.showScores" aria-label="显示题目分值" />
-          </div>
-          <div class="flex h-12 items-center justify-between rounded border border-slate-200 px-3 dark:border-night-border">
-            <span class="text-sm font-bold">预留答题空间</span>
-            <el-switch v-model="state.paperPrint.reserveSpace" :disabled="state.paperPrint.mode === 'answers'" aria-label="预留答题空间" />
-          </div>
-        </div>
       </el-form>
     </div>
 

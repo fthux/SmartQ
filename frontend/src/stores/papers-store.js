@@ -101,9 +101,6 @@ export function createPapersStore({ state, request, refresh, notify, mountIcons,
     const params = new URLSearchParams({
       paperId: settings.paperId,
       publishedAt: settings.publishedAt,
-      mode: settings.mode,
-      showScores: settings.showScores ? "1" : "0",
-      reserveSpace: settings.reserveSpace ? "1" : "0",
     });
     const target = new URL(location.href);
     target.hash = `/paper-print?${params.toString()}`;
@@ -175,8 +172,5 @@ function freshPaperPrintState() {
     paperName: "",
     versions: [],
     publishedAt: "",
-    mode: "paper",
-    showScores: true,
-    reserveSpace: true,
   };
 }

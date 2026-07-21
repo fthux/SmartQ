@@ -51,6 +51,7 @@ export function createUsersStore({ state, request, notify }) {
       password: "",
       confirmPassword: "",
     };
+    state.userManagement.formInitial = formFingerprint(state.userManagement.form);
     state.userManagement.formError = "";
     state.userManagement.editorOpen = true;
   }
@@ -64,6 +65,7 @@ export function createUsersStore({ state, request, notify }) {
       password: "",
       confirmPassword: "",
     };
+    state.userManagement.formInitial = formFingerprint(state.userManagement.form);
     state.userManagement.formError = "";
     state.userManagement.editorOpen = true;
   }
@@ -72,12 +74,22 @@ export function createUsersStore({ state, request, notify }) {
     const form = state.userManagement.form;
     state.userManagement.formError = "";
     if (!String(form.displayName || "").trim()) {
-      state.userManagement.formError = "请输入用户名";
+      state.userManagement.formError = "请输入显示名称";
+      return;
+    }
+    if (String(form.displayName || "").trim().length > 32) {
+      state.userManagement.formError = "显示名称不能超过 32 个字符";
       return;
     }
     if (state.userManagement.editorMode === "create") {
-      if (!String(form.username || "").trim()) {
-        state.userManagement.formError = "请输入登录账号";
+      const usernameError = validateUsername(form.username);
+      if (usernameError) {
+        state.userManagement.formError = usernameError;
+        return;
+      }
+      const passwordError = validatePassword(form.password);
+      if (passwordError) {
+        state.userManagement.formError = passwordError;
         return;
       }
       if (form.password !== form.confirmPassword) {
@@ -115,12 +127,33 @@ export function createUsersStore({ state, request, notify }) {
     }
   }
 
+  async function requestCloseAdminUserEditor(done) {
+    if (state.userManagement.saving) return;
+    if (formFingerprint(state.userManagement.form) !== state.userManagement.formInitial) {
+      try {
+        await ElMessageBox.confirm("当前用户信息尚未保存，关闭后修改会丢失。", "放弃未保存修改", {
+          confirmButtonText: "放弃修改",
+          cancelButtonText: "继续编辑",
+          type: "warning",
+        });
+      } catch (error) {
+        if (error === "cancel" || error === "close") return;
+        throw error;
+      }
+    }
+    if (typeof done === "function") done();
+    else state.userManagement.editorOpen = false;
+  }
+
   async function setManagedAdminUserStatus(user, status) {
     const active = status === "active";
     const action = active ? "启用" : "停用";
     try {
-      await ElMessageBox.confirm(`${action}账号“${user.displayName || user.username}”？`, `${action}用户`, {
-        confirmButtonText: action,
+      const message = active
+        ? `启用账号“${user.displayName || user.username}”？启用后该用户可以重新登录控制台。`
+        : `停用账号“${user.displayName || user.username}”？停用后该用户将无法登录，现有登录会话会立即失效。`;
+      await ElMessageBox.confirm(message, `${action}账号`, {
+        confirmButtonText: `确认${action}`,
         cancelButtonText: "取消",
         type: active ? "info" : "warning",
       });
@@ -129,7 +162,7 @@ export function createUsersStore({ state, request, notify }) {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
-      notify(`用户已${action}`);
+      notify(`账号已${action}`);
       await loadAdminUsers();
     } catch (error) {
       if (error === "cancel" || error === "close") {
@@ -148,6 +181,11 @@ export function createUsersStore({ state, request, notify }) {
     state.userManagement.resetPassword = "";
     state.userManagement.resetPasswordConfirm = "";
     state.userManagement.resetError = "";
+    const passwordError = validatePassword(state.userManagement.resetPassword);
+    if (passwordError) {
+      state.userManagement.resetError = passwordError;
+      return;
+    }
     state.userManagement.resetOpen = true;
   }
 
@@ -182,11 +220,14 @@ export function createUsersStore({ state, request, notify }) {
         cancelButtonText: "取消",
         type: "warning",
       });
+      state.userManagement.sessionRevokingId = user.id;
       const result = await request(`/api/admin/users/${encodeURIComponent(user.id)}/revoke-sessions`, { method: "POST" });
-      notify(result.revokedSessions ? `已注销 ${result.revokedSessions} 个会话` : "当前没有可注销的会话");
+      notify(result.revokedSessions ? `已强制下线，共注销 ${result.revokedSessions} 个登录会话` : "该用户当前没有有效登录会话");
     } catch (error) {
       if (error === "cancel" || error === "close") return;
       notify(`强制下线失败：${error.message || error}`);
+    } finally {
+      state.userManagement.sessionRevokingId = null;
     }
   }
 
@@ -199,8 +240,29 @@ export function createUsersStore({ state, request, notify }) {
     openEditAdminUser,
     openResetAdminPassword,
     resetManagedAdminPassword,
+    requestCloseAdminUserEditor,
     revokeManagedAdminSessions,
     saveManagedAdminUser,
     setManagedAdminUserStatus,
   };
+}
+
+function formFingerprint(form = {}) {
+  return JSON.stringify(form);
+}
+
+function validateUsername(value) {
+  const username = String(value || "").trim();
+  if (!username) return "请输入登录账号";
+  if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) return "登录账号需为 3-32 位字母、数字、点、下划线或连字符";
+  return "";
+}
+
+function validatePassword(value) {
+  const password = String(value || "");
+  if (!password) return "请输入密码";
+  if (password.length < 8) return "密码至少需要 8 个字符";
+  if (password.length > 128) return "密码不能超过 128 个字符";
+  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) return "密码必须同时包含字母和数字";
+  return "";
 }

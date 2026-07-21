@@ -12,7 +12,7 @@ import { useSmartQ } from "../stores/context.js";
 
 const {
   state,
-  closeQuestionEditor,
+  requestCloseQuestionEditor,
   saveQuestionEdit,
   runQuestionAiTransform,
   applyQuestionAiCandidate,
@@ -31,7 +31,7 @@ const sourceLabel = computed(() => {
     const names = [...new Set((origin.materialRefs || []).map((item) => item.name).filter(Boolean))];
     return names.length ? `资料题 · ${names.join("、")}` : "资料题";
   }
-  return "AI 独立题";
+  return "AI 生成题";
 });
 const sourceTagType = computed(() => {
   const type = state.editingQuestion?.origin?.type;
@@ -62,14 +62,17 @@ function changedFieldLabel(field) {
     top="3vh"
     append-to-body
     destroy-on-close
+    :close-on-click-modal="false"
+    :close-on-press-escape="!state.questionSaving && !state.questionAi.loading"
+    :show-close="!state.questionSaving && !state.questionAi.loading"
     class="question-editor-dialog"
-    @update:model-value="(value) => !value && closeQuestionEditor()"
+    @update:model-value="(value) => !value && requestCloseQuestionEditor()"
   >
     <div v-if="state.questionEditForm" class="question-editor-layout">
       <section class="min-w-0">
         <div class="mb-4 flex flex-wrap items-center gap-2">
           <el-tag :type="sourceTagType" effect="plain">{{ sourceLabel }}</el-tag>
-          <el-tag v-if="state.questionEditForm.origin?.aiTransformed" type="warning" effect="plain">AI 已修改</el-tag>
+          <el-tag v-if="state.questionEditForm.origin?.aiTransformed" type="warning" effect="plain">AI 修改待保存</el-tag>
           <el-button v-if="state.questionAi.previousForm" link type="primary" @click="undoQuestionAiChange">撤销 AI 修改</el-button>
         </div>
 
@@ -85,14 +88,14 @@ function changedFieldLabel(field) {
           </div>
 
           <el-form-item label="题干" :error="state.questionEditErrors.stem">
-            <el-input v-model="state.questionEditForm.stem" type="textarea" :rows="4" />
+            <el-input v-model="state.questionEditForm.stem" type="textarea" :rows="4" maxlength="10000" placeholder="请输入完整题干" />
           </el-form-item>
 
           <div v-if="isChoice" class="choice-editor">
             <div v-for="(letter, index) in letters" :key="letter" class="choice-row">
               <span class="choice-letter" :class="{ 'is-correct': state.questionEditForm.type === '单选' ? state.questionEditForm.answerSingle === letter : state.questionEditForm.answerMultiple.includes(letter) }">{{ letter }}</span>
               <el-form-item class="min-w-0 flex-1" :error="state.questionEditErrors['option' + letter]">
-                <el-input v-model="state.questionEditForm['option' + letter]" />
+                <el-input v-model="state.questionEditForm['option' + letter]" maxlength="500" :placeholder="`请输入选项 ${letter}`" />
               </el-form-item>
               <div class="choice-order-actions">
                 <el-tooltip content="上移选项"><el-button :icon="ArrowUp" circle size="small" :aria-label="`上移选项 ${letter}`" :disabled="index === 0" @click="moveQuestionOption(index, -1)" /></el-tooltip>
@@ -116,8 +119,8 @@ function changedFieldLabel(field) {
             <el-form-item v-else-if="state.questionEditForm.type === '多选'" label="正确答案" :error="state.questionEditErrors.answerMultiple">
               <el-checkbox-group v-model="state.questionEditForm.answerMultiple"><el-checkbox-button v-for="letter in letters" :key="letter" :label="letter" :value="letter" /></el-checkbox-group>
             </el-form-item>
-            <el-form-item v-else label="答案" :error="state.questionEditErrors.answerText"><el-input v-model="state.questionEditForm.answerText" /></el-form-item>
-            <el-form-item label="解析"><el-input v-model="state.questionEditForm.explanation" type="textarea" :rows="3" /></el-form-item>
+            <el-form-item v-else label="答案" :error="state.questionEditErrors.answerText"><el-input v-model="state.questionEditForm.answerText" placeholder="请输入参考答案" /></el-form-item>
+            <el-form-item label="解析"><el-input v-model="state.questionEditForm.explanation" type="textarea" :rows="3" maxlength="10000" placeholder="请输入答案解析，可选" /></el-form-item>
           </div>
 
           <el-form-item v-if="['简答','论述'].includes(state.questionEditForm.type)" label="评分规则" :error="state.questionEditErrors.rubricText">
@@ -133,8 +136,8 @@ function changedFieldLabel(field) {
         </div>
 
         <div class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-          <el-button :icon="RefreshRight" :loading="state.questionAi.loading && state.questionAi.operation === 'regenerate'" :disabled="state.questionAi.loading" @click="runQuestionAiTransform('regenerate')">同源重新生成</el-button>
-          <el-button v-if="isChoice" :icon="MagicStick" :loading="state.questionAi.loading && state.questionAi.operation === 'distractors'" :disabled="state.questionAi.loading" @click="runQuestionAiTransform('distractors')">重新生成迷惑项</el-button>
+          <el-button :icon="RefreshRight" :loading="state.questionAi.loading && state.questionAi.operation === 'regenerate'" :disabled="state.questionAi.loading" @click="runQuestionAiTransform('regenerate')">按原来源重新生成</el-button>
+          <el-button v-if="isChoice" :icon="MagicStick" :loading="state.questionAi.loading && state.questionAi.operation === 'distractors'" :disabled="state.questionAi.loading" @click="runQuestionAiTransform('distractors')">重新生成干扰项</el-button>
         </div>
 
         <div class="mt-4 border-t border-slate-200 pt-4 dark:border-night-border">
@@ -160,7 +163,7 @@ function changedFieldLabel(field) {
           <p v-if="state.questionAi.candidate.explanation" class="mt-3 text-xs leading-5 text-slate-600 dark:text-slate-300"><strong>解析：</strong>{{ state.questionAi.candidate.explanation }}</p>
           <el-alert v-for="warning in state.questionAi.warnings" :key="warning" class="mt-3" :title="warning" type="warning" :closable="false" show-icon />
           <div class="mt-4 flex justify-end gap-2">
-            <el-button :icon="Close" @click="discardQuestionAiCandidate">放弃</el-button>
+            <el-button :icon="Close" @click="discardQuestionAiCandidate">丢弃方案</el-button>
             <el-button type="primary" :icon="Check" @click="applyQuestionAiCandidate">应用修改</el-button>
           </div>
         </div>
@@ -169,8 +172,8 @@ function changedFieldLabel(field) {
 
     <template #footer>
       <div class="flex justify-end gap-2">
-        <el-button @click="closeQuestionEditor">取消</el-button>
-        <el-button type="primary" :icon="Check" @click="saveQuestionEdit">保存题目</el-button>
+        <el-button :disabled="state.questionSaving" @click="requestCloseQuestionEditor">取消</el-button>
+        <el-button type="primary" :icon="Check" :loading="state.questionSaving" @click="saveQuestionEdit">保存题目</el-button>
       </div>
     </template>
   </el-dialog>

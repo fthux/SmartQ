@@ -3,7 +3,6 @@ import { logItem } from "../lib/audit.js";
 import { readJson, sendJson } from "../lib/http.js";
 import { updateState } from "../lib/runtime-store.js";
 import { paperSnapshotDetail, upsertPaperSnapshot } from "../services/paper-service.js";
-import { activeLeafCategory, categorySnapshotForId } from "../lib/question-bank-categories.js";
 import {
   clearPaperFromAllAuthoringWorkspaces,
   scopedAuthoringState,
@@ -16,9 +15,6 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
     const body = await readJson(req);
     const paper = await updateState((current) => {
       const currentState = scopedAuthoringState(current, userId);
-      const categoryId = String(body.categoryId || currentState.generationTask?.categoryId || currentState.paper.categoryId || "");
-      if (!activeLeafCategory(currentState, categoryId)) return { error: "请选择有效的叶子分类后再保存试卷" };
-      const categorySnapshot = categorySnapshotForId(currentState, categoryId);
       const specChecks = currentState.generationTask ? validateGenerationSpec(currentState.questions, currentState.generationTask) : { failures: [] };
       if (specChecks.failures.length) return { error: "当前试卷与命题配置不一致，请修正后再保存", failures: specChecks.failures };
       const saved = saveFormalPaper(currentState.questions, {
@@ -26,8 +22,6 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
         id: currentState.paper.id || `paper-${Date.now()}`,
         name: body.name || currentState.generationTask?.paperName || currentState.paper.name || "未命名试卷",
         sourcePlanSnapshot: currentState.generationTask?.sourcePlan || currentState.paper.sourcePlanSnapshot || null,
-        categoryId,
-        categorySnapshot,
       });
       if (saved.error) return saved;
       currentState.paper = {
@@ -40,8 +34,6 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
         sourcePlanSnapshot: saved.sourcePlanSnapshot || currentState.generationTask?.sourcePlan || null,
         generationSpecSnapshot: currentState.generationTask || currentState.paper.generationSpecSnapshot || null,
         publishedAt: null,
-        categoryId,
-        categorySnapshot,
       };
       upsertPaperSnapshot(currentState, buildPaper(currentState.questions, currentState.paper));
       currentState.auditLog.push(logItem("paper-save", `保存试卷：${saved.name}，${saved.questionCount} 题 / ${saved.score} 分`));
@@ -59,9 +51,6 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
       const ids = new Set(currentState.paper.questionIds || []);
       const paperQuestions = hasSavedPaper ? currentState.questions.filter((item) => ids.has(item.id)) : currentState.questions;
       if (!paperQuestions.length) return { error: "当前试卷没有题目，请先完成出题" };
-      const categoryId = String(currentState.paper.categoryId || currentState.generationTask?.categoryId || "");
-      if (!activeLeafCategory(currentState, categoryId)) return { error: "当前试卷分类不存在、已归档或不是叶子分类，请重新选择" };
-      const categorySnapshot = categorySnapshotForId(currentState, categoryId);
       const checks = validateQuestions(paperQuestions);
       const specChecks = currentState.generationTask ? validateGenerationSpec(paperQuestions, currentState.generationTask) : { failures: [] };
       if (checks.failures.length || specChecks.failures.length) {
@@ -91,8 +80,6 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
           id: `paper-${Date.now()}`,
           name: currentState.generationTask?.paperName || currentState.paper.name || "未命名试卷",
           sourcePlanSnapshot: currentState.generationTask?.sourcePlan || currentState.paper.sourcePlanSnapshot || null,
-          categoryId,
-          categorySnapshot,
         });
         if (saved.error) return saved;
         currentState.paper = {
@@ -105,15 +92,11 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
           sourcePlanSnapshot: saved.sourcePlanSnapshot || currentState.generationTask?.sourcePlan || null,
           generationSpecSnapshot: currentState.generationTask || currentState.paper.generationSpecSnapshot || null,
           publishedAt: null,
-          categoryId,
-          categorySnapshot,
         };
         currentState.auditLog.push(logItem("paper-auto-save", `发布前自动保存试卷：${saved.name}，${saved.questionCount} 题 / ${saved.score} 分`));
       }
       currentState.paper.status = "已发布";
       currentState.paper.publishedAt = new Date().toISOString();
-      currentState.paper.categoryId = categoryId;
-      currentState.paper.categorySnapshot = categorySnapshot;
       upsertPaperSnapshot(currentState, buildPaper(currentState.questions, currentState.paper));
       currentState.auditLog.push(logItem("paper-publish", `${currentState.paper.name} 已发布`));
       return buildPaper(currentState.questions, currentState.paper);
@@ -138,8 +121,6 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
         buildSpec: target.buildSpec || null,
         sourcePlanSnapshot: target.sourcePlanSnapshot || target.buildSpec?.sourcePlanSnapshot || null,
         generationSpecSnapshot: target.generationSpecSnapshot || null,
-        categoryId: String(target.categoryId || ""),
-        categorySnapshot: target.categorySnapshot || null,
       };
       const targetQuestions = paperSnapshotDetail(target, currentState.questions).questions;
       currentState.questions = targetQuestions.map((question, index) => ({
@@ -151,7 +132,7 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
       currentState.auditLog.push(logItem("paper-activate", `${target.name} 已设为当前试卷`));
       return buildPaper(currentState.questions, currentState.paper);
     });
-    if (!paper) sendJson(res, 404, { error: "Paper Not Found" });
+    if (!paper) sendJson(res, 404, { error: "试卷不存在或已被删除，请刷新后重试" });
     else sendJson(res, 200, paper);
     return true;
   }
@@ -159,7 +140,7 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
   if (req.method === "GET" && url.pathname.startsWith("/api/papers/")) {
     const id = url.pathname.split("/").pop();
     const target = (state.papers || []).find((item) => item.id === id);
-    if (!target) sendJson(res, 404, { error: "Paper Not Found" });
+    if (!target) sendJson(res, 404, { error: "试卷不存在或已被删除，请刷新后重试" });
     else sendJson(res, 200, paperSnapshotDetail(target, scopedState.questions));
     return true;
   }
@@ -174,7 +155,7 @@ export async function handlePaperRoutes(req, res, url, state, auth) {
       current.auditLog.push(logItem("paper-delete", `删除试卷：${deleted.name}`));
       return { deleted: true, paper: deleted };
     });
-    if (!result) sendJson(res, 404, { error: "Paper Not Found" });
+    if (!result) sendJson(res, 404, { error: "试卷不存在或已被删除，请刷新后重试" });
     else sendJson(res, 200, result);
     return true;
   }

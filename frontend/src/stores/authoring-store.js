@@ -8,6 +8,8 @@ import {
   splitList,
 } from "../core/domain-utils.js";
 import { mountIcons } from "../core/presentation.js";
+import { ElMessageBox } from "element-plus";
+import "element-plus/theme-chalk/el-message-box.css";
 
 export function createAuthoringStore({
   state,
@@ -30,7 +32,6 @@ export function createAuthoringStore({
   function syncSpecFromActiveDraft() {
     const spec = state.generatedDraft?.spec || state.dashboard?.generationTask;
     if (!spec || typeof spec !== "object") return;
-    state.spec.categoryId = String(spec.categoryId || state.dashboard?.paper?.categoryId || state.spec.categoryId || "");
     state.spec.paperName = spec.paperName || state.spec.paperName || "";
     state.spec.direction = spec.direction || state.spec.direction || "";
     state.spec.difficulty = spec.difficulty || state.spec.difficulty || "中";
@@ -55,6 +56,19 @@ export function createAuthoringStore({
     state.spec.questionBankItems = sourceQuestionBankItems.length
       ? sourceQuestionBankItems.map((item) => ({ ...item }))
       : state.spec.questionBankIds.map((id) => ({ id }));
+    state.spec.questionBankRequestedCount = clampNumber(
+      sourcePlan.questionBankRequestedCount ?? sourcePlan.questionBankCount ?? state.spec.questionBankIds.length,
+      0,
+      Number(spec.count || 100),
+      0,
+    );
+    state.spec.questionBankCategoryIds = Array.isArray(sourcePlan.questionBankCategoryIds)
+      ? [...sourcePlan.questionBankCategoryIds]
+      : [];
+    state.spec.questionBankAllocationMode = sourcePlan.questionBankAllocationMode === "manual" ? "manual" : "balanced";
+    state.spec.questionBankAllocations = Array.isArray(sourcePlan.questionBankAllocations)
+      ? sourcePlan.questionBankAllocations.map((item) => ({ ...item }))
+      : [];
     state.spec.materialIds = Array.isArray(sourcePlan.materialIds)
       ? [...sourcePlan.materialIds]
       : Array.isArray(sourcePlan.materials) ? sourcePlan.materials.map((item) => item.id).filter(Boolean) : [];
@@ -149,7 +163,6 @@ export function createAuthoringStore({
         method: "POST",
         body: JSON.stringify({
           name: generated.spec?.paperName || state.spec.paperName,
-          categoryId: generated.spec?.categoryId || state.spec.categoryId,
         }),
       });
       state.generatedDraft = null;
@@ -211,7 +224,18 @@ export function createAuthoringStore({
     }
   }
 
-  function discardDraft() {
+  async function discardDraft() {
+    if (!state.generatedDraft?.questions?.length) return;
+    try {
+      await ElMessageBox.confirm("丢弃后本次生成结果不会保存，需要重新生成才能恢复。确认丢弃？", "丢弃生成结果", {
+        confirmButtonText: "确认丢弃",
+        cancelButtonText: "取消",
+        type: "warning",
+      });
+    } catch (error) {
+      if (error === "cancel" || error === "close") return;
+      throw error;
+    }
     state.generatedDraft = null;
     state.regeneratingDraft = false;
     state.publishQualityFailures = [];
@@ -240,7 +264,6 @@ export function createAuthoringStore({
         method: "POST",
         body: JSON.stringify({
           name: state.dashboard?.generationTask?.paperName || state.spec.paperName,
-          categoryId: state.dashboard?.generationTask?.categoryId || state.spec.categoryId,
         }),
       });
       state.authoringPaperId = builtPaper.id;
@@ -276,7 +299,7 @@ export function createAuthoringStore({
       if (failures.length) {
         state.publishQualityFailures = failures;
         state.activeWorkflowStep = "publish";
-        notify(`发布已终止：发现 ${failures.length} 个问题，请修改后重新发布`);
+        notify(`暂未发布：发现 ${failures.length} 个问题，请修改后重新发布`);
       } else {
         notify(`发布失败：${error.message}`);
       }
@@ -298,6 +321,29 @@ export function createAuthoringStore({
     state.questionEditForm = null;
     state.questionEditErrors = {};
     resetQuestionAiState();
+  }
+
+  async function requestCloseQuestionEditor() {
+    if (!state.editingQuestion || !state.questionEditForm) return closeQuestionEditor();
+    if (state.questionAi.loading) {
+      notify("AI 正在生成修改方案，请稍候再关闭");
+      return;
+    }
+    const initialForm = editorFormFromQuestion(state.editingQuestion);
+    const changed = JSON.stringify(initialForm) !== JSON.stringify(state.questionEditForm) || Boolean(state.questionAi.candidate);
+    if (changed) {
+      try {
+        await ElMessageBox.confirm("当前题目的修改尚未保存，关闭后这些修改会丢失。确认关闭？", "放弃未保存修改", {
+          confirmButtonText: "放弃修改",
+          cancelButtonText: "继续编辑",
+          type: "warning",
+        });
+      } catch (error) {
+        if (error === "cancel" || error === "close") return;
+        throw error;
+      }
+    }
+    closeQuestionEditor();
   }
 
   async function runQuestionAiTransform(operation) {
@@ -386,6 +432,7 @@ export function createAuthoringStore({
     const errors = validateQuestionEditForm(form);
     state.questionEditErrors = errors;
     if (!showFirstFormError(errors)) return;
+    state.questionSaving = true;
     try {
       const payload = {
         stem: String(form.stem || "").trim(),
@@ -407,6 +454,8 @@ export function createAuthoringStore({
       notify("题目已保存");
     } catch (error) {
       notify(`题目保存失败：${error.message}`);
+    } finally {
+      state.questionSaving = false;
     }
   }
 
@@ -439,24 +488,34 @@ export function createAuthoringStore({
 
   function validateSpecForm() {
     const errors = {};
-    if (!String(state.spec.paperName || "").trim()) errors.paperName = "请输入考卷名称";
+    if (!String(state.spec.paperName || "").trim()) errors.paperName = "请输入试卷名称";
     if (!String(state.spec.direction || "").trim()) errors.direction = "请输入出题方向";
-    const category = state.questionBankManagement.categories.find((item) => item.id === state.spec.categoryId);
-    if (!category || category.status !== "active" || !category.isLeaf) errors.categoryId = "请选择有效的叶子分类";
     const count = paperTypeConfig.reduce((sum, item) => sum + clampNumber(state.spec[item.countKey], 0, 50, 0), 0);
     if (count <= 0) errors.questionCount = "请至少设置一种题型数量";
     const questionBankIds = Array.isArray(state.spec.questionBankIds) ? state.spec.questionBankIds : [];
     const questionBankItems = Array.isArray(state.spec.questionBankItems) ? state.spec.questionBankItems : [];
-    const questionBankCount = questionBankIds.length;
+    const questionBankCount = clampNumber(state.spec.questionBankRequestedCount, 0, count, questionBankIds.length);
     const remainingCount = Math.max(0, count - questionBankCount);
     const materialCount = clampNumber(state.spec.materialQuestionCount, 0, remainingCount, 0);
     if (questionBankCount > count) errors.questionBankIds = `题库题已选择 ${questionBankCount} 道，超过试卷总题数 ${count} 道`;
-    paperTypeConfig.forEach((item) => {
+    if (questionBankCount > 0 && !(state.spec.questionBankCategoryIds || []).length && !questionBankIds.length) {
+      errors.questionBankIds = "请为题库题选择至少一个分类";
+    }
+    if (questionBankCount > 0 && !questionBankIds.length) {
+      const invalidCategory = (state.spec.questionBankCategoryIds || []).find((categoryId) => {
+        const category = state.questionBankManagement.categories.find((item) => item.id === categoryId);
+        return !category || category.status !== "active" || !category.isLeaf;
+      });
+      if (invalidCategory) errors.questionBankIds = "所选题库分类已归档或不可用，请重新设置题库题";
+    }
+    if (state.spec.questionBankAllocationMode === "manual") {
+      const allocationTotal = (state.spec.questionBankAllocations || []).reduce((sum, item) => sum + clampNumber(item.count, 0, questionBankCount, 0), 0);
+      if (allocationTotal !== questionBankCount) errors.questionBankIds = `题库分类手动分配合计需为 ${questionBankCount} 道`;
+    }
+    if (questionBankIds.length) paperTypeConfig.forEach((item) => {
       const selectedCount = questionBankItems.filter((question) => question.type === item.type).length;
       const targetCount = clampNumber(state.spec[item.countKey], 0, 50, 0);
-      if (selectedCount > targetCount) {
-        errors.questionBankIds = `${item.type}目标为 ${targetCount} 道，当前已选择 ${selectedCount} 道题库题，请移除至少 ${selectedCount - targetCount} 道`;
-      }
+      if (selectedCount > targetCount) errors.questionBankIds = `${item.type}目标为 ${targetCount} 道，当前题库题为 ${selectedCount} 道`;
     });
     if (materialCount > 0 && !(state.spec.materialIds || []).length) errors.materialIds = "资料题数量大于 0 时，请选择至少一份出题资料";
     if (Number(state.spec.materialQuestionCount || 0) > remainingCount) errors.materialQuestionCount = `资料题最多可设置 ${remainingCount} 道`;
@@ -492,8 +551,7 @@ export function createAuthoringStore({
     const typeCounts = Object.fromEntries(paperTypeConfig.map((item) => [item.apiKey, clampNumber(state.spec[item.countKey], 0, 50, 0)]));
     const typeScores = Object.fromEntries(paperTypeConfig.map((item) => [item.apiKey, clampNumber(state.spec[item.scoreKey], 1, 200, item.defaultScore)]));
     return {
-      title: state.dashboard?.exam?.title || "综合能力测评",
-      categoryId: String(state.spec.categoryId || ""),
+      title: String(state.spec.paperName || state.spec.direction || "试卷内容").trim(),
       paperName: String(state.spec.paperName || "A 卷").trim(),
       direction: String(state.spec.direction || "").trim(),
       difficulty: state.spec.difficulty,
@@ -506,17 +564,21 @@ export function createAuthoringStore({
       requirements: String(state.spec.requirements || "").trim(),
       sourcePlan: {
         questionBankIds: [...(state.spec.questionBankIds || [])],
+        questionBankRequestedCount: clampNumber(state.spec.questionBankRequestedCount, 0, Object.values(typeCounts).reduce((sum, value) => sum + value, 0), 0),
+        questionBankCategoryIds: [...(state.spec.questionBankCategoryIds || [])],
+        questionBankAllocationMode: state.spec.questionBankAllocationMode === "manual" ? "manual" : "balanced",
+        questionBankAllocations: (state.spec.questionBankAllocations || []).map((item) => ({ categoryId: item.categoryId, count: Number(item.count || 0) })),
         materialIds: [...(state.spec.materialIds || [])],
         materialQuestionCount: clampNumber(
           state.spec.materialQuestionCount,
           0,
-          Math.max(0, Object.values(typeCounts).reduce((sum, value) => sum + value, 0) - (state.spec.questionBankIds || []).length),
+          Math.max(0, Object.values(typeCounts).reduce((sum, value) => sum + value, 0) - Number(state.spec.questionBankRequestedCount || 0)),
           0,
         ),
         aiQuestionCount: Math.max(
           0,
           Object.values(typeCounts).reduce((sum, value) => sum + value, 0)
-            - (state.spec.questionBankIds || []).length
+            - Number(state.spec.questionBankRequestedCount || 0)
             - clampNumber(state.spec.materialQuestionCount, 0, Object.values(typeCounts).reduce((sum, value) => sum + value, 0), 0),
         ),
         coverageStrategy: state.spec.coverageStrategy,
@@ -534,6 +596,7 @@ export function createAuthoringStore({
     moveSingleCorrectAnswer,
     openQuestionEditor,
     publishPaper,
+    requestCloseQuestionEditor,
     regenerate,
     runQuestionAiTransform,
     saveCurrentPaper,
@@ -619,7 +682,7 @@ function generationStageForProgress(progress, stage = "") {
 function formatGenerationError(message) {
   const text = String(message || "");
   if (text.includes("UND_ERR_CONNECT_TIMEOUT") || text.includes("Connect Timeout")) {
-    return "AI 服务连接超时，请检查服务器网络是否能访问配置的 AI 服务地址，或确认 OPENAI_BASE_URL 服务当前可用。";
+    return "AI 服务连接超时，请稍后重试或联系系统管理员。";
   }
   return text;
 }

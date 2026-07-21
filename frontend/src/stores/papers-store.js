@@ -62,7 +62,8 @@ export function createPapersStore({ state, request, refresh, notify, mountIcons,
 
   async function deletePaper() {
     const target = state.confirmDeletePaper;
-    if (!target) return;
+    if (!target || state.deletingPaperId) return;
+    state.deletingPaperId = target.id;
     try {
       await request(`/api/papers/${target.id}`, { method: "DELETE" });
       state.confirmDeletePaper = null;
@@ -74,6 +75,8 @@ export function createPapersStore({ state, request, refresh, notify, mountIcons,
       notify("试卷已删除");
     } catch (error) {
       notify(`删除失败：${error.message}`);
+    } finally {
+      state.deletingPaperId = null;
     }
   }
 

@@ -6,7 +6,7 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
 </script>
 
 <template>
-  <section class="relative flex h-screen items-center justify-center overflow-hidden px-4 py-8 sm:px-8">
+    <section class="relative flex min-h-screen items-center justify-center overflow-x-hidden overflow-y-auto px-4 py-8 sm:px-8">
     <div class="absolute inset-y-0 right-0 hidden w-1/2 bg-emerald-100 lg:block dark:bg-night-sidebar"></div>
     <div class="absolute left-[17%] top-[9%] hidden h-14 w-14 rotate-45 rounded-md border-[10px] border-emerald-400/70 lg:block"></div>
     <div class="absolute bottom-[9%] left-[30%] hidden h-20 w-20 rotate-45 rounded-md border-[10px] border-leaf/70 lg:block"></div>
@@ -18,25 +18,19 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
           <div class="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg bg-white p-2 shadow-lg ring-1 ring-emerald-100">
             <img :src="publicUrl('/assets/favicon.svg')" alt="SmartQ" class="h-full w-full object-contain" />
           </div>
-          <div class="mt-2 text-[11px] font-black uppercase text-slate-400">SmartQ Console</div>
+          <div class="mt-2 text-[11px] font-black text-slate-400">SmartQ 内容管理控制台</div>
         </div>
 
         <el-card class="w-full max-w-[360px]" shadow="always">
           <el-form label-position="top" @submit.prevent="loginAdmin">
             <el-form-item label="登录账号">
-              <el-input v-model="state.admin.username" autocomplete="username" placeholder="admin" size="large" :prefix-icon="User" />
+              <el-input v-model="state.admin.username" autocomplete="username" placeholder="请输入登录账号" size="large" :prefix-icon="User" />
             </el-form-item>
             <el-form-item label="登录密码">
               <el-input v-model="state.admin.password" type="password" autocomplete="current-password" placeholder="请输入密码" show-password size="large" :prefix-icon="Lock" />
             </el-form-item>
 
-            <el-alert class="mb-4" type="success" :closable="false" show-icon>
-              <template #title>测试账号</template>
-              <div class="mt-1 grid grid-cols-2 text-xs font-semibold">
-                <span>账号：admin</span>
-                <span>密码：123456</span>
-              </div>
-            </el-alert>
+            <el-alert class="mb-4" title="请使用分配给你的控制台账号登录，不要向他人透露登录密码。" type="info" :closable="false" show-icon />
 
             <el-alert v-if="state.admin.error" class="mb-4" :title="state.admin.error" type="error" :closable="false" show-icon />
 
@@ -46,13 +40,13 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
 
             <div class="mt-4 flex items-center justify-between">
               <el-checkbox v-model="state.admin.rememberUsername">记住账号</el-checkbox>
-              <span class="inline-flex items-center gap-1 text-xs font-bold text-leaf"><el-icon><InfoFilled /></el-icon>安全登录</span>
+              <span class="inline-flex items-center gap-1 text-xs font-bold text-leaf"><el-icon><InfoFilled /></el-icon>仅限授权用户</span>
             </div>
-            <div class="mt-5 border-t border-slate-100 pt-4 text-center text-xs font-black text-leaf dark:border-night-border">SmartQ 运营控制台</div>
+            <div class="mt-5 border-t border-slate-100 pt-4 text-center text-xs font-black text-leaf dark:border-night-border">SmartQ 内容管理控制台</div>
           </el-form>
         </el-card>
 
-        <div class="mt-auto pt-8 text-center text-[11px] font-bold text-slate-500 dark:text-slate-400">© 2026 SmartQ. All rights reserved.</div>
+        <div class="mt-auto pt-8 text-center text-[11px] font-bold text-slate-500 dark:text-slate-400">© 2026 SmartQ</div>
       </div>
 
       <div class="relative hidden min-h-[600px] overflow-hidden bg-[#e7faf1] lg:block dark:bg-night-sidebar">
@@ -71,7 +65,7 @@ const { state, loginAdmin, publicUrl } = useSmartQ();
             <div class="text-2xl font-medium">欢迎来到 <span class="font-black">SmartQ</span></div>
             <div class="mt-4 h-px w-80 max-w-full bg-leaf/35"></div>
             <p class="mt-6 text-base font-semibold leading-7 text-slate-600 dark:text-slate-300">面向 AI 命题、题目编辑与试卷管理的一体化控制台，让内容生产流程清晰、稳定、可追踪。</p>
-            <el-tag class="mt-7" type="success" effect="plain" size="large">Secure console</el-tag>
+            <el-tag class="mt-7" type="success" effect="plain" size="large">内容管理入口</el-tag>
           </div>
         </div>
       </div>

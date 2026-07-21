@@ -1,4 +1,4 @@
-import { repairQuestions, transformQuestionWithAi, validateGenerationSpec, validateQuestions } from "../lib/ai.js";
+import { publicAiErrorMessage, repairQuestions, transformQuestionWithAi, validateGenerationSpec, validateQuestions } from "../lib/ai.js";
 import { logItem } from "../lib/audit.js";
 import { readJson, sendJson } from "../lib/http.js";
 import { updateState } from "../lib/runtime-store.js";
@@ -6,7 +6,6 @@ import { getGenerationJob, startGenerationJob } from "../services/generation-ser
 import { importQuestionBankIntoAuthoring } from "../services/question-bank-service.js";
 import { questionContentChanged, upsertPaperSnapshot } from "../services/paper-service.js";
 import { buildPaper } from "../lib/ai.js";
-import { activeLeafCategory, categorySnapshotForId } from "../lib/question-bank-categories.js";
 import { scopedAuthoringState } from "../services/authoring-workspace-service.js";
 
 export async function handleAuthoringRoutes(req, res, url, state, auth) {
@@ -36,10 +35,6 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
     const paperId = String(body.paperId || "");
     if (!questions.length) {
       sendJson(res, 400, { error: "没有可保存的试卷内容" });
-      return true;
-    }
-    if (!activeLeafCategory(state, spec.categoryId)) {
-      sendJson(res, 400, { error: "请选择有效的叶子分类后再保存试卷内容" });
       return true;
     }
     const checks = validateQuestions(questions);
@@ -73,8 +68,6 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
         buildSpec: activePaper?.buildSpec || null,
         sourcePlanSnapshot: spec.sourcePlan || null,
         generationSpecSnapshot: spec,
-        categoryId: String(spec.categoryId || ""),
-        categorySnapshot: categorySnapshotForId(current, spec.categoryId),
       };
       currentState.auditLog.push(logItem("ai-draft-save", `保存「${spec.paperName || "未命名试卷"}」试卷内容 ${currentState.questions.length} 道，稳定性 ${checks.stabilityScore}`));
     });
@@ -92,21 +85,20 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
     const id = decodeURIComponent(url.pathname.split("/").at(-2) || "");
     const question = scopedState.questions.find((item) => item.id === id);
     if (!question) {
-      sendJson(res, 404, { error: "Question Not Found" });
+      sendJson(res, 404, { error: "题目不存在或已被删除，请刷新后重试" });
       return true;
     }
     const body = await readJson(req);
     try {
       const result = await transformQuestionWithAi(question, {
-        categoryId: scopedState.generationTask?.categoryId || scopedState.paper?.categoryId || "",
-        categoryName: scopedState.paper?.categorySnapshot?.path || scopedState.paper?.categorySnapshot?.name || "",
         direction: scopedState.generationTask?.direction || "",
         requirements: scopedState.generationTask?.requirements || "",
       }, body);
       sendJson(res, 200, result);
     } catch (error) {
+      if (!error.statusCode || error.statusCode >= 500) console.error("SmartQ question AI transform failed", error);
       sendJson(res, error.statusCode || 500, {
-        error: error.message || "AI 题目修改失败",
+        error: publicAiErrorMessage(error, "AI 题目修改服务暂时不可用，请稍后重试"),
         failures: error.failures || undefined,
       });
     }
@@ -139,7 +131,7 @@ export async function handleAuthoringRoutes(req, res, url, state, auth) {
       }));
       return target;
     });
-    if (!question) sendJson(res, 404, { error: "Question Not Found" });
+    if (!question) sendJson(res, 404, { error: "题目不存在或已被删除，请刷新后重试" });
     else if (question.error) sendJson(res, 409, question);
     else sendJson(res, 200, question);
     return true;

@@ -36,20 +36,26 @@ function onPageSizeChange(size) {
   state.paperPageSize = size;
   resetPaperPage();
 }
+
+function clearPaperFilters() {
+  state.paperSearch = "";
+  state.paperStatusFilter = "all";
+  resetPaperPage();
+}
 </script>
 
 <template>
   <section class="mt-4 space-y-4">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h1 class="text-2xl font-black">已出卷子管理</h1>
-        <div class="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">集中管理草稿、已发布和历史试卷</div>
+        <h1 class="text-2xl font-black">试卷管理</h1>
+        <div class="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">集中管理草稿和已发布试卷</div>
       </div>
       <el-button type="primary" :icon="Plus" size="large" @click="go('authoring')">新建试卷</el-button>
     </div>
 
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <el-card shadow="never"><div class="metric-value text-xl font-black">{{ paperRows.length }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">历史试卷</div></el-card>
+      <el-card shadow="never"><div class="metric-value text-xl font-black">{{ paperRows.length }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">全部试卷</div></el-card>
       <el-card shadow="never"><div class="metric-value text-xl font-black text-leaf">{{ papers.filter((item) => item.status === '已发布').length }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">已发布</div></el-card>
       <el-card shadow="never"><div class="metric-value text-xl font-black text-iris">{{ papers.filter((item) => ['草稿','未发布','已保存','已组卷'].includes(item.status)).length }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">草稿</div></el-card>
       <el-card shadow="never"><div class="metric-value text-xl font-black text-ocean">{{ paperRows.reduce((sum, item) => sum + Number(item.questionCount || 0), 0) }}</div><div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">累计题数</div></el-card>
@@ -68,7 +74,13 @@ function onPageSizeChange(size) {
         </div>
       </div>
 
-      <el-table :data="pagedPaperRows" class="mt-4 w-full" empty-text="暂无匹配试卷" @row-dblclick="onRowDoubleClick">
+      <el-table :data="pagedPaperRows" class="mt-4 w-full" @row-dblclick="onRowDoubleClick">
+        <template #empty>
+          <el-empty :description="state.paperSearch || state.paperStatusFilter !== 'all' ? '没有符合当前条件的试卷' : '还没有试卷'">
+            <el-button v-if="state.paperSearch || state.paperStatusFilter !== 'all'" @click="clearPaperFilters">清空筛选</el-button>
+            <el-button v-else type="primary" :icon="Plus" @click="go('authoring')">新建试卷</el-button>
+          </el-empty>
+        </template>
         <el-table-column label="试卷名称" min-width="250">
           <template #default="{ row }">
             <div class="font-black text-ink dark:text-slate-100">{{ row.name }}</div>
@@ -78,7 +90,6 @@ function onPageSizeChange(size) {
         <el-table-column label="状态" width="110">
           <template #default="{ row }"><el-tag :type="statusTagType(row.status)" effect="light">{{ displayPaperStatus(row.status) }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="分类" min-width="170" show-overflow-tooltip><template #default="{ row }">{{ row.categorySnapshot?.path?.map((item) => item.name).join(' / ') || '未分类' }}</template></el-table-column>
         <el-table-column label="题数" prop="questionCount" width="90"><template #default="{ row }">{{ row.questionCount || 0 }} 题</template></el-table-column>
         <el-table-column label="总分" prop="score" width="90"><template #default="{ row }">{{ row.score || 0 }} 分</template></el-table-column>
         <el-table-column label="更新时间" min-width="150"><template #default="{ row }">{{ formatDateTime(row.updatedAt || row.publishedAt || row.createdAt) }}</template></el-table-column>

@@ -41,7 +41,7 @@ export function createAppStore() {
       admin: {
         token: localStorage.getItem("smartqAdminToken") || "",
         user: null,
-        username: localStorage.getItem("smartqAdminUsername") || "admin",
+        username: localStorage.getItem("smartqAdminUsername") || "",
         password: "",
         rememberUsername: Boolean(localStorage.getItem("smartqAdminUsername")),
         loading: false,
@@ -78,6 +78,7 @@ export function createAppStore() {
         editorMode: "create",
         editingId: null,
         form: { username: "", displayName: "", password: "", confirmPassword: "" },
+        formInitial: "",
         formError: "",
         saving: false,
         resetOpen: false,
@@ -86,6 +87,7 @@ export function createAppStore() {
         resetPasswordConfirm: "",
         resetError: "",
         resetting: false,
+        sessionRevokingId: null,
       },
       materialManagement: {
         items: [],
@@ -104,6 +106,7 @@ export function createAppStore() {
         editorMode: "create",
         editingId: null,
         form: { name: "", description: "", tags: "", content: "", mode: "text", file: null },
+        formInitial: "",
         formError: "",
         saving: false,
         detailOpen: false,
@@ -124,6 +127,7 @@ export function createAppStore() {
         categoryEditorMode: "create",
         categoryEditingId: "",
         categoryForm: { name: "", parentId: "", sortOrder: 0 },
+        categoryFormInitial: "",
         categoryFormError: "",
         categorySaving: false,
         categoryActionId: "",
@@ -147,6 +151,7 @@ export function createAppStore() {
         editorMode: "create",
         editingId: null,
         form: {},
+        formInitial: "",
         formError: "",
         saving: false,
         detailOpen: false,
@@ -157,19 +162,12 @@ export function createAppStore() {
         paperImportCategoryId: "",
         picker: {
           open: false,
-          items: [],
-          total: 0,
-          page: 1,
-          pageSize: 10,
           search: "",
-          status: "已校验",
-          type: "",
-          difficulty: "",
-          loading: false,
           error: "",
-          selection: [],
-          categoryId: "",
-          importing: false,
+          categoryIds: [],
+          requestedCount: 0,
+          allocationMode: "balanced",
+          allocations: [],
         },
       },
       ui: {
@@ -202,9 +200,11 @@ export function createAppStore() {
       paperPageSize: 20,
       paperActionMenuId: null,
       confirmDeletePaper: null,
+      deletingPaperId: null,
       editingQuestion: null,
       questionEditForm: null,
       questionEditErrors: {},
+      questionSaving: false,
       questionAi: {
         loading: false,
         operation: "",
@@ -226,7 +226,7 @@ export function createAppStore() {
     let dashboardRequestSequence = 0;
 
     const navItems = [
-      { key: "papers", label: "已出卷子", icon: "files" },
+      { key: "papers", label: "试卷管理", icon: "files" },
       { key: "authoring", label: "出题制卷", icon: "sparkles" },
       { key: "question-bank", label: "题库管理", icon: "collection" },
       { key: "materials", label: "出题资料", icon: "folder" },
@@ -267,7 +267,16 @@ export function createAppStore() {
       return state.materialManagement.options.filter((item) => selected.has(item.id));
     });
     const selectedQuestionBankItems = computed(() => Array.isArray(state.spec.questionBankItems) ? state.spec.questionBankItems : []);
-    const questionBankQuestionCount = computed(() => Array.isArray(state.spec.questionBankIds) ? state.spec.questionBankIds.length : 0);
+    const selectedQuestionBankCategories = computed(() => {
+      const selected = new Set(state.spec.questionBankCategoryIds || []);
+      return state.questionBankManagement.categories.filter((item) => selected.has(item.id));
+    });
+    const questionBankQuestionCount = computed(() => clampNumber(
+      state.spec.questionBankRequestedCount,
+      0,
+      totalQuestionCount.value,
+      Array.isArray(state.spec.questionBankIds) ? state.spec.questionBankIds.length : 0,
+    ));
     const remainingGeneratedQuestionCount = computed(() => Math.max(0, totalQuestionCount.value - questionBankQuestionCount.value));
     const materialQuestionCount = computed(() => clampNumber(state.spec.materialQuestionCount, 0, remainingGeneratedQuestionCount.value, 0));
     const aiQuestionCount = computed(() => Math.max(0, remainingGeneratedQuestionCount.value - materialQuestionCount.value));
@@ -283,7 +292,7 @@ export function createAppStore() {
         {
           key: "config",
           title: "命题配置",
-          meta: configDone ? "试卷内容已生成" : "填写考卷、方向、题型",
+          meta: configDone ? "试卷内容已生成" : "填写试卷、方向、题型",
           status: currentStep === "config" ? "active" : configDone ? "done" : "pending",
           action: configDone ? "查看配置" : "填写参数",
           clickable: true,
@@ -309,9 +318,9 @@ export function createAppStore() {
 
     const visibleWorkflowStep = computed(() => state.activeWorkflowStep);
     const documentTitle = computed(() => {
-      const routeTitle = navItems.find((item) => item.key === state.route)?.label || "已出卷子";
+      const routeTitle = navItems.find((item) => item.key === state.route)?.label || "试卷管理";
       if (state.route === "papers" && state.selectedPaperDetail?.name) {
-        return `${state.selectedPaperDetail.name} - 已出卷子 - SmartQ`;
+        return `${state.selectedPaperDetail.name} - 试卷管理 - SmartQ`;
       }
       if (state.route === "authoring") {
         const title = state.authoringPaperId ? paper.value.name || state.dashboard?.generationTask?.paperName || "编辑试卷" : "出题制卷";
@@ -367,6 +376,7 @@ export function createAppStore() {
       loginAdmin,
       logoutAdmin,
       openAdminProfile,
+      restoreDefaultAdminAvatar,
       runAdminAccountMenuItem,
       saveAdminProfile,
       selectAdminAvatar,
@@ -389,6 +399,7 @@ export function createAppStore() {
       openCreateAdminUser,
       openEditAdminUser,
       openResetAdminPassword,
+      requestCloseAdminUserEditor,
       resetManagedAdminPassword,
       revokeManagedAdminSessions,
       saveManagedAdminUser,
@@ -406,6 +417,7 @@ export function createAppStore() {
       openMaterialDetail,
       openMaterialSelector,
       removeSelectedMaterial,
+      requestCloseMaterialEditor,
       resumeAuthoringFromMaterials,
       runMaterialAction,
       saveMaterial,
@@ -417,12 +429,10 @@ export function createAppStore() {
       addPaperQuestionsToBank,
       addSelectedQuestionBankToAuthoring,
       applyQuestionBankFilters,
-      applyQuestionBankPickerFilters,
       applyBulkQuestionCategories,
-      changeAuthoringCategory,
+      clearQuestionBankPlan,
       changeQuestionBankPage,
       changeQuestionBankPageSize,
-      changeQuestionBankPickerPage,
       loadQuestionBank,
       loadQuestionBankCategories,
       openBulkQuestionCategories,
@@ -433,13 +443,14 @@ export function createAppStore() {
       openQuestionBankDetail,
       openQuestionBankPicker,
       removeSelectedQuestionBankItem,
+      requestCloseQuestionBankCategoryEditor,
+      requestCloseQuestionBankEditor,
       runQuestionBankAction,
       runQuestionBankCategoryAction,
       saveQuestionBankCategory,
       saveQuestionBankItem,
       selectQuestionBankCategory,
       setQuestionBankRows,
-      setQuestionBankPickerSelection,
     } = createQuestionBankStore({
       state,
       notify,
@@ -467,6 +478,7 @@ export function createAppStore() {
     });
     const {
       closeQuestionEditor,
+      requestCloseQuestionEditor,
       discardDraft,
       generateDraft,
       openQuestionEditor,
@@ -581,6 +593,10 @@ export function createAppStore() {
         sourceMode: spec.sourcePlan?.mode || "ai-only",
         questionBankIds: spec.sourcePlan?.questionBankIds || [],
         questionBankItems: spec.sourcePlan?.questionBankItems || [],
+        questionBankRequestedCount: spec.sourcePlan?.questionBankRequestedCount ?? spec.sourcePlan?.questionBankCount ?? spec.sourcePlan?.questionBankIds?.length ?? 0,
+        questionBankCategoryIds: spec.sourcePlan?.questionBankCategoryIds || [],
+        questionBankAllocationMode: spec.sourcePlan?.questionBankAllocationMode || "balanced",
+        questionBankAllocations: spec.sourcePlan?.questionBankAllocations || [],
         materialIds: spec.sourcePlan?.materialIds || [],
         materialQuestionCount: spec.sourcePlan?.materialQuestionCount || 0,
       });
@@ -612,9 +628,11 @@ export function createAppStore() {
         paperDetailLoading: false,
         paperActionMenuId: null,
         confirmDeletePaper: null,
+        deletingPaperId: null,
         editingQuestion: null,
         questionEditForm: null,
         questionEditErrors: {},
+        questionSaving: false,
         editingPaperId: null,
         authoringPaperId: "",
         authoringNewDraftActive: false,
@@ -642,9 +660,9 @@ export function createAppStore() {
         categoryDrawerOpen: false, categoryEditorOpen: false, bulkOpen: false,
         editorOpen: false, detailOpen: false, detail: null,
       });
-      Object.assign(state.questionBankManagement.picker, { open: false, items: [], total: 0, selection: [] });
+      Object.assign(state.questionBankManagement.picker, { open: false, categoryIds: [], requestedCount: 0, allocations: [] });
       Object.assign(state.userManagement, {
-        items: [], total: 0, editorOpen: false, editingId: null, resetOpen: false, resetUser: null,
+        items: [], total: 0, editorOpen: false, editingId: null, resetOpen: false, resetUser: null, sessionRevokingId: null,
       });
     }
 
@@ -657,6 +675,16 @@ export function createAppStore() {
     }, { immediate: true });
 
     watch([totalQuestionCount, questionBankQuestionCount], ([count, bankCount]) => {
+      const requested = Number(state.spec.questionBankRequestedCount || 0);
+      if (requested > count) {
+        state.spec.questionBankRequestedCount = count;
+        let remaining = count;
+        state.spec.questionBankAllocations = (state.spec.questionBankAllocations || []).map((item) => {
+          const nextCount = Math.min(Math.max(0, Number(item.count || 0)), remaining);
+          remaining -= nextCount;
+          return { ...item, count: nextCount };
+        });
+      }
       state.spec.materialQuestionCount = clampNumber(state.spec.materialQuestionCount, 0, Math.max(0, count - bankCount), 0);
     });
 
@@ -744,6 +772,7 @@ export function createAppStore() {
       computedSpecTotalScore,
       selectedSourceMaterials,
       selectedQuestionBankItems,
+      selectedQuestionBankCategories,
       questionBankQuestionCount,
       materialQuestionCount,
       aiQuestionCount,
@@ -757,6 +786,7 @@ export function createAppStore() {
       openCreateAdminUser,
       openEditAdminUser,
       openResetAdminPassword,
+      requestCloseAdminUserEditor,
       resetManagedAdminPassword,
       revokeManagedAdminSessions,
       saveManagedAdminUser,
@@ -765,12 +795,10 @@ export function createAppStore() {
       addPaperQuestionsToBank,
       addSelectedQuestionBankToAuthoring,
       applyQuestionBankFilters,
-      applyQuestionBankPickerFilters,
       applyBulkQuestionCategories,
-      changeAuthoringCategory,
+      clearQuestionBankPlan,
       changeQuestionBankPage,
       changeQuestionBankPageSize,
-      changeQuestionBankPickerPage,
       loadQuestionBank,
       loadQuestionBankCategories,
       openBulkQuestionCategories,
@@ -781,13 +809,14 @@ export function createAppStore() {
       openQuestionBankDetail,
       openQuestionBankPicker,
       removeSelectedQuestionBankItem,
+      requestCloseQuestionBankCategoryEditor,
+      requestCloseQuestionBankEditor,
       runQuestionBankAction,
       runQuestionBankCategoryAction,
       saveQuestionBankCategory,
       saveQuestionBankItem,
       selectQuestionBankCategory,
       setQuestionBankRows,
-      setQuestionBankPickerSelection,
       applyMaterialFilters,
       changeMaterialPage,
       changeMaterialPageSize,
@@ -799,6 +828,7 @@ export function createAppStore() {
       openMaterialDetail,
       openMaterialSelector,
       removeSelectedMaterial,
+      requestCloseMaterialEditor,
       resumeAuthoringFromMaterials,
       runMaterialAction,
       saveMaterial,
@@ -813,6 +843,7 @@ export function createAppStore() {
       saveAdminProfile,
       changeAdminPassword,
       selectAdminAvatar,
+      restoreDefaultAdminAvatar,
       toggleSidebar,
       toggleThemeMenu,
       setTheme,
@@ -836,6 +867,7 @@ export function createAppStore() {
       editPaper,
       openQuestionEditor,
       closeQuestionEditor,
+      requestCloseQuestionEditor,
       runQuestionAiTransform,
       applyQuestionAiCandidate,
       discardQuestionAiCandidate,
@@ -865,6 +897,8 @@ function freshSpec(overrides = {}) {
     ...overrides,
     questionBankIds: Array.isArray(overrides.questionBankIds) ? [...overrides.questionBankIds] : [],
     questionBankItems: Array.isArray(overrides.questionBankItems) ? overrides.questionBankItems.map((item) => ({ ...item })) : [],
+    questionBankCategoryIds: Array.isArray(overrides.questionBankCategoryIds) ? [...overrides.questionBankCategoryIds] : [],
+    questionBankAllocations: Array.isArray(overrides.questionBankAllocations) ? overrides.questionBankAllocations.map((item) => ({ ...item })) : [],
     materialIds: Array.isArray(overrides.materialIds) ? [...overrides.materialIds] : [],
   };
 }

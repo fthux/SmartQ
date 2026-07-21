@@ -39,6 +39,12 @@ export function aiConfig() {
   };
 }
 
+export function publicAiErrorMessage(error, fallback = "AI 服务暂时不可用，请稍后重试或联系系统管理员") {
+  const statusCode = Number(error?.statusCode || 500);
+  if (statusCode >= 400 && statusCode < 500 && error?.message) return error.message;
+  return fallback;
+}
+
 export async function generateQuestions(spec = {}, options = {}) {
   const config = aiConfig();
   const normalizedSpec = normalizeGenerationSpec(spec);
@@ -49,10 +55,11 @@ export async function generateQuestions(spec = {}, options = {}) {
     options.materialSources,
     options.questionBankItems,
     questionBankQuestions,
+    options.questionBankSelection,
   );
   const remainingTypeMix = subtractTypePlan(normalizedSpec.typeMix, questionBankQuestions);
   if (sourcePlan.materialQuestionCount > 0 && !options.materialSources?.length) {
-    throw new Error("未找到可用于出题的资料内容，请重新选择资料");
+    throw badRequestError("未找到可用于出题的资料内容，请重新选择资料");
   }
 
   const materialTypeMix = allocateTypePlan(remainingTypeMix, sourcePlan.materialQuestionCount);
@@ -75,7 +82,7 @@ export async function generateQuestions(spec = {}, options = {}) {
   }
   let aiResult = { source: materialResult.source, questions: [] };
   if (aiSpec.count > 0) {
-    options.onProgress?.(66, `正在生成 ${aiSpec.count} 道 AI 独立题`);
+    options.onProgress?.(66, `正在生成 ${aiSpec.count} 道 AI 生成题`);
     aiResult = await generateUniqueQuestionBatch(
       aiSpec,
       config,
@@ -109,7 +116,7 @@ export async function transformQuestionWithAi(question = {}, context = {}, input
   if (!operation) throw badRequestError("不支持的 AI 题目操作");
   const draft = normalizeTransformDraft(question, input.draft);
   if (operation === "distractors" && !["单选", "多选"].includes(draft.type)) {
-    throw badRequestError("只有单选题和多选题可以重新生成迷惑项");
+    throw badRequestError("只有单选题和多选题可以重新生成干扰项");
   }
   const customPrompt = cleanText(input.prompt, "").slice(0, 2000);
   if (operation === "custom" && !customPrompt) throw badRequestError("请输入自定义提示词");
@@ -120,7 +127,7 @@ export async function transformQuestionWithAi(question = {}, context = {}, input
     const wrongCount = draft.options.length - normalizeAnswer(draft.answer, draft.type).length;
     const payload = config.mockMode
       ? { distractors: buildMockDistractors(draft, wrongCount) }
-      : await requestAiTransformPayload(config, buildDistractorPrompt(draft, wrongCount), "迷惑项生成");
+      : await requestAiTransformPayload(config, buildDistractorPrompt(draft, wrongCount), "干扰项生成");
     candidate = applyGeneratedDistractors(draft, payload?.distractors, wrongCount);
   } else {
     const payload = config.mockMode
@@ -176,12 +183,11 @@ function buildQuestionTransformPrompt(question, context, operation, customPrompt
     ]
     : question.origin?.type === "question-bank"
       ? ["以原题库题为命题参考，但必须生成新的题目内容，不得修改题库原记录。"]
-      : ["按当前试卷的分类、方向和知识点生成独立题目。"];
+      : ["按当前试卷的方向和知识点生成独立题目。"];
   return [
     "你是严谨的考试题目编辑器。只允许输出 JSON，不允许输出 Markdown。",
     "输出格式必须是 {\"question\":{\"type\":\"\",\"stem\":\"\",\"options\":[],\"answer\":\"\",\"difficulty\":\"\",\"explanation\":\"\",\"rubric\":[],\"quality\":90}}。",
     `操作：${operation === "regenerate" ? "重新生成一道同题型、同来源约束的新题" : "按照用户提示修改当前题目"}`,
-    `当前试卷分类：${context.categoryName || context.categoryId || "未设置"}`,
     `当前试卷方向：${context.direction || "未设置"}`,
     `当前试卷要求：${context.requirements || "无"}`,
     `当前题目：${JSON.stringify(question)}`,
@@ -200,8 +206,8 @@ function buildDistractorPrompt(question, wrongCount) {
     `题型：${question.type}`,
     `题干：${question.stem}`,
     `正确选项：${JSON.stringify(correctOptions)}`,
-    `需要生成 ${wrongCount} 个迷惑项。`,
-    "迷惑项必须有干扰性但明确错误；不得与正确选项、其他迷惑项重复；不要修改或复述正确答案。",
+    `需要生成 ${wrongCount} 个干扰项。`,
+    "干扰项必须具有区分度但答案明确错误；不得与正确选项、其他干扰项重复；不要修改或复述正确答案。",
   ].join("\n");
 }
 
@@ -265,7 +271,7 @@ function applyGeneratedDistractors(question, value, wrongCount) {
   const distractors = [...new Set((Array.isArray(value) ? value : []).map((item) => cleanText(item, "")).filter(Boolean))]
     .filter((item) => !correctTexts.has(item));
   if (distractors.length < wrongCount) {
-    const error = new Error(`AI 返回的迷惑项数量不足：需要 ${wrongCount} 个，实际 ${distractors.length} 个`);
+    const error = new Error(`AI 返回的干扰项数量不足：需要 ${wrongCount} 个，实际 ${distractors.length} 个`);
     error.statusCode = 502;
     throw error;
   }
@@ -353,7 +359,7 @@ async function generateUniqueQuestionBatch(spec, config, batch, existingQuestion
   }
   if (missing.length) {
     const detail = missing.map((item) => `${item.type}${item.count}道`).join("、");
-    throw new Error(`生成题目重复度过高，仍缺少${detail}，请调整命题范围后重试`);
+    throw badRequestError(`生成题目重复度过高，仍缺少${detail}，请调整命题范围后重试`);
   }
   return { source, questions: accepted };
 }
@@ -477,7 +483,7 @@ async function generateQuestionBatch(normalizedSpec, config, batch = {}) {
   };
 }
 
-function normalizeSourcePlan(input = {}, count, materialSources = [], questionBankItems = [], questionBankQuestions = []) {
+function normalizeSourcePlan(input = {}, count, materialSources = [], questionBankItems = [], questionBankQuestions = [], questionBankSelection = {}) {
   const questionBankCount = questionBankQuestions.length;
   const remainingCount = Math.max(0, count - questionBankCount);
   const legacyMode = ["ai-only", "mixed", "materials-only"].includes(input?.mode) ? input.mode : "";
@@ -495,6 +501,22 @@ function normalizeSourcePlan(input = {}, count, materialSources = [], questionBa
     mode,
     questionBankIds: questionBankItems.map((item) => item.id),
     questionBankCount,
+    questionBankRequestedCount: clampNumber(questionBankSelection?.requestedCount ?? input?.questionBankRequestedCount, 0, count, questionBankCount),
+    questionBankShortfall: clampNumber(questionBankSelection?.shortfall, 0, count, 0),
+    questionBankAvailableCount: clampNumber(questionBankSelection?.availableCount, 0, 100000, 0),
+    questionBankCategoryIds: Array.isArray(questionBankSelection?.categoryIds)
+      ? [...questionBankSelection.categoryIds]
+      : normalizeList(input?.questionBankCategoryIds),
+    questionBankCategories: Array.isArray(questionBankSelection?.categories)
+      ? questionBankSelection.categories.map((item) => structuredClone(item))
+      : [],
+    questionBankAllocationMode: questionBankSelection?.allocationMode || (input?.questionBankAllocationMode === "manual" ? "manual" : "balanced"),
+    questionBankAllocations: Array.isArray(questionBankSelection?.allocations)
+      ? questionBankSelection.allocations.map((item) => ({ categoryId: String(item.categoryId || ""), count: Number(item.count || 0) }))
+      : [],
+    questionBankSelectedTypeCounts: questionBankSelection?.selectedTypeCounts && typeof questionBankSelection.selectedTypeCounts === "object"
+      ? { ...questionBankSelection.selectedTypeCounts }
+      : {},
     questionBankItems: questionBankItems.map((item) => ({ id: item.id, type: item.type, stem: item.stem, version: item.version })),
     materialIds: materialSources.map((item) => item.id),
     materialQuestionCount,
@@ -711,8 +733,6 @@ export function buildPaper(sourceQuestions = questions, meta = {}) {
     buildSpec: meta.buildSpec || { targetScore, source: "preview" },
     sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
     generationSpecSnapshot: meta.generationSpecSnapshot || null,
-    categoryId: String(meta.categoryId || ""),
-    categorySnapshot: meta.categorySnapshot || null,
     score,
     questionCount: selected.length,
     typeGroups,
@@ -730,8 +750,6 @@ function emptyPaper(meta = {}) {
     buildSpec: meta.buildSpec || null,
     sourcePlanSnapshot: meta.sourcePlanSnapshot || meta.buildSpec?.sourcePlanSnapshot || null,
     generationSpecSnapshot: meta.generationSpecSnapshot || null,
-    categoryId: String(meta.categoryId || ""),
-    categorySnapshot: meta.categorySnapshot || null,
     score: 0,
     questionCount: 0,
     typeGroups: {},
@@ -807,11 +825,12 @@ function normalizeGenerationSpec(spec = {}) {
   const typeScores = normalizeTypeScores(spec.typeScores || spec.scores);
   const calculatedTotal = typePlan.reduce((sum, item) => sum + item.count * typeScores[item.type], 0);
   const totalScore = calculatedTotal || clampNumber(spec.totalScore, Math.max(1, count), 200, 50);
-  const knowledge = normalizeList(spec.knowledge).length ? normalizeList(spec.knowledge) : ["综合能力"];
+  const normalizedKnowledge = normalizeList(spec.knowledge).map((item) => item.slice(0, 80)).slice(0, 50);
+  const knowledge = normalizedKnowledge.length ? normalizedKnowledge : ["综合能力"];
   return {
-    title: cleanText(spec.title, "综合能力测评"),
-    paperName: cleanText(spec.paperName || spec.paper, "A 卷"),
-    direction: cleanText(spec.direction, "综合能力"),
+    title: cleanText(spec.title, "试卷内容"),
+    paperName: cleanText(spec.paperName || spec.paper, "A 卷").slice(0, 80),
+    direction: cleanText(spec.direction, "综合能力").slice(0, 120),
     count,
     difficulty: normalizeDifficulty(spec.difficulty),
     totalScore,
@@ -821,8 +840,7 @@ function normalizeGenerationSpec(spec = {}) {
     typeScoreText: typePlan.map((item) => `${item.type}每题${typeScores[item.type]}分`).join("，"),
     knowledge,
     knowledgeInputEmpty: Boolean(spec.knowledgeInputEmpty),
-    requirements: cleanText(spec.requirements, ""),
-    categoryId: String(spec.categoryId || ""),
+    requirements: cleanText(spec.requirements, "").slice(0, 1000),
   };
 }
 
@@ -1100,7 +1118,7 @@ function ensureSpecCompliance(items, spec, options = {}) {
     const targetType = targetTypes[index] || "单选";
     const existing = items[index] || {};
     if (items[index] === undefined && options.strictSource) {
-      throw new Error(`资料题生成数量不足：需要 ${spec.count} 道，实际 ${items.length} 道`);
+      throw badRequestError(`资料题生成数量不足：需要 ${spec.count} 道，实际 ${items.length} 道`);
     }
     const question = items[index] === undefined
         ? buildMockQuestion({

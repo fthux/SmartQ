@@ -52,6 +52,7 @@ export function createMaterialsStore({ state, notify, go }) {
     state.materialManagement.editorMode = "create";
     state.materialManagement.editingId = null;
     state.materialManagement.form = { name: "", description: "", tags: "", content: "", mode, file: null };
+    state.materialManagement.formInitial = materialFormFingerprint(state.materialManagement.form);
     state.materialManagement.formError = "";
   }
 
@@ -74,6 +75,7 @@ export function createMaterialsStore({ state, notify, go }) {
         mode: "text",
         file: null,
       };
+      state.materialManagement.formInitial = materialFormFingerprint(state.materialManagement.form);
       state.materialManagement.formError = "";
       state.materialManagement.editorOpen = true;
     } catch (error) {
@@ -166,21 +168,42 @@ export function createMaterialsStore({ state, notify, go }) {
     }
   }
 
+  async function requestCloseMaterialEditor(done) {
+    const management = state.materialManagement;
+    if (management.saving) return;
+    if (materialFormFingerprint(management.form) !== management.formInitial) {
+      try {
+        await ElMessageBox.confirm("当前资料内容尚未保存，关闭后修改会丢失。", "放弃未保存修改", {
+          confirmButtonText: "放弃修改",
+          cancelButtonText: "继续编辑",
+          type: "warning",
+        });
+      } catch (error) {
+        if (error === "cancel" || error === "close") return;
+        throw error;
+      }
+    }
+    if (typeof done === "function") done();
+    else management.editorOpen = false;
+  }
+
   async function runMaterialAction(row, action) {
     const archiving = action === "archive";
     const restoring = action === "restore";
     const actionLabel = archiving ? "归档" : restoring ? "恢复" : "重新解析";
     try {
-      if (archiving || restoring) {
+      if (archiving || restoring || action === "reparse") {
         await ElMessageBox.confirm(
           archiving
             ? `确认归档资料“${row.name}”？归档后不会影响历史试卷，但不能再用于新的出题任务。`
-            : `确认恢复资料“${row.name}”？恢复后该资料将重新进入可选的出题资料列表。`,
+            : restoring
+              ? `确认恢复资料“${row.name}”？恢复后该资料将重新进入可选的出题资料列表。`
+              : `确认重新解析资料“${row.name}”？当前解析结果将被新的解析结果替换。`,
           `确认${actionLabel}`,
           {
             confirmButtonText: `确认${actionLabel}`,
             cancelButtonText: "取消",
-            type: archiving ? "warning" : "info",
+            type: archiving || action === "reparse" ? "warning" : "info",
           },
         );
       }
@@ -234,6 +257,7 @@ export function createMaterialsStore({ state, notify, go }) {
     openMaterialDetail,
     openMaterialSelector,
     removeSelectedMaterial,
+    requestCloseMaterialEditor,
     resumeAuthoringFromMaterials,
     runMaterialAction,
     saveMaterial,
@@ -245,4 +269,9 @@ export function createMaterialsStore({ state, notify, go }) {
 function formatFileSize(bytes) {
   const megabytes = Number(bytes || 0) / 1024 / 1024;
   return `${Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)} MB`;
+}
+
+function materialFormFingerprint(form = {}) {
+  const file = form.file ? { name: form.file.name, size: form.file.size, lastModified: form.file.lastModified } : null;
+  return JSON.stringify({ ...form, file });
 }

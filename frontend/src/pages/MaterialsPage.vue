@@ -22,6 +22,7 @@ const {
   openCreateMaterial,
   openEditMaterial,
   openMaterialDetail,
+  requestCloseMaterialEditor,
   resumeAuthoringFromMaterials,
   runMaterialAction,
   saveMaterial,
@@ -38,6 +39,7 @@ const materialFileMaxLabel = computed(() => {
   const megabytes = Number(state.systemLimits.materialFileMaxBytes || 0) / 1024 / 1024;
   return `${Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)} MB`;
 });
+const hasMaterialFilters = computed(() => Boolean(state.materialManagement.search || state.materialManagement.status));
 
 function statusLabel(status) {
   return { ready: "可用", failed: "解析失败", archived: "已归档" }[status] || status;
@@ -50,6 +52,12 @@ function statusType(status) {
 function formatTextLength(value) {
   const length = Number(value || 0);
   return length >= 10_000 ? `${(length / 10_000).toFixed(1)} 万字` : `${length} 字`;
+}
+
+function clearMaterialFilters() {
+  state.materialManagement.search = "";
+  state.materialManagement.status = "";
+  applyMaterialFilters();
 }
 </script>
 
@@ -68,10 +76,10 @@ function formatTextLength(value) {
     </div>
 
     <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight">{{ state.materialManagement.total }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前筛选</div></el-card>
-      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-leaf">{{ state.materialManagement.items.filter((item) => item.status === 'ready').length }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前页可用</div></el-card>
-      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-iris">{{ state.materialManagement.items.reduce((sum, item) => sum + Number(item.paperUsageCount || 0), 0) }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前页试卷引用</div></el-card>
-      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-ocean">{{ state.materialManagement.items.reduce((sum, item) => sum + Number(item.revisionCount || 0), 0) }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前页版本</div></el-card>
+      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight">{{ state.materialManagement.total }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">匹配总数</div></el-card>
+      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-leaf">{{ state.materialManagement.items.filter((item) => item.status === 'ready').length }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">本页可用</div></el-card>
+      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-iris">{{ state.materialManagement.items.reduce((sum, item) => sum + Number(item.paperUsageCount || 0), 0) }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">本页试卷引用</div></el-card>
+      <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-ocean">{{ state.materialManagement.items.reduce((sum, item) => sum + Number(item.revisionCount || 0), 0) }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">本页版本</div></el-card>
     </div>
 
     <el-card shadow="never" class="material-list-card">
@@ -88,7 +96,13 @@ function formatTextLength(value) {
 
       <el-alert v-if="state.materialManagement.error" class="mt-4" :title="state.materialManagement.error" type="error" show-icon :closable="false" />
 
-      <el-table v-loading="state.materialManagement.loading" :data="state.materialManagement.items" class="mt-4 w-full" empty-text="暂无匹配资料">
+      <el-table v-loading="state.materialManagement.loading" :data="state.materialManagement.items" class="mt-4 w-full">
+        <template #empty>
+          <el-empty :description="hasMaterialFilters ? '没有符合当前条件的资料' : '还没有出题资料'">
+            <el-button v-if="hasMaterialFilters" @click="clearMaterialFilters">清空筛选</el-button>
+            <el-button v-else type="primary" :icon="Plus" @click="openCreateMaterial('text')">新建文本资料</el-button>
+          </el-empty>
+        </template>
         <el-table-column label="资料" min-width="260">
           <template #default="{ row }">
             <div class="flex min-w-0 items-start gap-3">
@@ -109,9 +123,9 @@ function formatTextLength(value) {
           <template #default="{ row }">
             <el-button link type="primary" :icon="View" @click="openMaterialDetail(row)">查看</el-button>
             <el-button v-if="row.status !== 'archived'" link type="primary" :icon="Edit" @click="openEditMaterial(row)">编辑</el-button>
-            <el-button v-if="row.status === 'failed'" link type="warning" :icon="Refresh" :loading="state.materialManagement.actionId === row.id" @click="runMaterialAction(row, 'reparse')">重解析</el-button>
-            <el-button v-if="row.status === 'archived'" link type="success" :loading="state.materialManagement.actionId === row.id" @click="runMaterialAction(row, 'restore')">恢复</el-button>
-            <el-button v-else link type="danger" :icon="Box" :loading="state.materialManagement.actionId === row.id" @click="runMaterialAction(row, 'archive')">归档</el-button>
+            <el-button v-if="row.status === 'failed'" link type="warning" :icon="Refresh" :loading="state.materialManagement.actionId === row.id" :disabled="state.materialManagement.actionId !== null && state.materialManagement.actionId !== row.id" @click="runMaterialAction(row, 'reparse')">重解析</el-button>
+            <el-button v-if="row.status === 'archived'" link type="success" :loading="state.materialManagement.actionId === row.id" :disabled="state.materialManagement.actionId !== null && state.materialManagement.actionId !== row.id" @click="runMaterialAction(row, 'restore')">恢复</el-button>
+            <el-button v-else link type="danger" :icon="Box" :loading="state.materialManagement.actionId === row.id" :disabled="state.materialManagement.actionId !== null && state.materialManagement.actionId !== row.id" @click="runMaterialAction(row, 'archive')">归档</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -130,7 +144,7 @@ function formatTextLength(value) {
       </div>
     </el-card>
 
-    <el-dialog v-model="state.materialManagement.editorOpen" :title="state.materialManagement.editorMode === 'edit' ? '编辑出题资料' : '新建出题资料'" width="680px" top="5vh" append-to-body destroy-on-close>
+    <el-dialog v-model="state.materialManagement.editorOpen" :title="state.materialManagement.editorMode === 'edit' ? '编辑出题资料' : '新建出题资料'" width="min(680px, calc(100vw - 24px))" top="5vh" append-to-body destroy-on-close :close-on-click-modal="false" :before-close="requestCloseMaterialEditor">
       <el-form label-position="top" @submit.prevent="saveMaterial">
         <el-alert v-if="state.materialManagement.formError" class="mb-4" :title="state.materialManagement.formError" type="error" show-icon :closable="false" />
         <el-segmented
@@ -140,10 +154,10 @@ function formatTextLength(value) {
           :options="[{ label: '文本资料', value: 'text' }, { label: '导入文件', value: 'file' }]"
         />
         <div class="grid gap-x-3 sm:grid-cols-2">
-          <el-form-item label="资料名称"><el-input v-model="state.materialManagement.form.name" maxlength="80" show-word-limit /></el-form-item>
+          <el-form-item label="资料名称"><el-input v-model="state.materialManagement.form.name" maxlength="80" show-word-limit placeholder="请输入便于识别的资料名称" /></el-form-item>
           <el-form-item label="标签"><el-input v-model="state.materialManagement.form.tags" placeholder="多个标签使用逗号分隔" /></el-form-item>
         </div>
-        <el-form-item label="资料说明"><el-input v-model="state.materialManagement.form.description" type="textarea" :rows="2" maxlength="300" show-word-limit /></el-form-item>
+        <el-form-item label="资料说明"><el-input v-model="state.materialManagement.form.description" type="textarea" :rows="2" maxlength="300" show-word-limit placeholder="说明资料用途或适用范围，可选" /></el-form-item>
         <el-form-item v-if="state.materialManagement.editorMode === 'create' && state.materialManagement.form.mode === 'file'" label="资料文件">
           <el-upload drag :auto-upload="false" :limit="1" accept=".txt,.md,.pdf,.docx" :on-change="selectMaterialFile" :on-remove="() => state.materialManagement.form.file = null">
             <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
@@ -156,7 +170,7 @@ function formatTextLength(value) {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="state.materialManagement.editorOpen = false">取消</el-button>
+        <el-button @click="requestCloseMaterialEditor">取消</el-button>
         <el-button type="primary" :loading="state.materialManagement.saving" @click="saveMaterial">保存资料</el-button>
       </template>
     </el-dialog>

@@ -58,6 +58,7 @@ try {
     "vite.config.js",
     "frontend/src/main.js",
     "frontend/src/App.vue",
+    "frontend/src/components/ConfirmDeleteDialog.vue",
     "frontend/src/components/ConsoleShell.vue",
     "frontend/src/components/PaperDetailDrawer.vue",
     "frontend/src/components/QuestionBankPicker.vue",
@@ -84,9 +85,14 @@ try {
   const frontendSources = await Promise.all(frontendFiles.map((path) => readFile(path, "utf8")));
   const frontend = frontendSources.join("\n");
   const backendFiles = [
+    "backend/server.js",
+    "backend/lib/ai.js",
     "backend/routes/index.js",
+    "backend/routes/authoring.js",
     "backend/routes/materials.js",
+    "backend/routes/papers.js",
     "backend/routes/question-bank.js",
+    "backend/services/generation-service.js",
     "backend/services/material-service.js",
     "backend/services/question-bank-service.js",
     "backend/services/question-bank-category-service.js",
@@ -100,6 +106,8 @@ try {
   assert(frontend.includes("<script setup>") && frontend.includes("<el-form") && frontend.includes("<el-button"), "frontend pages use Vue SFC and Element Plus controls");
   assert(frontend.includes("<el-table") && frontend.includes("<el-drawer") && frontend.includes("<el-dialog"), "tables, drawers, and dialogs use Element Plus components");
   assert(frontend.includes('aria-label="管理功能导航"') && frontend.includes('data-admin-route-content'), "frontend keeps the management sidebar layout");
+  assert(frontend.includes("智能命题与试卷管理") && frontend.includes("智能命题工作台") && !frontend.includes("考试与测评管理平台"), "product positioning matches the authoring and paper-management scope");
+  assert(frontend.includes("SmartQ 内容管理控制台") && frontend.includes("内容管理入口") && !/SmartQ 运营控制台|运营管理入口|管理运营控制台/.test(frontend), "control-panel wording does not imply retired operations capabilities");
   assert(frontend.includes("toggleSidebar") && frontend.includes("smartqSidebarCollapsed"), "desktop sidebar can collapse and persist its state");
   assert(frontend.includes("requestFullscreen") && frontend.includes("fullscreenchange"), "header exposes synchronized fullscreen controls");
   assert(frontend.includes('value: "system"') && frontend.includes("prefers-color-scheme: dark"), "theme defaults to the system preference");
@@ -122,6 +130,8 @@ try {
   assert(frontend.includes("ElNotification.success") && frontend.includes("ElNotification.error") && frontend.includes("notifyProfileSaveError(state.profile.error)"), "profile saves show typed Element Plus notifications for success and validation or request failures");
   assert(frontend.includes("state.admin.user?.avatar || publicUrl('/assets/default_avatar.jpg')") && frontend.includes("state.profile.avatarPreview || publicUrl('/assets/default_avatar.jpg')") && frontend.includes("row.avatar || publicUrl('/assets/default_avatar.jpg')"), "users without uploaded avatars display default_avatar.jpg by default");
   assert(frontend.includes("用户管理") && frontend.includes("/api/admin/users") && frontend.includes("重置密码"), "admin user management UI is available");
+  assert(!frontend.includes("测试账号") && !frontend.includes("密码：123456"), "login page does not expose plaintext test credentials");
+  assert(frontend.includes("登录账号需为 3-32 位字母、数字、点、下划线或连字符") && frontend.includes("密码必须同时包含字母和数字") && frontend.includes("两次输入的密码不一致"), "user forms validate account format, password strength, and repeated passwords");
   assert(!frontend.includes("全部角色") && !frontend.includes('label="角色"') && !frontend.includes("adminRoleLabel"), "role controls and labels are removed from the frontend");
   assert((frontend.match(/append-to-body/g) || []).length >= 2, "user management dialogs attach overlays to the document body");
   assert(frontend.includes('active-value="active"') && frontend.includes('inactive-value="disabled"') && frontend.includes("statusUpdatingId"), "user status switches use Element Plus active, inactive, disabled, and loading states");
@@ -129,10 +139,11 @@ try {
   assert(!frontend.includes(retiredInitialPasswordFlag) && !/首次登录.*修改.*密码|初始密码/.test(frontend), "frontend removes the initial-password change policy and UI");
   assert(!backend.includes(retiredInitialPasswordFlag) && !backend.includes("请先修改初始密码"), "backend removes the initial-password field and API gate");
   assert(frontend.includes("await uploadAdminAvatar(file)") && frontend.includes("用户头像已更新"), "valid avatar selection uploads immediately");
-  assert(frontend.includes("restoreDefaultAdminAvatar") && frontend.includes('method: "DELETE"') && frontend.includes("恢复默认头像"), "profile page can remove a custom avatar and return to the default avatar");
+  assert((frontend.match(/restoreDefaultAdminAvatar/g) || []).length >= 6 && frontend.includes('method: "DELETE"') && frontend.includes("恢复默认头像"), "profile page wires the default-avatar reset action through the app context");
+  assert(frontend.includes("确认退出当前账号") && frontend.includes("确认恢复默认头像") && frontend.includes("确认丢弃") && frontend.includes("确认清空题库题配置"), "logout, avatar reset, generated-draft discard, and question-bank plan clearing require confirmation");
   assert(frontend.includes("100 * 1024") && frontend.includes("width !== dimensions.height"), "avatar selection enforces 100KB square images");
   assert(frontend.includes('window.scrollTo({ top: 0, left: 0, behavior: "auto" });'), "frontend resets scroll on module switches");
-  assert(frontend.includes("出题制卷") && frontend.includes("已出卷子"), "frontend keeps authoring and paper UI");
+  assert(frontend.includes("出题制卷") && frontend.includes("试卷管理") && !frontend.includes("已出卷子"), "frontend uses consistent authoring and paper-management wording");
   assert(frontend.indexOf('{ key: "papers"') < frontend.indexOf('{ key: "authoring"'), "paper management is the first navigation item");
   assert(frontend.includes('return ["authoring", "papers", "question-bank", "materials", "users", "profile"].includes(route) ? route : "papers";'), "papers is the default route and content-management routes are routable");
   assert(frontend.includes('if (route === "papers") return "";'), "papers uses the root URL");
@@ -149,12 +160,13 @@ try {
   assert(frontend.includes("smartq:unauthorized") && frontend.includes("resetSessionState"), "global unauthorized responses clear session-scoped application state");
   assert(frontend.includes('paperId: state.authoringPaperId || ""') && !frontend.includes('paperId: state.authoringPaperId || state.dashboard?.paper?.id'), "new-paper saves never fall back to the active paper id");
   assert(frontend.includes("pageSize=1000") && !frontend.includes("filter((id) => validIds.has(id))"), "material selector loads beyond the first 100 items without dropping retained selections");
-  assert(frontend.includes("publishQualityFailures") && frontend.includes("发布已终止") && frontend.includes("editPublishIssue"), "publish failures stay visible and link to question editing");
+  assert(frontend.includes("publishQualityFailures") && frontend.includes("暂未发布") && frontend.includes("editPublishIssue"), "publish failures stay visible with actionable wording and link to question editing");
   assert(frontend.includes("data-authoring-workbench") && frontend.includes("data-authoring-summary") && frontend.includes("data-authoring-action-bar"), "authoring uses the dense workbench, summary, and action bar layout");
   assert(frontend.includes("data-question-type-matrix") && frontend.includes("typeMatrixRows") && frontend.includes("试卷编辑"), "authoring keeps the compact type matrix and direct question editing flow");
   assert(frontend.includes('key: "edit"') && !/人工审核|待审核|通过并继续|取消审核|确认并审核/.test(frontend), "authoring removes per-question review controls and wording");
-  assert(frontend.includes("同源重新生成") && frontend.includes("重新生成迷惑项") && frontend.includes("自定义 AI 修改") && frontend.includes("应用修改"), "question editor exposes AI regeneration, distractor, custom prompt, and candidate application controls");
+  assert(frontend.includes("按原来源重新生成") && frontend.includes("重新生成干扰项") && frontend.includes("自定义 AI 修改") && frontend.includes("应用修改"), "question editor exposes clear AI regeneration, distractor, custom prompt, and candidate application controls");
   assert(frontend.includes("moveQuestionOption") && frontend.includes("moveSingleCorrectAnswer") && frontend.includes("undoQuestionAiChange"), "question editor supports answer-safe option movement and AI undo");
+  assert(frontend.includes("questionSaving") && frontend.includes("requestCloseQuestionEditor"), "question editing prevents duplicate saves and protects unsaved changes");
   assert(frontend.includes('paperPageSize: 20') && frontend.includes('aria-label="试卷状态筛选"'), "paper management uses the Element Plus list controls");
   assert(frontend.includes('aria-label="试卷详情抽屉"') && frontend.includes("paperDetailMode"), "paper details open in the responsive drawer");
   assert(
@@ -166,22 +178,39 @@ try {
   );
   assert((frontend.match(/if \(state\.selectedPaperId\) clearSelectedPaper\(\);/g) || []).length >= 2, "route changes close an open paper detail drawer");
   assert(frontend.includes("出题资料管理") && frontend.includes("/api/materials/upload") && frontend.includes("data-question-source-plan"), "frontend exposes material management and source allocation");
-  assert(frontend.includes("questionBankQuestionCount") && frontend.includes("自动补齐剩余题型和数量") && frontend.includes("资料依据"), "authoring config and editing expose unified source allocation and traceability");
-  assert(frontend.includes("题库管理") && frontend.includes("data-question-bank-page") && frontend.includes("从题库选择题目"), "frontend exposes question bank management and paper selection");
+  assert(frontend.includes("questionBankQuestionCount") && frontend.includes("不引用题库或资料，按命题要求自动补齐") && frontend.includes("资料依据"), "authoring config and editing expose unified source allocation and traceability");
+  assert(frontend.includes("题库管理") && frontend.includes("data-question-bank-page") && frontend.includes("设置题库题"), "frontend exposes question bank management and category-based paper selection");
+  assert(frontend.includes("自动均衡") && frontend.includes("手动分配") && frontend.includes("分类题量不足时由 AI 补齐"), "question-bank picker exposes simple category allocation and shortage behavior");
+  assert(frontend.includes("['易', '中', '难', '混合']") && !frontend.includes("试卷分类"), "paper difficulty is ordered low to high and paper classification is removed");
   assert(frontend.includes("确认归档") && frontend.includes("确认恢复") && frontend.includes("ElMessageBox.confirm"), "question bank archive and restore require explicit confirmation");
+  assert(frontend.includes("当前解析结果将被新的解析结果替换") && frontend.includes("此操作会立即修改题目的分类归属"), "material reparsing and destructive bulk category changes describe their impact before confirmation");
+  assert(frontend.includes("deletingPaperId") && frontend.includes("删除后无法恢复"), "paper deletion exposes irreversible impact and blocks duplicate submission");
+  assert(frontend.includes("mobile-category-actions"), "question-bank category actions remain available on mobile");
+  assert(
+    [
+      "requestCloseAdminUserEditor",
+      "requestCloseMaterialEditor",
+      "requestCloseQuestionBankEditor",
+      "requestCloseQuestionBankCategoryEditor",
+    ].every((name) => frontend.includes(name)),
+    "user, material, question-bank item, and category editors protect unsaved changes",
+  );
   assert(frontend.includes("未分类") && frontend.includes("多分类题目") && frontend.includes("批量设置分类"), "question bank frontend exposes category tree and bulk classification");
-  assert(frontend.includes("当前题目入库") && frontend.includes("整卷入库") && frontend.includes("加入题库"), "editing and paper detail surfaces can explicitly add questions to the bank");
+  assert(frontend.includes("当前试卷全部题目入库") && frontend.includes("全部题目入库") && frontend.includes("加入题库"), "editing and paper detail surfaces accurately describe adding questions to the bank");
+  assert(frontend.includes("显示名称") && frontend.includes("末级分类") && frontend.includes("AI 生成题") && !/用户名|叶子分类|AI 独立题|迷惑项/.test(frontend), "frontend uses the approved display-name, category, and AI-question glossary");
+  assert(frontend.includes("没有符合当前条件的试卷") && frontend.includes("没有符合当前条件的题目") && frontend.includes("没有符合当前条件的资料") && frontend.includes("没有符合当前条件的用户"), "list pages distinguish empty data from filtered no-results states");
+  assert(backend.includes("publicAiErrorMessage") && backend.includes("服务暂时不可用，请稍后重试") && !backend.includes('error: "Question Not Found"') && !backend.includes('error: "Paper Not Found"'), "backend returns safe Chinese messages for AI, server, paper, and question errors");
   assert(backend.includes("questionContentHash") && backend.includes("questionBankUsageMap") && backend.includes("resolveGenerationQuestionBank"), "backend implements question deduplication, usage relations, and unified bank-question generation");
-  assert(backend.includes("questionBankCategories") && backend.includes("validateActiveLeafCategories") && backend.includes("categorySnapshotForId"), "backend implements hierarchical bank categories and paper category snapshots");
+  assert(backend.includes("questionBankCategories") && backend.includes("validateActiveLeafCategories") && backend.includes("questionBankRequestedCount"), "backend implements hierarchical bank categories and category-based sampling");
 
   const blockedDashboard = await getJson("/api/dashboard", { expectedStatus: 401 });
-  assert(blockedDashboard.error.includes("运营控制台"), "dashboard requires admin login");
+  assert(blockedDashboard.error.includes("内容管理控制台"), "dashboard requires admin login");
   const blockedProfile = await putJson("/api/admin/profile", { displayName: "unauthorized" }, { expectedStatus: 401 });
-  assert(blockedProfile.error.includes("运营控制台"), "profile updates require admin login");
+  assert(blockedProfile.error.includes("内容管理控制台"), "profile updates require admin login");
   const blockedAvatarReset = await requestJson("/api/admin/profile/avatar", { method: "DELETE", expectedStatus: 401 });
-  assert(blockedAvatarReset.error.includes("运营控制台"), "avatar reset requires admin login");
+  assert(blockedAvatarReset.error.includes("内容管理控制台"), "avatar reset requires admin login");
   const blockedUsers = await getJson("/api/admin/users", { expectedStatus: 401 });
-  assert(blockedUsers.error.includes("运营控制台"), "user management requires login");
+  assert(blockedUsers.error.includes("内容管理控制台"), "user management requires login");
   const oversizedLogin = await postJson("/api/admin/login", { username: "x".repeat(140 * 1024), password: "x" }, { expectedStatus: 413 });
   assert(oversizedLogin.error.includes("请求体过大"), "oversized JSON is rejected");
 
@@ -307,8 +336,13 @@ try {
   ];
   for (const [method, path] of retiredEndpoints) {
     const result = await requestJson(path, { method, headers: adminHeaders, body: method === "POST" ? {} : undefined, expectedStatus: 404 });
-    assert(result.error === "Not Found", `${method} ${path} is retired`);
+    assert(result.error === "请求的接口不存在", `${method} ${path} is retired`);
   }
+
+  const missingPaper = await getJson("/api/papers/missing-paper", { headers: adminHeaders, expectedStatus: 404 });
+  assert(missingPaper.error.includes("试卷不存在"), "missing papers return actionable Chinese errors");
+  const missingQuestion = await postJson("/api/questions/missing-question/ai-transform", { operation: "regenerate" }, { headers: adminHeaders, expectedStatus: 404 });
+  assert(missingQuestion.error.includes("题目不存在"), "missing questions return actionable Chinese errors");
 
   const freshDashboard = await getJson("/api/dashboard", { headers: adminHeaders });
   assert(freshDashboard.questions.length === 0 && freshDashboard.papers.length === 0, "fresh dashboard starts without content");
@@ -322,15 +356,15 @@ try {
   const backendCategory = backendCategories.items.find((item) => item.name === "后端基础");
   const categoryTree = await getJson("/api/question-bank/categories", { headers: contentUserHeaders });
   assert(categoryTree.tree[0].children.length === 2 && categoryTree.items.every((item) => item.depth <= 3), "question bank categories expose a sorted tree with bounded depth");
-  const missingCategoryGeneration = await postJson("/api/ai/generate-questions", {
+  const unclassifiedPaperGeneration = await postJson("/api/ai/generate-questions", {
     paperName: "无分类试卷",
     direction: "分类校验",
     typeCounts: { judge: 1 },
     typeScores: { judge: 2 },
     sourcePlan: {},
   }, { headers: contentUserHeaders, expectedStatus: 202 });
-  const missingCategoryJob = await waitForGenerationJob(missingCategoryGeneration.id, contentUserHeaders);
-  assert(missingCategoryJob.status === "error" && missingCategoryJob.error.includes("分类"), "generation rejects papers without an active leaf category");
+  const unclassifiedPaperJob = await waitForGenerationJob(unclassifiedPaperGeneration.id, contentUserHeaders);
+  assert(unclassifiedPaperJob.status === "done" && !("categoryId" in unclassifiedPaperJob.result.spec), "generation succeeds without paper classification");
 
   const manualBankQuestion = await postJson("/api/question-bank", {
     type: "判断",
@@ -375,6 +409,43 @@ try {
   const restoredBankQuestion = await postJson(`/api/question-bank/${manualBankQuestion.id}/restore`, {}, { headers: contentUserHeaders });
   assert(restoredBankQuestion.status === "已校验", "restoring a bank question makes it immediately available again");
 
+  const backendBankQuestion = await postJson("/api/question-bank", {
+    type: "单选",
+    stem: "JavaScript 中用于声明不可重新赋值绑定的关键字是？",
+    options: ["const", "var", "with", "delete"],
+    answer: "A",
+    defaultScore: 2,
+    difficulty: "易",
+    knowledge: ["JavaScript"],
+    categoryIds: [backendCategory.id],
+  }, { headers: contentUserHeaders, expectedStatus: 201 });
+  const categoryCoverage = await getJson("/api/question-bank/categories", { headers: contentUserHeaders });
+  assert(categoryCoverage.items.find((item) => item.id === frontendCategory.id)?.typeCounts?.["判断"] === 1, "category summaries expose type coverage for simple configuration");
+  const balancedPreview = await postJson("/api/question-bank/selection-preview", {
+    sourcePlan: { questionBankRequestedCount: 2, questionBankCategoryIds: [frontendCategory.id, backendCategory.id], questionBankAllocationMode: "balanced" },
+    spec: { typeCounts: { single: 1, judge: 1 } },
+  }, { headers: contentUserHeaders });
+  assert(balancedPreview.selectedCount === 2 && balancedPreview.allocations.every((item) => item.count === 1), "balanced category allocation selects the requested bank count");
+  const manualPreview = await postJson("/api/question-bank/selection-preview", {
+    sourcePlan: {
+      questionBankRequestedCount: 1,
+      questionBankCategoryIds: [frontendCategory.id, backendCategory.id],
+      questionBankAllocationMode: "manual",
+      questionBankAllocations: [{ categoryId: frontendCategory.id, count: 0 }, { categoryId: backendCategory.id, count: 1 }],
+    },
+    spec: { typeCounts: { single: 1, judge: 1 } },
+  }, { headers: contentUserHeaders });
+  assert(manualPreview.selectedCount === 1 && manualPreview.selectedTypeCounts["单选"] === 1, "manual category allocation honors per-category counts");
+  const shortageGeneration = await generateQuestionsAsync({
+    paperName: "题库不足自动补题",
+    direction: "JavaScript",
+    difficulty: "中",
+    typeCounts: { single: 1, judge: 1, blank: 1 },
+    typeScores: { single: 2, judge: 2, blank: 2 },
+    sourcePlan: { questionBankRequestedCount: 3, questionBankCategoryIds: [frontendCategory.id, backendCategory.id], questionBankAllocationMode: "balanced" },
+  }, contentUserHeaders);
+  assert(shortageGeneration.spec.sourcePlan.questionBankCount === 2 && shortageGeneration.spec.sourcePlan.questionBankShortfall === 1 && shortageGeneration.spec.sourcePlan.aiQuestionCount === 1, "AI fills category or type shortages without blocking generation");
+
   const materialOne = await postJson("/api/materials", {
     name: "JavaScript 基础规范",
     description: "用于验证资料题生成",
@@ -399,7 +470,6 @@ try {
   assert(materialList.total === 2, "material list returns created sources");
 
   const combinedSpec = {
-    categoryId: frontendCategory.id,
     paperName: "三类题源组合测评",
     direction: "JavaScript 工程实践",
     difficulty: "中",
@@ -427,7 +497,6 @@ try {
   assert(combinedPreviewDashboard.questions.length === 0, "three-source preview does not mutate the active authoring draft");
 
   const generationSpec = {
-    categoryId: frontendCategory.id,
     paperName: "核心能力测评",
     direction: "JavaScript 工程实践",
     difficulty: "中",
@@ -518,7 +587,7 @@ try {
   const paperDetail = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
   const publishedPaperAQuestions = JSON.stringify(paperDetail.questions);
   assert(paperDetail.questions.length === 4 && paperDetail.status === "已发布", "paper detail returns the published snapshot");
-  assert(paperDetail.categoryId === frontendCategory.id && paperDetail.categorySnapshot.path.map((item) => item.name).join(" / ") === "专业能力 / 前端基础", "paper snapshot freezes its leaf category path");
+  assert(!("categoryId" in paperDetail) && !("categorySnapshot" in paperDetail), "paper snapshots no longer expose paper classification");
   assert(paperDetail.sourcePlanSnapshot.materialQuestionCount === 2 && paperDetail.sourcePlanSnapshot.materials.length === 2, "paper snapshot preserves source allocation and material versions");
   const usages = await getJson(`/api/materials/${materialOne.id}/usages`, { headers: contentUserHeaders });
   assert(usages.items.some((item) => item.paperId === paper.id && item.questionCount >= 1), "material usage links back to published papers");
@@ -529,33 +598,32 @@ try {
   const activated = await postJson(`/api/papers/${paper.id}/activate`, {}, { headers: contentUserHeaders });
   assert(activated.id === paper.id, "paper can be activated as current");
 
-  const importedPaperA = await postJson("/api/question-bank/import", { paperId: paper.id }, { headers: contentUserHeaders });
+  await postJson("/api/question-bank/import", { paperId: paper.id }, { headers: contentUserHeaders, expectedStatus: 400 });
+  const importedPaperA = await postJson("/api/question-bank/import", { paperId: paper.id, categoryId: frontendCategory.id }, { headers: contentUserHeaders });
   assert(importedPaperA.created === 4 && importedPaperA.reused === 0, "first paper import creates unique bank questions");
   const bankAfterPaperA = await getJson("/api/question-bank?page=1&pageSize=20", { headers: contentUserHeaders });
-  assert(bankAfterPaperA.total === 5, "manual and paper questions coexist in the bank");
+  assert(bankAfterPaperA.total === 6, "manual, sampled, and paper questions coexist in the bank");
   const frontendBank = await getJson(`/api/question-bank?categoryId=${encodeURIComponent(frontendCategory.id)}&page=1&pageSize=20`, { headers: contentUserHeaders });
   assert(frontendBank.total === 5 && frontendBank.items.every((item) => item.categoryIds.includes(frontendCategory.id)), "question bank list filters by the selected category subtree");
 
   await patchJson(`/api/question-bank/categories/${frontendCategory.id}`, { name: "前端工程" }, { headers: contentUserHeaders });
   const renamedPaperDetail = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
-  assert(renamedPaperDetail.categorySnapshot.path.at(-1).name === "前端基础", "renaming a category does not rewrite published paper snapshots");
+  assert(!("categoryId" in renamedPaperDetail), "renaming a question-bank category does not add classification back to papers");
 
-  const secondSpec = { ...generated.spec, categoryId: backendCategory.id, paperName: "核心能力测评 B 卷" };
+  const secondSpec = { ...generated.spec, paperName: "核心能力测评 B 卷" };
   await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: secondSpec }, { headers: contentUserHeaders });
   const paperB = await postJson("/api/papers/publish", {}, { headers: contentUserHeaders });
   assert(paperB.id !== paper.id && paperB.status === "已发布", "a second paper with the same questions is saved independently");
   const paperAAfterCreatingB = await getJson(`/api/papers/${paper.id}`, { headers: contentUserHeaders });
   assert(JSON.stringify(paperAAfterCreatingB.questions) === publishedPaperAQuestions && paperAAfterCreatingB.status === "已发布", "creating paper B does not overwrite the active paper A snapshot");
-  const importedPaperB = await postJson("/api/question-bank/import", { paperId: paperB.id }, { headers: contentUserHeaders });
+  const importedPaperB = await postJson("/api/question-bank/import", { paperId: paperB.id, categoryId: backendCategory.id }, { headers: contentUserHeaders });
   assert(importedPaperB.created === 0 && importedPaperB.reused === 4, "same questions from paper B reuse paper A bank records");
   const bankAfterPaperB = await getJson("/api/question-bank?page=1&pageSize=20", { headers: contentUserHeaders });
-  assert(bankAfterPaperB.total === 5, "paper B duplicate import does not create extra bank records");
-  const sharedBankQuestion = bankAfterPaperB.items.find((item) => item.id !== manualBankQuestion.id);
+  assert(bankAfterPaperB.total === 6, "paper B duplicate import does not create extra bank records");
+  const sharedBankQuestion = bankAfterPaperB.items.find((item) => item.sourceCount > 0 && item.id !== manualBankQuestion.id && item.id !== backendBankQuestion.id);
   const sharedDetail = await getJson(`/api/question-bank/${sharedBankQuestion.id}`, { headers: contentUserHeaders });
   assert(sharedDetail.usages.some((item) => item.paperId === paper.id) && sharedDetail.usages.some((item) => item.paperId === paperB.id), "one bank question records both A and B paper sources");
   assert(sharedDetail.categoryIds.includes(frontendCategory.id) && sharedDetail.categoryIds.includes(backendCategory.id), "duplicate imports reuse one bank record and merge category memberships");
-
-  await postJson("/api/authoring/questions/import", { questionBankIds: [manualBankQuestion.id] }, { headers: contentUserHeaders, expectedStatus: 400 });
 
   const manualVersionBeforeCategoryChange = (await getJson(`/api/question-bank/${manualBankQuestion.id}`, { headers: contentUserHeaders })).version;
   const bulkCategories = await postJson("/api/question-bank/categories/bulk", {
@@ -615,7 +683,7 @@ try {
   );
   await postJson(`/api/papers/${paperB.id}/activate`, {}, { headers: contentUserHeaders });
 
-  const adminSpec = { ...generated.spec, categoryId: backendCategory.id, paperName: "管理员独立试卷" };
+  const adminSpec = { ...generated.spec, paperName: "管理员独立试卷" };
   await postJson("/api/ai/save-question-draft", { questions: generated.questions, spec: adminSpec }, { headers: adminHeaders });
   const adminPaper = await postJson("/api/papers/build", {}, { headers: adminHeaders });
   const adminDashboard = await getJson("/api/dashboard", { headers: adminHeaders });

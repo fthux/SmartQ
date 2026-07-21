@@ -16,11 +16,11 @@ export async function request(path, options = {}) {
   let response;
   try {
     response = await fetch(publicUrl(path), { ...fetchOptions, headers });
-  } catch (error) {
-    throw new Error(`网络请求失败：${error.message || "请检查服务是否可用"}`);
+  } catch {
+    throw new Error("网络连接失败，请检查网络或稍后重试");
   }
   if (!response.ok) {
-    let message = `${path} ${response.status}`;
+    let message = response.status >= 500 ? "服务暂时不可用，请稍后重试" : "请求失败，请稍后重试";
     let payload = null;
     try {
       payload = await response.json();

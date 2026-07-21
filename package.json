@@ -1,7 +1,7 @@
 {
   "name": "smartq",
   "version": "0.1.0",
-  "description": "SmartQ MVP exam and assessment platform",
+  "description": "SmartQ AI authoring and paper management console",
   "private": true,
   "type": "module",
   "scripts": {

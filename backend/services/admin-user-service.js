@@ -314,8 +314,8 @@ function validateUsername(username) {
 }
 
 function validateDisplayName(displayName) {
-  if (!displayName) return "请输入用户名";
-  if (displayName.length > 32) return "用户名不能超过 32 个字符";
+  if (!displayName) return "请输入显示名称";
+  if (displayName.length > 32) return "显示名称不能超过 32 个字符";
   return "";
 }
 

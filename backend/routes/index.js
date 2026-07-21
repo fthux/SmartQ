@@ -36,5 +36,5 @@ export async function handleApi(req, res, url) {
   if (await handleMaterialRoutes(req, res, url, state, auth)) return;
   if (await handleAuthoringRoutes(req, res, url, state, auth)) return;
   if (await handlePaperRoutes(req, res, url, state, auth)) return;
-  sendJson(res, 404, { error: "Not Found" });
+  sendJson(res, 404, { error: "请求的接口不存在" });
 }

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { generateQuestions } from "../lib/ai.js";
+import { generateQuestions, publicAiErrorMessage } from "../lib/ai.js";
 import { loadState } from "../lib/runtime-store.js";
 import { resolveGenerationMaterials } from "./material-service.js";
 import { resolveGenerationQuestionBank } from "./question-bank-service.js";
@@ -44,6 +44,7 @@ async function runGenerationJob(job, spec) {
     const result = await generateQuestions(spec, {
       questionBankQuestions: questionBank.questions,
       questionBankItems: questionBank.items,
+      questionBankSelection: questionBank.selection,
       materialSources,
       onProgress: (progress, stage) => updateGenerationJob(job, { progress, stage }),
     });
@@ -54,11 +55,12 @@ async function runGenerationJob(job, spec) {
       result: { ...result, saved: false, message: "试卷已组合完成，确认后保存并进入试卷编辑。" },
     });
   } catch (error) {
+    console.error("SmartQ generation job failed", error);
     updateGenerationJob(job, {
       status: "error",
       progress: 100,
       stage: "生成失败",
-      error: error.message || "AI 出题失败",
+      error: publicAiErrorMessage(error, "AI 出题服务暂时不可用，请稍后重试或联系系统管理员"),
     });
   }
 }

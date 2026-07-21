@@ -1,66 +1,110 @@
 <script setup>
-import { Search } from "@element-plus/icons-vue";
-import { computed, nextTick, ref, watch } from "vue";
+import { Collection, Search } from "@element-plus/icons-vue";
+import { computed, watch } from "vue";
 import { useSmartQ } from "../stores/context.js";
 
-const {
-  state,
-  addSelectedQuestionBankToAuthoring,
-  applyQuestionBankPickerFilters,
-  changeQuestionBankPickerPage,
-  setQuestionBankPickerSelection,
-} = useSmartQ();
+const { state, totalQuestionCount, addSelectedQuestionBankToAuthoring } = useSmartQ();
 
-const questionTypes = ["单选", "多选", "判断", "填空", "简答", "论述"];
-const tableRef = ref(null);
-let restoringSelection = false;
-const categoryPath = computed(() => {
-  const category = state.questionBankManagement.categories.find((item) => item.id === state.spec.categoryId);
-  return category?.path?.map((item) => item.name).join(" / ") || "未选择分类";
+const picker = computed(() => state.questionBankManagement.picker);
+const leafCategories = computed(() => {
+  const keyword = picker.value.search.trim().toLowerCase();
+  return state.questionBankManagement.categories.filter((item) => {
+    if (item.status !== "active" || !item.isLeaf) return false;
+    const path = (item.path || []).map((part) => part.name).join(" / ");
+    return !keyword || path.toLowerCase().includes(keyword);
+  });
 });
+const selectedTotal = computed(() => picker.value.allocations.reduce((sum, item) => sum + Number(item.count || 0), 0));
 
 watch([
-  () => state.questionBankManagement.picker.open,
-  () => state.questionBankManagement.picker.items,
-], async ([open]) => {
-  if (!open) return;
-  restoringSelection = true;
-  await nextTick();
-  const selectedIds = new Set((state.questionBankManagement.picker.selection || []).map((item) => item.id));
-  tableRef.value?.clearSelection();
-  (state.questionBankManagement.picker.items || []).forEach((item) => {
-    if (selectedIds.has(item.id)) tableRef.value?.toggleRowSelection(item, true);
-  });
-  await nextTick();
-  restoringSelection = false;
-}, { deep: true });
+  () => picker.value.categoryIds,
+  () => picker.value.requestedCount,
+  () => picker.value.allocationMode,
+], syncAllocations, { deep: true });
 
-function handleSelectionChange(rows) {
-  if (!restoringSelection) setQuestionBankPickerSelection(rows);
+function categoryPath(category) {
+  return (category.path || []).map((item) => item.name).join(" / ") || category.name;
+}
+
+function typeCoverage(category) {
+  return Object.entries(category.typeCounts || {})
+    .filter(([, count]) => Number(count) > 0)
+    .map(([type, count]) => `${type} ${count} 题`)
+    .join(" · ") || "暂无可用题目";
+}
+
+function isSelected(id) {
+  return picker.value.categoryIds.includes(id);
+}
+
+function toggleCategory(category, selected) {
+  const ids = new Set(picker.value.categoryIds);
+  if (selected) ids.add(category.id);
+  else ids.delete(category.id);
+  picker.value.categoryIds = [...ids];
+  picker.value.error = "";
+}
+
+function allocationFor(categoryId) {
+  return picker.value.allocations.find((item) => item.categoryId === categoryId);
+}
+
+function syncAllocations() {
+  const ids = picker.value.categoryIds;
+  const requested = Math.max(0, Number(picker.value.requestedCount || 0));
+  const previous = new Map(picker.value.allocations.map((item) => [item.categoryId, Number(item.count || 0)]));
+  if (!ids.length) {
+    picker.value.allocations = [];
+    return;
+  }
+  if (picker.value.allocationMode === "manual") {
+    picker.value.allocations = ids.map((categoryId) => ({ categoryId, count: previous.get(categoryId) || 0 }));
+    return;
+  }
+  const base = Math.floor(requested / ids.length);
+  let remainder = requested % ids.length;
+  picker.value.allocations = ids.map((categoryId) => ({ categoryId, count: base + (remainder-- > 0 ? 1 : 0) }));
 }
 </script>
 
 <template>
-  <el-dialog v-model="state.questionBankManagement.picker.open" title="从题库选择题目" width="min(900px, calc(100vw - 24px))" top="4vh" append-to-body destroy-on-close>
-    <el-alert :title="`当前试卷分类：${categoryPath}`" type="info" show-icon :closable="false" class="mb-4" />
-    <div class="grid gap-3 border-b border-slate-200 pb-4 md:grid-cols-[minmax(240px,1fr)_140px_130px_auto] dark:border-night-border">
-      <el-input v-model="state.questionBankManagement.picker.search" clearable :prefix-icon="Search" placeholder="搜索题干、知识点或编号" @keyup.enter="applyQuestionBankPickerFilters" @clear="applyQuestionBankPickerFilters" />
-      <el-select v-model="state.questionBankManagement.picker.type" clearable placeholder="全部题型" @change="applyQuestionBankPickerFilters"><el-option v-for="type in questionTypes" :key="type" :label="type" :value="type" /></el-select>
-      <el-select v-model="state.questionBankManagement.picker.difficulty" clearable placeholder="全部难度" @change="applyQuestionBankPickerFilters"><el-option v-for="difficulty in ['易','中','难','混合']" :key="difficulty" :label="difficulty" :value="difficulty" /></el-select>
-      <el-button type="primary" :icon="Search" @click="applyQuestionBankPickerFilters">查询</el-button>
+  <el-dialog v-model="picker.open" title="设置题库题" width="min(920px, calc(100vw - 24px))" top="4vh" append-to-body destroy-on-close :close-on-click-modal="false">
+    <div class="grid gap-3 border-b border-slate-200 pb-4 sm:grid-cols-[minmax(0,1fr)_180px] dark:border-night-border">
+      <el-input v-model="picker.search" clearable :prefix-icon="Search" placeholder="搜索题库分类" />
+      <el-input-number v-model="picker.requestedCount" :min="0" :max="totalQuestionCount" controls-position="right" class="w-full" aria-label="题库题数量" />
     </div>
-    <el-alert v-if="state.questionBankManagement.picker.error" class="mt-4" :title="state.questionBankManagement.picker.error" type="error" show-icon :closable="false" />
-    <el-table ref="tableRef" v-loading="state.questionBankManagement.picker.loading" :data="state.questionBankManagement.picker.items" row-key="id" class="mt-4" max-height="480" empty-text="暂无可用题目" @selection-change="handleSelectionChange">
-      <el-table-column type="selection" width="48" />
-      <el-table-column prop="type" label="题型" width="78" />
-      <el-table-column prop="stem" label="题干" min-width="320" show-overflow-tooltip />
-      <el-table-column prop="difficulty" label="难度" width="68" />
-      <el-table-column label="分类" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ (row.categories || []).map((item) => item.path.map((part) => part.name).join(' / ')).join('、') }}</template></el-table-column>
-      <el-table-column label="知识点" min-width="130" show-overflow-tooltip><template #default="{ row }">{{ (row.knowledge || []).join('、') || '未设置' }}</template></el-table-column>
-      <el-table-column label="分值" width="68" align="right"><template #default="{ row }">{{ row.defaultScore }}</template></el-table-column>
-      <el-table-column label="使用" width="76" align="right"><template #default="{ row }">{{ row.paperUsageCount }} 卷</template></el-table-column>
-    </el-table>
-    <div class="mt-4 flex justify-end"><el-pagination :current-page="state.questionBankManagement.picker.page" :page-size="state.questionBankManagement.picker.pageSize" :total="state.questionBankManagement.picker.total" layout="total, prev, pager, next" background @current-change="changeQuestionBankPickerPage" /></div>
-    <template #footer><div class="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center"><span class="text-xs font-semibold text-slate-500">已选择 {{ state.questionBankManagement.picker.selection.length }} 道，翻页后选择仍会保留</span><div class="flex justify-end"><el-button @click="state.questionBankManagement.picker.open = false">取消</el-button><el-button type="primary" @click="addSelectedQuestionBankToAuthoring">确认选择</el-button></div></div></template>
+
+    <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <div class="text-sm font-black">选择题库分类</div>
+        <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">系统按题型目标自动抽题；分类题量不足时由 AI 补齐，不会阻断出题。</div>
+      </div>
+      <el-segmented v-model="picker.allocationMode" :options="[{ label: '自动均衡', value: 'balanced' }, { label: '手动分配', value: 'manual' }]" aria-label="分类题量分配方式" />
+    </div>
+
+    <el-alert v-if="picker.error" class="mt-3" :title="picker.error" type="error" show-icon :closable="false" />
+
+    <div class="mt-3 overflow-hidden rounded border border-slate-200 dark:border-night-border">
+      <div class="grid grid-cols-[44px_minmax(0,1fr)_92px] items-center gap-3 bg-slate-50 px-3 py-2 text-xs font-black text-slate-500 sm:grid-cols-[44px_minmax(0,1fr)_minmax(180px,0.7fr)_92px] dark:bg-night-elevated dark:text-slate-300">
+        <span></span><span>分类与可用题量</span><span class="hidden sm:block">题型覆盖</span><span class="text-right">抽题数</span>
+      </div>
+      <div class="max-h-[430px] divide-y divide-slate-100 overflow-y-auto dark:divide-night-border">
+        <div v-for="category in leafCategories" :key="category.id" class="grid grid-cols-[44px_minmax(0,1fr)_92px] items-center gap-3 px-3 py-3 hover:bg-slate-50 sm:grid-cols-[44px_minmax(0,1fr)_minmax(180px,0.7fr)_92px] dark:hover:bg-night-elevated">
+          <el-checkbox :model-value="isSelected(category.id)" :aria-label="`选择${categoryPath(category)}`" @change="(value) => toggleCategory(category, value)" />
+          <span class="min-w-0"><strong class="block truncate text-sm">{{ categoryPath(category) }}</strong><span class="mt-1 block text-xs font-semibold text-slate-400">可用 {{ category.count || 0 }} 题</span></span>
+          <span class="hidden min-w-0 truncate text-xs font-semibold text-slate-500 sm:block dark:text-slate-400">{{ typeCoverage(category) }}</span>
+          <el-input-number v-if="isSelected(category.id)" :model-value="allocationFor(category.id)?.count || 0" :disabled="picker.allocationMode === 'balanced'" :min="0" :max="picker.requestedCount" controls-position="right" size="small" class="w-[92px]" @click.prevent @update:model-value="(value) => allocationFor(category.id).count = value" />
+          <span v-else class="text-right text-xs font-semibold text-slate-300">-</span>
+        </div>
+        <el-empty v-if="!leafCategories.length" :image-size="72" :description="picker.search ? '没有符合当前条件的分类' : '还没有可用的末级分类'" />
+      </div>
+    </div>
+
+    <template #footer>
+      <div class="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
+        <span class="flex items-center gap-2 text-xs font-semibold text-slate-500"><el-icon><Collection /></el-icon>已选 {{ picker.categoryIds.length }} 个分类，计划 {{ selectedTotal }} 题，目标 {{ picker.requestedCount }} 题</span>
+        <div class="flex justify-end"><el-button @click="picker.open = false">取消</el-button><el-button type="primary" @click="addSelectedQuestionBankToAuthoring">应用设置</el-button></div>
+      </div>
+    </template>
   </el-dialog>
 </template>

@@ -23,7 +23,7 @@ const {
   totalQuestionCount,
   computedSpecTotalScore,
   selectedSourceMaterials,
-  selectedQuestionBankItems,
+  selectedQuestionBankCategories,
   questionBankQuestionCount,
   materialQuestionCount,
   aiQuestionCount,
@@ -36,8 +36,7 @@ const {
   saveDraft,
   openQuestionEditor,
   openQuestionBankPicker,
-  changeAuthoringCategory,
-  removeSelectedQuestionBankItem,
+  clearQuestionBankPlan,
   addCurrentQuestionsToBank,
   saveCurrentPaper,
   publishPaper,
@@ -54,11 +53,7 @@ const editType = ref("all");
 const selectedQuestionId = ref("");
 const materialSearch = ref("");
 const categoryLeafOptions = computed(() => state.questionBankManagement.categories.filter((item) => item.status === "active" && item.isLeaf));
-const selectedCategoryPath = computed(() => {
-  const id = activeSpec.value?.categoryId || state.spec.categoryId;
-  const category = state.questionBankManagement.categories.find((item) => item.id === id);
-  return category?.path?.map((item) => item.name).join(" / ") || "未选择";
-});
+const selectedQuestionBankCategoryPaths = computed(() => selectedQuestionBankCategories.value.map((category) => category.path?.map((item) => item.name).join(" / ") || category.name));
 
 const currentStep = computed(() => workflowSteps.value.find((item) => item.key === state.activeWorkflowStep) || workflowSteps.value[0]);
 const activeQuestions = computed(() => state.generatedDraft?.questions?.length ? state.generatedDraft.questions : authoringQuestions.value);
@@ -69,7 +64,8 @@ const activeSpec = computed(() => state.generatedDraft?.spec
 const activeSourcePlan = computed(() => activeSpec.value?.sourcePlan || {
   questionBankIds: state.spec.questionBankIds,
   questionBankCount: questionBankQuestionCount.value,
-  questionBankItems: selectedQuestionBankItems.value,
+  questionBankRequestedCount: state.spec.questionBankRequestedCount,
+  questionBankCategoryIds: state.spec.questionBankCategoryIds,
   materialIds: state.spec.materialIds,
   materialQuestionCount: materialQuestionCount.value,
   aiQuestionCount: aiQuestionCount.value,
@@ -92,8 +88,8 @@ const overviewQuestionSources = computed(() => ({
   material: activeQuestions.value.filter((item) => item.origin?.type === "material").length,
   ai: activeQuestions.value.filter((item) => !["question-bank", "material"].includes(item.origin?.type)).length,
 }));
-const sourceAllocationError = computed(() => questionBankQuestionCount.value > totalQuestionCount.value
-  ? `题库题已选择 ${questionBankQuestionCount.value} 道，超过试卷总题数 ${totalQuestionCount.value} 道`
+const sourceAllocationError = computed(() => questionBankQuestionCount.value > 0 && !state.spec.questionBankCategoryIds.length && !state.spec.questionBankIds.length
+  ? "请为题库题选择至少一个分类"
   : "");
 const overviewPaperName = computed(() => activePaper.value.name || activeSpec.value?.paperName || state.spec.paperName || "未命名试卷");
 const overviewKnowledge = computed(() => {
@@ -138,6 +134,11 @@ function workflowButtonType(step) {
   return "";
 }
 
+function clearEditFilters() {
+  editSearch.value = "";
+  editType.value = "all";
+}
+
 function workflowTagType(step) {
   if (step.status === "done") return "success";
   if (step.status === "active") return "primary";
@@ -163,7 +164,7 @@ function questionKnowledge(question) {
 
 function questionSourceLabel(question) {
   if (question?.origin?.type === "question-bank") return `题库 · ${question.origin.bankQuestionId || "已入库"} · v${question.origin.bankVersion || 1}`;
-  if (question?.origin?.type !== "material") return "AI 独立";
+  if (question?.origin?.type !== "material") return "AI 生成";
   const names = [...new Set((question.origin.materialRefs || []).map((item) => item.name).filter(Boolean))];
   return names.join("、") || "资料题";
 }
@@ -172,7 +173,7 @@ function sourcePlanLabel(plan = {}) {
   const sources = [];
   if (Number(plan.questionBankCount || plan.questionBankIds?.length || 0) > 0) sources.push("题库题");
   if (Number(plan.materialQuestionCount || 0) > 0) sources.push("资料题");
-  if (Number(plan.aiQuestionCount ?? 0) > 0 || !sources.length) sources.push("AI 独立题");
+  if (Number(plan.aiQuestionCount ?? 0) > 0 || !sources.length) sources.push("AI 生成题");
   return sources.join(" + ");
 }
 
@@ -199,7 +200,7 @@ function editPublishIssue(issue) {
       <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2 text-xs font-bold text-ocean">
-            <span>{{ state.dashboard.exam.title }}</span>
+            <span>智能命题工作台</span>
             <el-tag v-if="state.authoringPaperId" type="primary" size="small">编辑试卷</el-tag>
             <el-tag v-else type="success" size="small">新建试卷</el-tag>
           </div>
@@ -246,7 +247,7 @@ function editPublishIssue(issue) {
                 </div>
               </div>
               <div class="flex flex-wrap items-center gap-2">
-                <el-tag :type="formLocked ? 'info' : 'success'" effect="plain">{{ state.spec.difficulty || '中' }}等难度</el-tag>
+                <el-tag :type="formLocked ? 'info' : 'success'" effect="plain">难度：{{ state.spec.difficulty || '中' }}</el-tag>
               </div>
             </div>
 
@@ -259,30 +260,25 @@ function editPublishIssue(issue) {
               <el-alert v-if="state.generationError" class="mt-2" :title="state.generationError" type="error" :closable="false" show-icon />
             </div>
 
-            <div class="mt-4 grid gap-x-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.2fr_140px]">
-              <el-form-item label="试卷分类" :error="state.specFormErrors.categoryId">
-                <el-select :model-value="state.spec.categoryId" :disabled="formLocked" filterable placeholder="选择叶子分类" class="w-full" @change="changeAuthoringCategory">
-                  <el-option v-for="category in categoryLeafOptions" :key="category.id" :label="category.path.map((item) => item.name).join(' / ')" :value="category.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="考卷名称" :error="state.specFormErrors.paperName">
-                <el-input v-model="state.spec.paperName" :disabled="formLocked" placeholder="请输入考卷名称" />
+            <div class="mt-4 grid gap-x-4 md:grid-cols-2 xl:grid-cols-[1fr_1.2fr_140px]">
+              <el-form-item label="试卷名称" :error="state.specFormErrors.paperName">
+                <el-input v-model="state.spec.paperName" :disabled="formLocked" maxlength="80" show-word-limit placeholder="请输入试卷名称" />
               </el-form-item>
               <el-form-item label="出题方向" :error="state.specFormErrors.direction">
-                <el-input v-model="state.spec.direction" :disabled="formLocked" placeholder="请输入出题方向" />
+                <el-input v-model="state.spec.direction" :disabled="formLocked" maxlength="120" show-word-limit placeholder="例如：JavaScript 工程实践" />
               </el-form-item>
               <el-form-item label="难度">
                 <el-select v-model="state.spec.difficulty" :disabled="formLocked" class="w-full">
-                  <el-option v-for="value in ['中', '易', '难', '混合']" :key="value" :label="value" :value="value" />
+                  <el-option v-for="value in ['易', '中', '难', '混合']" :key="value" :label="value" :value="value" />
                 </el-select>
               </el-form-item>
             </div>
             <div class="grid gap-x-4 md:grid-cols-2">
               <el-form-item label="知识点范围">
-                <el-input v-model="state.spec.knowledge" :disabled="formLocked" type="textarea" :rows="1" resize="none" placeholder="多个知识点使用逗号分隔" />
+                <el-input v-model="state.spec.knowledge" :disabled="formLocked" type="textarea" :rows="1" resize="none" maxlength="500" show-word-limit placeholder="多个知识点使用逗号分隔" />
               </el-form-item>
               <el-form-item label="补充要求">
-                <el-input v-model="state.spec.requirements" :disabled="formLocked" type="textarea" :rows="1" resize="none" placeholder="输入命题约束或内容要求" />
+                <el-input v-model="state.spec.requirements" :disabled="formLocked" type="textarea" :rows="1" resize="none" maxlength="1000" show-word-limit placeholder="输入命题约束或内容要求，可选" />
               </el-form-item>
             </div>
           </section>
@@ -333,20 +329,19 @@ function editPublishIssue(issue) {
               <div class="source-allocation-row">
                 <div class="source-allocation-name">
                   <el-icon class="text-ocean"><Collection /></el-icon>
-                  <div><strong>题库题</strong><span>从已校验题库中选择具体题目</span></div>
+                  <div><strong>题库题</strong><span>按分类和数量自动抽取，题型不足由 AI 补齐</span></div>
                 </div>
                 <div class="source-allocation-content">
-                  <div v-if="selectedQuestionBankItems.length" class="flex flex-wrap gap-2">
-                    <el-tag v-for="item in selectedQuestionBankItems" :key="item.id" :closable="!formLocked" :disable-transitions="true" @close="removeSelectedQuestionBankItem(item.id)">
-                      {{ item.type ? `${item.type} · ` : '' }}{{ item.id }}<template v-if="item.version"> · v{{ item.version }}</template>
-                    </el-tag>
+                  <div v-if="selectedQuestionBankCategoryPaths.length" class="flex flex-wrap gap-2">
+                    <el-tag v-for="path in selectedQuestionBankCategoryPaths" :key="path">{{ path }}</el-tag>
                   </div>
-                  <span v-else class="source-empty">未选择，默认由 AI 补足</span>
+                  <span v-else class="source-empty">未配置，全部题目由资料或 AI 生成</span>
                   <div v-if="state.specFormErrors.questionBankIds || sourceAllocationError" class="mt-2 text-xs font-bold text-coral">{{ state.specFormErrors.questionBankIds || sourceAllocationError }}</div>
                 </div>
                 <div class="source-allocation-actions">
                   <strong>{{ questionBankQuestionCount }} 题</strong>
-                  <el-button :icon="Collection" :disabled="formLocked" @click="openQuestionBankPicker">选择题目</el-button>
+                  <el-button :icon="Collection" :disabled="formLocked" @click="openQuestionBankPicker">设置题库题</el-button>
+                  <el-button v-if="questionBankQuestionCount" link type="danger" :disabled="formLocked" @click="clearQuestionBankPlan">清空</el-button>
                 </div>
               </div>
 
@@ -380,7 +375,7 @@ function editPublishIssue(issue) {
               <div class="source-allocation-row">
                 <div class="source-allocation-name">
                   <el-icon class="text-iris"><MagicStick /></el-icon>
-                  <div><strong>AI 独立题</strong><span>自动补齐剩余题型和数量</span></div>
+                  <div><strong>AI 生成题</strong><span>不引用题库或资料，按命题要求自动补齐</span></div>
                 </div>
                 <div class="source-allocation-content">
                   <span class="source-empty">无需设置，将根据前两类题目自动计算</span>
@@ -433,7 +428,10 @@ function editPublishIssue(issue) {
               <div class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{{ authoringQuestions.length }} 道题 · 题库 {{ overviewQuestionSources.bank }} · 资料 {{ overviewQuestionSources.material }} · AI {{ overviewQuestionSources.ai }}</div>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2">
-              <el-button type="success" plain :loading="state.questionBankManagement.importingCurrent" :disabled="!authoringQuestions.length" @click="addCurrentQuestionsToBank">当前题目入库</el-button>
+              <el-select v-model="state.questionBankManagement.paperImportCategoryId" filterable placeholder="选择题目入库分类" class="w-56">
+                <el-option v-for="category in categoryLeafOptions" :key="category.id" :label="category.path.map((item) => item.name).join(' / ')" :value="category.id" />
+              </el-select>
+              <el-button type="success" plain :loading="state.questionBankManagement.importingCurrent" :disabled="!authoringQuestions.length" @click="addCurrentQuestionsToBank">当前试卷全部题目入库</el-button>
             </div>
           </div>
 
@@ -452,9 +450,13 @@ function editPublishIssue(issue) {
             size="small"
             highlight-current-row
             :row-class-name="editRowClass"
-            empty-text="暂无匹配题目"
             @row-click="selectQuestion"
           >
+            <template #empty>
+              <el-empty :description="editSearch || editType !== 'all' ? '没有符合当前条件的题目' : '当前试卷还没有题目'">
+                <el-button v-if="editSearch || editType !== 'all'" @click="clearEditFilters">清空筛选</el-button>
+              </el-empty>
+            </template>
             <el-table-column type="index" label="#" width="52" />
             <el-table-column label="题型" width="82"><template #default="{ row }"><el-tag :type="questionTagType(row.type)" size="small" effect="plain">{{ row.type }}</el-tag></template></el-table-column>
             <el-table-column label="来源" min-width="150" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.origin?.type === 'material' ? 'success' : row.origin?.type === 'question-bank' ? 'primary' : 'info'" size="small" effect="plain">{{ questionSourceLabel(row) }}</el-tag></template></el-table-column>
@@ -462,7 +464,7 @@ function editPublishIssue(issue) {
             <el-table-column prop="difficulty" label="难度" width="64" />
             <el-table-column label="答案" min-width="100" show-overflow-tooltip><template #default="{ row }">{{ formatAnswer(row) }}</template></el-table-column>
             <el-table-column prop="score" label="分值" width="64" align="right" />
-            <el-table-column prop="quality" label="质量" width="64" align="right" />
+            <el-table-column prop="quality" label="质量分" width="72" align="right" />
             <el-table-column label="操作" fixed="right" width="88">
               <template #default="{ row }">
                 <el-button link type="primary" :icon="Edit" @click.stop="openQuestionEditor(row)">编辑</el-button>
@@ -487,12 +489,12 @@ function editPublishIssue(issue) {
             <div><span>发布检查</span><strong class="text-ocean">发布时自动执行</strong></div>
             <div><span>题库题</span><strong>{{ overviewQuestionSources.bank }} 题</strong></div>
             <div><span>资料题</span><strong>{{ overviewQuestionSources.material }} 题</strong></div>
-            <div><span>AI 独立题</span><strong>{{ overviewQuestionSources.ai }} 题</strong></div>
+            <div><span>AI 生成题</span><strong>{{ overviewQuestionSources.ai }} 题</strong></div>
           </div>
 
           <div v-if="state.publishQualityFailures.length" class="mt-4">
             <el-alert
-              :title="`发布已终止，共发现 ${state.publishQualityFailures.length} 个问题`"
+              :title="`暂未发布，共发现 ${state.publishQualityFailures.length} 个问题`"
               description="请逐项修改对应题目，然后再次发布。"
               type="error"
               :closable="false"
@@ -502,7 +504,7 @@ function editPublishIssue(issue) {
               <el-table-column label="题号" width="72"><template #default="{ row }">第 {{ row.questionNumber || row.index + 1 }} 题</template></el-table-column>
               <el-table-column label="题型" width="82"><template #default="{ row }"><el-tag :type="questionTagType(row.type)" size="small">{{ row.type || '未知' }}</el-tag></template></el-table-column>
               <el-table-column prop="stem" label="题干" min-width="220" show-overflow-tooltip />
-              <el-table-column label="问题字段" width="96"><template #default="{ row }">{{ publishIssueFieldLabel(row.field) }}</template></el-table-column>
+              <el-table-column label="需修改项" width="96"><template #default="{ row }">{{ publishIssueFieldLabel(row.field) }}</template></el-table-column>
               <el-table-column prop="message" label="问题说明" min-width="220" />
               <el-table-column label="操作" fixed="right" width="82">
                 <template #default="{ row }"><el-button link type="primary" :icon="Edit" @click="editPublishIssue(row)">修改</el-button></template>
@@ -528,7 +530,6 @@ function editPublishIssue(issue) {
 
           <dl class="summary-details mt-4">
             <div><dt>出题方向</dt><dd>{{ activeSpec?.direction || state.spec.direction || '未设置' }}</dd></div>
-            <div><dt>试卷分类</dt><dd>{{ selectedCategoryPath }}</dd></div>
             <div><dt>知识点</dt><dd>{{ overviewKnowledge }}</dd></div>
             <div><dt>题目来源</dt><dd>{{ sourcePlanLabel(activeSourcePlan) }}</dd></div>
             <div v-if="activeSourceMaterials.length"><dt>使用资料</dt><dd>{{ activeSourceMaterials.map((item) => `${item.name} v${item.version}`).join('、') }}</dd></div>
@@ -579,12 +580,18 @@ function editPublishIssue(issue) {
       </aside>
     </div>
 
-    <el-dialog v-model="state.materialManagement.selectorOpen" title="选择出题资料" width="780px" top="6vh" append-to-body>
+    <el-dialog v-model="state.materialManagement.selectorOpen" title="选择出题资料" width="min(780px, calc(100vw - 24px))" top="6vh" append-to-body :close-on-click-modal="false">
       <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
         <el-input v-model="materialSearch" clearable :prefix-icon="Search" placeholder="搜索资料名称、标签或文件名" />
         <el-button text type="primary" :icon="FolderOpened" @click="manageMaterialsFromAuthoring">管理出题资料</el-button>
       </div>
-      <el-table v-loading="state.materialManagement.optionsLoading" :data="filteredMaterialOptions" class="mt-4" max-height="440" empty-text="暂无可用资料">
+      <el-table v-loading="state.materialManagement.optionsLoading" :data="filteredMaterialOptions" class="mt-4" max-height="440">
+        <template #empty>
+          <el-empty :description="materialSearch ? '没有符合当前条件的资料' : '还没有可用的出题资料'">
+            <el-button v-if="materialSearch" @click="materialSearch = ''">清空搜索</el-button>
+            <el-button v-else type="primary" :icon="FolderOpened" @click="manageMaterialsFromAuthoring">管理出题资料</el-button>
+          </el-empty>
+        </template>
         <el-table-column width="52">
           <template #default="{ row }"><el-checkbox :model-value="state.spec.materialIds.includes(row.id)" :aria-label="`选择${row.name}`" @change="toggleMaterialSelection(row.id)" /></template>
         </el-table-column>
@@ -610,7 +617,7 @@ function editPublishIssue(issue) {
           <template v-if="visibleWorkflowStep === 'config' && state.generatedDraft?.questions?.length">生成结果等待确认</template>
           <template v-else-if="visibleWorkflowStep === 'config'">{{ totalQuestionCount }} 题 = 题库 {{ questionBankQuestionCount }} + 资料 {{ materialQuestionCount }} + AI {{ aiQuestionCount }}</template>
           <template v-else-if="visibleWorkflowStep === 'edit'">可继续编辑题目，或保存后进入发布</template>
-          <template v-else>{{ state.publishQualityFailures.length ? `请先修正 ${state.publishQualityFailures.length} 个发布问题` : '发布时将自动保存并执行完整检查' }}</template>
+          <template v-else>{{ state.publishQualityFailures.length ? `请先修正 ${state.publishQualityFailures.length} 个问题` : '发布时将自动保存并执行完整检查' }}</template>
         </div>
       </div>
       <div class="action-buttons">
@@ -618,7 +625,7 @@ function editPublishIssue(issue) {
           <el-button v-if="formLocked && !state.generating" :icon="RefreshRight" @click="regenerate">重新生成</el-button>
           <el-button v-if="state.generatedDraft?.questions?.length" :icon="Delete" :disabled="state.saving" @click="discardDraft">丢弃</el-button>
           <el-button v-if="state.generatedDraft?.questions?.length" type="primary" :icon="Check" :loading="state.saving" @click="saveDraft">确认并保存</el-button>
-          <el-button v-else-if="!formLocked" type="primary" :icon="MagicStick" :loading="state.generating" @click="generateDraft">生成并组合试卷</el-button>
+          <el-button v-else-if="!formLocked" type="primary" :icon="MagicStick" :loading="state.generating" @click="generateDraft">生成试卷预览</el-button>
         </template>
         <template v-else-if="visibleWorkflowStep === 'edit'">
           <el-button :loading="state.saving" @click="saveCurrentPaper">保存试卷</el-button>

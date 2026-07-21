@@ -17,7 +17,6 @@ export const paperTypeConfig = [
 ];
 
 export const defaultSpec = {
-  categoryId: "",
   paperName: "",
   direction: "",
   difficulty: "中",
@@ -38,6 +37,10 @@ export const defaultSpec = {
   sourceMode: "ai-only",
   questionBankIds: [],
   questionBankItems: [],
+  questionBankRequestedCount: 0,
+  questionBankCategoryIds: [],
+  questionBankAllocationMode: "balanced",
+  questionBankAllocations: [],
   materialIds: [],
   materialQuestionCount: 0,
   coverageStrategy: "balanced",

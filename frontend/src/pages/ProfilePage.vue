@@ -46,12 +46,12 @@ function updateAdminDisplayName(value) {
         </div>
 
         <div class="min-w-0">
-          <el-form-item label="用户名" :error="state.profile.error">
+          <el-form-item label="显示名称" :error="state.profile.error">
             <el-input
               :model-value="state.profile.displayName"
               :maxlength="maxAdminDisplayNameLength"
               show-word-limit
-              placeholder="请输入用户名"
+              placeholder="请输入显示名称"
               @update:model-value="updateAdminDisplayName"
             />
           </el-form-item>
@@ -72,13 +72,13 @@ function updateAdminDisplayName(value) {
       <el-form class="mt-5 max-w-xl" label-position="top" @submit.prevent="changeAdminPassword">
         <el-alert v-if="state.password.error" class="mb-4" :title="state.password.error" type="error" :closable="false" show-icon />
         <el-form-item label="当前密码">
-          <el-input v-model="state.password.currentPassword" type="password" show-password autocomplete="current-password" />
+          <el-input v-model="state.password.currentPassword" type="password" show-password autocomplete="current-password" placeholder="请输入当前登录密码" />
         </el-form-item>
         <el-form-item label="新密码">
           <el-input v-model="state.password.newPassword" type="password" show-password autocomplete="new-password" placeholder="至少 8 位，同时包含字母和数字" />
         </el-form-item>
         <el-form-item label="确认新密码">
-          <el-input v-model="state.password.confirmPassword" type="password" show-password autocomplete="new-password" />
+          <el-input v-model="state.password.confirmPassword" type="password" show-password autocomplete="new-password" placeholder="请再次输入新密码" />
         </el-form-item>
         <div class="flex justify-end border-t border-slate-200 pt-4 dark:border-night-border">
           <el-button type="primary" native-type="submit" :loading="state.password.saving">更新密码</el-button>

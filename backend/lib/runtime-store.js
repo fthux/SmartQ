@@ -470,9 +470,7 @@ function normalizeState(input) {
     questionIds: Array.isArray(input.paper?.questionIds) ? input.paper.questionIds : [],
     buildSpec: input.paper?.buildSpec || null,
     sourcePlanSnapshot: input.paper?.sourcePlanSnapshot || input.paper?.buildSpec?.sourcePlanSnapshot || null,
-    generationSpecSnapshot: input.paper?.generationSpecSnapshot || null,
-    categoryId: String(input.paper?.categoryId || ""),
-    categorySnapshot: normalizeCategorySnapshot(input.paper?.categorySnapshot),
+    generationSpecSnapshot: stripPaperCategory(input.paper?.generationSpecSnapshot),
   };
   const hasRetiredRuntimeData = retiredRuntimeKeys.some((key) => Object.prototype.hasOwnProperty.call(input, key));
   const hasPendingQuestionBankItems = Array.isArray(input.questionBank) && input.questionBank.some((item) => item?.status === "待确认");
@@ -498,7 +496,16 @@ function normalizeState(input) {
   normalized.questionBank.forEach((item) => {
     item.categoryIds = normalizeCategoryIds(item.categoryIds).filter((id) => knownCategoryIds.has(id));
   });
-  if (hasRetiredRuntimeData || hasPendingQuestionBankItems || auditLog.length !== sourceAuditLog.length) normalizedStateNeedsSave = true;
+  const hasPaperCategories = Boolean(
+    input.paper?.categoryId || input.paper?.categorySnapshot || input.generationTask?.categoryId
+      || (input.papers || []).some((item) => item?.categoryId || item?.categorySnapshot || item?.generationSpecSnapshot?.categoryId)
+      || Object.values(input.authoringWorkspaces || {}).some((workspace) => workspace?.paper?.categoryId || workspace?.paper?.categorySnapshot || workspace?.generationTask?.categoryId),
+  );
+  if (hasRetiredRuntimeData || hasPendingQuestionBankItems || hasPaperCategories || auditLog.length !== sourceAuditLog.length) normalizedStateNeedsSave = true;
+  normalized.generationTask = stripPaperCategory(normalized.generationTask);
+  Object.values(normalized.authoringWorkspaces || {}).forEach((workspace) => {
+    workspace.generationTask = stripPaperCategory(workspace.generationTask);
+  });
   return stripLegacyQuestionSeed(normalized);
 }
 
@@ -600,9 +607,7 @@ function normalizePaperSnapshot(item) {
     questions: Array.isArray(item.questions) ? item.questions : [],
     buildSpec: item.buildSpec || null,
     sourcePlanSnapshot: item.sourcePlanSnapshot || item.buildSpec?.sourcePlanSnapshot || null,
-    generationSpecSnapshot: item.generationSpecSnapshot || null,
-    categoryId: String(item.categoryId || ""),
-    categorySnapshot: normalizeCategorySnapshot(item.categorySnapshot),
+    generationSpecSnapshot: stripPaperCategory(item.generationSpecSnapshot),
     publishedAt: item.publishedAt || null,
     createdAt: item.createdAt || item.buildSpec?.builtAt || new Date().toISOString(),
     updatedAt: item.updatedAt || item.publishedAt || item.createdAt || item.buildSpec?.builtAt || new Date().toISOString(),
@@ -625,22 +630,15 @@ function normalizePublishedPaperVersion(item) {
     questions: Array.isArray(item.questions) ? item.questions : [],
     buildSpec: item.buildSpec || null,
     sourcePlanSnapshot: item.sourcePlanSnapshot || item.buildSpec?.sourcePlanSnapshot || null,
-    generationSpecSnapshot: item.generationSpecSnapshot || null,
-    categoryId: String(item.categoryId || ""),
-    categorySnapshot: normalizeCategorySnapshot(item.categorySnapshot),
+    generationSpecSnapshot: stripPaperCategory(item.generationSpecSnapshot),
     publishedAt: item.publishedAt,
     createdAt: item.createdAt || item.publishedAt,
     updatedAt: item.updatedAt || item.publishedAt,
   };
 }
 
-function normalizeCategorySnapshot(value) {
-  if (!value || typeof value !== "object" || !value.id) return null;
-  return {
-    id: String(value.id),
-    name: String(value.name || ""),
-    path: Array.isArray(value.path)
-      ? value.path.map((item) => ({ id: String(item?.id || ""), name: String(item?.name || "") })).filter((item) => item.id)
-      : [],
-  };
+function stripPaperCategory(value) {
+  if (!value || typeof value !== "object") return value || null;
+  const { categoryId: _categoryId, categorySnapshot: _categorySnapshot, ...rest } = value;
+  return rest;
 }

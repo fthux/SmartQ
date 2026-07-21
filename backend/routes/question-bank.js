@@ -4,6 +4,7 @@ import {
   getQuestionBankDetail,
   importQuestionsToBank,
   listQuestionBank,
+  previewGenerationQuestionBank,
   setQuestionBankArchived,
   updateQuestionBankItem,
 } from "../services/question-bank-service.js";
@@ -56,6 +57,11 @@ export async function handleQuestionBankRoutes(req, res, url, state, auth) {
     const result = await importQuestionsToBank(await readJson(req), actor, userId);
     if (!result) sendJson(res, 404, { error: "试卷不存在" });
     else sendJson(res, 200, result);
+    return true;
+  }
+  if (req.method === "POST" && url.pathname === "/api/question-bank/selection-preview") {
+    const body = await readJson(req);
+    sendJson(res, 200, previewGenerationQuestionBank(state, body.sourcePlan, body.spec));
     return true;
   }
   const actionMatch = url.pathname.match(/^\/api\/question-bank\/([^/]+)\/(archive|restore)$/);

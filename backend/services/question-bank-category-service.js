@@ -24,7 +24,12 @@ export function listQuestionBankCategories(state) {
   const rows = categories.map((item) => {
     const descendants = categoryDescendantIds(state, item.id);
     const directCount = activeQuestions.filter((question) => question.categoryIds?.includes(item.id)).length;
-    const count = activeQuestions.filter((question) => question.categoryIds?.some((id) => descendants.has(id))).length;
+    const categoryQuestions = activeQuestions.filter((question) => question.categoryIds?.some((id) => descendants.has(id)));
+    const count = categoryQuestions.length;
+    const typeCounts = categoryQuestions.reduce((result, question) => {
+      result[question.type] = (result[question.type] || 0) + 1;
+      return result;
+    }, {});
     return {
       ...item,
       depth: categoryDepth(state, item.id),
@@ -32,6 +37,7 @@ export function listQuestionBankCategories(state) {
       path: categoryPath(state, item.id),
       directCount,
       count,
+      typeCounts,
     };
   });
   const rowMap = new Map(rows.map((item) => [item.id, item]));
@@ -158,7 +164,7 @@ export function validateActiveLeafCategories(state, categoryIds, required = fals
   const ids = normalizeCategoryIds(categoryIds);
   if (required && !ids.length) throw badRequest("请选择至少一个题库分类");
   const invalid = ids.find((id) => !activeLeafCategory(state, id));
-  if (invalid) throw badRequest(`分类 ${invalid} 不存在、已归档或不是叶子分类`);
+  if (invalid) throw badRequest(`分类 ${invalid} 不存在、已归档或不是末级分类`);
   return ids;
 }
 

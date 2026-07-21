@@ -22,7 +22,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
       if (model.status) params.set("status", model.status);
       if (model.type) params.set("type", model.type);
       if (model.difficulty) params.set("difficulty", model.difficulty);
-      const categoryId = target === "picker" ? String(state.spec.categoryId || "") : String(management.selectedCategoryId || "all");
+      const categoryId = String(management.selectedCategoryId || "all");
       if (categoryId) params.set("categoryId", categoryId);
       const result = await request(`/api/question-bank?${params}`);
       model.items = result.items || [];
@@ -81,6 +81,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     state.questionBankManagement.editorMode = "create";
     state.questionBankManagement.editingId = null;
     state.questionBankManagement.form = emptyQuestionBankForm();
+    state.questionBankManagement.formInitial = questionBankFormFingerprint(state.questionBankManagement.form);
     state.questionBankManagement.formError = "";
   }
 
@@ -117,6 +118,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
         tagsText: (item.tags || []).join("，"),
         categoryIds: [...(item.categoryIds || [])],
       };
+      management.formInitial = questionBankFormFingerprint(management.form);
       management.formError = "";
       management.editorOpen = true;
     } catch (error) {
@@ -150,6 +152,25 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     } finally {
       management.saving = false;
     }
+  }
+
+  async function requestCloseQuestionBankEditor(done) {
+    const management = state.questionBankManagement;
+    if (management.saving) return;
+    if (questionBankFormFingerprint(management.form) !== management.formInitial) {
+      try {
+        await ElMessageBox.confirm("当前题库题目尚未保存，关闭后修改会丢失。", "放弃未保存修改", {
+          confirmButtonText: "放弃修改",
+          cancelButtonText: "继续编辑",
+          type: "warning",
+        });
+      } catch (error) {
+        if (error === "cancel" || error === "close") return;
+        throw error;
+      }
+    }
+    if (typeof done === "function") done();
+    else management.editorOpen = false;
   }
 
   async function openQuestionBankDetail(row) {
@@ -208,11 +229,16 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
       return;
     }
     const management = state.questionBankManagement;
+    const categoryId = String(management.paperImportCategoryId || "");
+    if (!categoryId) {
+      notify("请先选择题目入库分类");
+      return;
+    }
     management.importingCurrent = true;
     try {
       const result = await request("/api/question-bank/import", {
         method: "POST",
-        body: JSON.stringify({ questionIds: currentQuestions.map((item) => item.id) }),
+        body: JSON.stringify({ questionIds: currentQuestions.map((item) => item.id), categoryId }),
       });
       notify(importResultMessage(result));
       if (state.route === "question-bank") await loadQuestionBank();
@@ -227,9 +253,9 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
   async function addPaperQuestionsToBank(paper, questionIds = []) {
     if (!paper?.id) return;
     const management = state.questionBankManagement;
-    const categoryId = String(paper.categoryId || management.paperImportCategoryId || "");
+    const categoryId = String(management.paperImportCategoryId || "");
     if (!categoryId) {
-      notify("该历史试卷没有分类，请先选择入库分类");
+      notify("请先选择题目入库分类");
       return;
     }
     management.importingPaperId = paper.id;
@@ -249,67 +275,68 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
   }
 
   function openQuestionBankPicker() {
-    if (!state.spec.categoryId) {
-      notify("请先选择试卷分类，再从题库选择题目");
-      return;
-    }
     const picker = state.questionBankManagement.picker;
     picker.open = true;
-    picker.page = 1;
-    const selectedItems = Array.isArray(state.spec.questionBankItems) ? state.spec.questionBankItems : [];
-    const selectedById = new Map(selectedItems.map((item) => [item.id, { ...item }]));
-    (state.spec.questionBankIds || []).forEach((id) => {
-      if (!selectedById.has(id)) selectedById.set(id, { id });
-    });
-    picker.selection = [...selectedById.values()];
-    picker.status = "已校验";
-    picker.categoryId = state.spec.categoryId;
-    loadQuestionBank("picker");
-  }
-
-  function changeAuthoringCategory(categoryId) {
-    const nextId = String(categoryId || "");
-    const hadSelection = (state.spec.questionBankIds || []).length > 0;
-    state.spec.categoryId = nextId;
-    state.spec.questionBankIds = [];
-    state.spec.questionBankItems = [];
-    state.questionBankManagement.picker.selection = [];
-    state.specFormErrors.categoryId = "";
-    state.specFormErrors.questionBankIds = "";
-    if (hadSelection) notify("试卷分类已变更，原先选择的题库题已清空");
-  }
-
-  function applyQuestionBankPickerFilters() {
-    state.questionBankManagement.picker.page = 1;
-    loadQuestionBank("picker");
-  }
-
-  function changeQuestionBankPickerPage(page) {
-    state.questionBankManagement.picker.page = page;
-    loadQuestionBank("picker");
-  }
-
-  function setQuestionBankPickerSelection(rows) {
-    const picker = state.questionBankManagement.picker;
-    const pageIds = new Set((picker.items || []).map((item) => item.id));
-    const retained = (picker.selection || []).filter((item) => !pageIds.has(item.id));
-    const merged = new Map([...retained, ...(rows || [])].map((item) => [item.id, item]));
-    picker.selection = [...merged.values()];
+    picker.search = "";
+    picker.error = "";
+    picker.categoryIds = [...(state.spec.questionBankCategoryIds || [])];
+    picker.requestedCount = Number(state.spec.questionBankRequestedCount || 0);
+    picker.allocationMode = state.spec.questionBankAllocationMode === "manual" ? "manual" : "balanced";
+    picker.allocations = (state.spec.questionBankAllocations || []).map((item) => ({ ...item }));
   }
 
   function addSelectedQuestionBankToAuthoring() {
     const picker = state.questionBankManagement.picker;
-    const selected = (picker.selection || []).filter((item) => item?.id).map((item) => ({ ...item }));
-    state.spec.questionBankIds = selected.map((item) => item.id);
-    state.spec.questionBankItems = selected;
+    const requestedCount = clampNumber(picker.requestedCount, 0, 100, 0);
+    const categoryIds = [...new Set((picker.categoryIds || []).map(String).filter(Boolean))];
+    if (requestedCount > 0 && !categoryIds.length) {
+      picker.error = "请选择至少一个题库分类";
+      return;
+    }
+    const allocationMode = picker.allocationMode === "manual" ? "manual" : "balanced";
+    const allocations = categoryIds.map((categoryId) => ({
+      categoryId,
+      count: clampNumber((picker.allocations || []).find((item) => item.categoryId === categoryId)?.count, 0, requestedCount, 0),
+    }));
+    if (allocationMode === "manual" && allocations.reduce((sum, item) => sum + item.count, 0) !== requestedCount) {
+      picker.error = `手动分配题量合计应为 ${requestedCount} 道`;
+      return;
+    }
+    state.spec.questionBankIds = [];
+    state.spec.questionBankItems = [];
+    state.spec.questionBankRequestedCount = requestedCount;
+    state.spec.questionBankCategoryIds = requestedCount > 0 ? categoryIds : [];
+    state.spec.questionBankAllocationMode = allocationMode;
+    state.spec.questionBankAllocations = requestedCount > 0 ? allocations : [];
     picker.open = false;
     state.specFormErrors.questionBankIds = "";
-    notify(selected.length ? `已选择 ${selected.length} 道题库题` : "已清空题库题选择");
+    notify(requestedCount ? `已设置从 ${categoryIds.length} 个分类抽取 ${requestedCount} 道题库题` : "已清空题库题配置");
   }
 
   function removeSelectedQuestionBankItem(id) {
     state.spec.questionBankIds = (state.spec.questionBankIds || []).filter((itemId) => itemId !== id);
     state.spec.questionBankItems = (state.spec.questionBankItems || []).filter((item) => item.id !== id);
+    state.specFormErrors.questionBankIds = "";
+  }
+
+  async function clearQuestionBankPlan() {
+    if (Number(state.spec.questionBankRequestedCount || 0) > 0) {
+      try {
+        await ElMessageBox.confirm("清空后已选择的题库分类、题量和分配设置都会移除。确认清空题库题配置？", "清空题库题配置", {
+          confirmButtonText: "确认清空",
+          cancelButtonText: "取消",
+          type: "warning",
+        });
+      } catch (error) {
+        if (error === "cancel" || error === "close") return;
+        throw error;
+      }
+    }
+    state.spec.questionBankIds = [];
+    state.spec.questionBankItems = [];
+    state.spec.questionBankRequestedCount = 0;
+    state.spec.questionBankCategoryIds = [];
+    state.spec.questionBankAllocations = [];
     state.specFormErrors.questionBankIds = "";
   }
 
@@ -322,6 +349,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     management.categoryEditorMode = "create";
     management.categoryEditingId = "";
     management.categoryForm = { name: "", parentId: String(parentId || ""), sortOrder: 0 };
+    management.categoryFormInitial = questionBankFormFingerprint(management.categoryForm);
     management.categoryFormError = "";
     management.categoryEditorOpen = true;
   }
@@ -331,6 +359,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     management.categoryEditorMode = "edit";
     management.categoryEditingId = category.id;
     management.categoryForm = { name: category.name, parentId: category.parentId || "", sortOrder: Number(category.sortOrder || 0) };
+    management.categoryFormInitial = questionBankFormFingerprint(management.categoryForm);
     management.categoryFormError = "";
     management.categoryEditorOpen = true;
   }
@@ -361,15 +390,47 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     }
   }
 
+  async function requestCloseQuestionBankCategoryEditor(done) {
+    const management = state.questionBankManagement;
+    if (management.categorySaving) return;
+    if (questionBankFormFingerprint(management.categoryForm) !== management.categoryFormInitial) {
+      try {
+        await ElMessageBox.confirm("当前分类信息尚未保存，关闭后修改会丢失。", "放弃未保存修改", {
+          confirmButtonText: "放弃修改",
+          cancelButtonText: "继续编辑",
+          type: "warning",
+        });
+      } catch (error) {
+        if (error === "cancel" || error === "close") return;
+        throw error;
+      }
+    }
+    if (typeof done === "function") done();
+    else management.categoryEditorOpen = false;
+  }
+
   async function runQuestionBankCategoryAction(category, action) {
     const management = state.questionBankManagement;
-    management.categoryActionId = category.id;
+    const archiving = action === "archive";
     try {
+      await ElMessageBox.confirm(
+        archiving
+          ? `确认归档分类“${category.name}”及其子分类？归档后这些分类不能用于新的题库抽题。`
+          : `确认恢复分类“${category.name}”及其子分类？恢复后其中的末级分类将重新可选。`,
+        archiving ? "归档题库分类" : "恢复题库分类",
+        {
+          confirmButtonText: archiving ? "确认归档" : "确认恢复",
+          cancelButtonText: "取消",
+          type: archiving ? "warning" : "info",
+        },
+      );
+      management.categoryActionId = category.id;
       await request(`/api/question-bank/categories/${encodeURIComponent(category.id)}/${action}`, { method: "POST", body: JSON.stringify({}) });
       await loadQuestionBankCategories();
       await loadQuestionBank();
       notify(action === "archive" ? "分类及其子分类已归档" : "分类及其子分类已恢复");
     } catch (error) {
+      if (error === "cancel" || error === "close") return;
       notify(`${action === "archive" ? "归档" : "恢复"}分类失败：${error.message}`);
     } finally {
       management.categoryActionId = "";
@@ -397,6 +458,18 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     management.bulkSaving = true;
     management.bulkError = "";
     try {
+      if (["remove", "replace"].includes(management.bulkMode)) {
+        const actionLabel = management.bulkMode === "replace" ? "替换" : "移除";
+        await ElMessageBox.confirm(
+          `确认对已选择的 ${management.selectedRows.length} 道题${actionLabel}分类？此操作会立即修改题目的分类归属。`,
+          `批量${actionLabel}分类`,
+          {
+            confirmButtonText: `确认${actionLabel}`,
+            cancelButtonText: "取消",
+            type: "warning",
+          },
+        );
+      }
       const result = await request("/api/question-bank/categories/bulk", {
         method: "POST",
         body: JSON.stringify({
@@ -411,6 +484,7 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
       await loadQuestionBank();
       notify(`已更新 ${result.updated || 0} 道题的分类`);
     } catch (error) {
+      if (error === "cancel" || error === "close") return;
       management.bulkError = error.message;
     } finally {
       management.bulkSaving = false;
@@ -423,11 +497,9 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     addSelectedQuestionBankToAuthoring,
     applyBulkQuestionCategories,
     applyQuestionBankFilters,
-    applyQuestionBankPickerFilters,
-    changeAuthoringCategory,
+    clearQuestionBankPlan,
     changeQuestionBankPage,
     changeQuestionBankPageSize,
-    changeQuestionBankPickerPage,
     loadQuestionBank,
     loadQuestionBankCategories,
     openBulkQuestionCategories,
@@ -437,6 +509,8 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     openEditQuestionBankItem,
     openQuestionBankDetail,
     openQuestionBankPicker,
+    requestCloseQuestionBankCategoryEditor,
+    requestCloseQuestionBankEditor,
     removeSelectedQuestionBankItem,
     runQuestionBankAction,
     runQuestionBankCategoryAction,
@@ -444,7 +518,6 @@ export function createQuestionBankStore({ state, notify, authoringQuestions }) {
     saveQuestionBankItem,
     selectQuestionBankCategory,
     setQuestionBankRows,
-    setQuestionBankPickerSelection,
   };
 }
 
@@ -467,6 +540,10 @@ function emptyQuestionBankForm() {
     tagsText: "",
     categoryIds: [],
   };
+}
+
+function questionBankFormFingerprint(form = {}) {
+  return JSON.stringify(form);
 }
 
 function questionBankFormPayload(form) {

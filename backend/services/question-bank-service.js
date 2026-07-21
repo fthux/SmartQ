@@ -142,7 +142,7 @@ export async function importQuestionsToBank(body = {}, actor = "", userId = "") 
     const paperId = String(body.paperId || "");
     const paper = paperId ? (scopedState.papers || []).find((item) => item.id === paperId) : null;
     if (paperId && !paper) return null;
-    const categoryId = resolveImportCategoryId(scopedState, body, paper);
+    const categoryId = resolveImportCategoryId(scopedState, body);
     const sourceQuestions = paper ? paperSnapshotDetail(paper, scopedState.questions).questions : scopedState.questions;
     const selectedIds = new Set(Array.isArray(body.questionIds) ? body.questionIds.map(String) : []);
     const questions = selectedIds.size ? sourceQuestions.filter((item) => selectedIds.has(String(item.id))) : sourceQuestions;
@@ -194,14 +194,10 @@ export async function importQuestionBankIntoAuthoring(body = {}, actor = "", use
   if (!ids.length) throw badRequest("请选择需要加入试卷的题目");
   return updateState((state) => {
     const scopedState = scopedAuthoringState(state, userId);
-    const categoryId = String(body.categoryId || scopedState.generationTask?.categoryId || scopedState.paper?.categoryId || "");
-    if (!activeLeafCategory(scopedState, categoryId)) throw badRequest("请先为当前试卷选择有效的叶子分类");
     const selected = ids.map((id) => findQuestionBankItem(scopedState, id)).filter(Boolean);
     if (selected.length !== ids.length) throw badRequest("部分题库题目不存在，请刷新后重试");
     const unavailable = selected.find((item) => item.status !== "已校验");
     if (unavailable) throw badRequest(`题库题目 ${unavailable.id} 尚未审核通过或已归档`);
-    const incompatible = selected.find((item) => !(item.categoryIds || []).includes(categoryId));
-    if (incompatible) throw badRequest(`题库题目 ${incompatible.id} 不属于当前试卷分类`);
     const currentBankIds = new Set((scopedState.questions || []).map((item) => item.origin?.bankQuestionId).filter(Boolean));
     const currentHashes = new Set((scopedState.questions || []).map((item) => questionContentHash(item)));
     const added = [];
@@ -222,7 +218,6 @@ export async function importQuestionBankIntoAuthoring(body = {}, actor = "", use
       scopedState.generationTask = buildBankGenerationTask(
         scopedState.questions,
         scopedState.paper?.name || body.paperName || "题库组卷",
-        categoryId,
         scopedState.generationTask,
       );
       if (scopedState.paper?.id) {
@@ -244,18 +239,51 @@ export async function importQuestionBankIntoAuthoring(body = {}, actor = "", use
 }
 
 export function resolveGenerationQuestionBank(state, sourcePlan = {}, spec = {}) {
-  const categoryId = String(spec.categoryId || "");
-  if (!activeLeafCategory(state, categoryId)) throw badRequest("请选择有效的叶子分类后再生成试卷");
   const ids = [...new Set((Array.isArray(sourcePlan.questionBankIds) ? sourcePlan.questionBankIds : []).map(String))].slice(0, 100);
-  if (!ids.length) return { questions: [], items: [] };
-  const selected = ids.map((id) => findQuestionBankItem(state, id)).filter(Boolean);
-  if (selected.length !== ids.length) throw badRequest("部分题库题目不存在，请重新选择");
-  const unavailable = selected.find((item) => item.status !== "已校验");
-  if (unavailable) throw badRequest(`题库题目 ${unavailable.id} 尚未审核通过或已归档`);
-  const incompatible = selected.find((item) => !(item.categoryIds || []).includes(categoryId));
-  if (incompatible) throw badRequest(`题库题目 ${incompatible.id} 不属于当前试卷分类，请重新选择`);
-
   const typeTargets = generationTypeTargets(spec);
+  if (ids.length) {
+    const selected = ids.map((id) => findQuestionBankItem(state, id)).filter(Boolean);
+    if (selected.length !== ids.length) throw badRequest("部分题库题目不存在，请重新选择");
+    const unavailable = selected.find((item) => item.status !== "已校验");
+    if (unavailable) throw badRequest(`题库题目 ${unavailable.id} 已归档，不能用于新的试卷`);
+    validateSelectedTypeCounts(selected, typeTargets);
+    return resolvedQuestionBankSelection(state, selected, spec, {
+      requestedCount: selected.length,
+      allocationMode: "legacy-exact",
+      categoryIds: [...new Set(selected.flatMap((item) => item.categoryIds || []))],
+      allocations: [],
+      availableCount: selected.length,
+    });
+  }
+
+  const requestedCount = clampNumber(sourcePlan.questionBankRequestedCount, 0, 100, 0);
+  if (!requestedCount) return resolvedQuestionBankSelection(state, [], spec, {
+    requestedCount: 0,
+    allocationMode: "balanced",
+    categoryIds: [],
+    allocations: [],
+    availableCount: 0,
+  });
+  const categoryIds = validateActiveLeafCategories(state, sourcePlan.questionBankCategoryIds, true);
+  const allocationMode = sourcePlan.questionBankAllocationMode === "manual" ? "manual" : "balanced";
+  const allocations = normalizeGenerationAllocations(sourcePlan.questionBankAllocations, categoryIds, requestedCount, allocationMode);
+  const categorySet = new Set(categoryIds);
+  const candidates = (state.questionBank || []).filter((item) => item.status === "已校验" && (item.categoryIds || []).some((id) => categorySet.has(id)));
+  const selected = selectQuestionBankCandidates(state, candidates, allocations, typeTargets, requestedCount, allocationMode, spec);
+  return resolvedQuestionBankSelection(state, selected, spec, {
+    requestedCount,
+    allocationMode,
+    categoryIds,
+    allocations,
+    availableCount: candidates.length,
+  });
+}
+
+export function previewGenerationQuestionBank(state, sourcePlan = {}, spec = {}) {
+  return resolveGenerationQuestionBank(state, sourcePlan, spec).selection;
+}
+
+function validateSelectedTypeCounts(selected, typeTargets) {
   const selectedTypeCounts = new Map();
   for (const item of selected) {
     selectedTypeCounts.set(item.type, (selectedTypeCounts.get(item.type) || 0) + 1);
@@ -266,7 +294,10 @@ export function resolveGenerationQuestionBank(state, sourcePlan = {}, spec = {})
       throw badRequest(`${type}目标为 ${targetCount} 道，当前已选择 ${selectedCount} 道题库题，请移除至少 ${selectedCount - targetCount} 道`);
     }
   }
+}
 
+function resolvedQuestionBankSelection(state, selected, spec, plan) {
+  const selectedTypeCounts = Object.fromEntries(questionTypes.map((type) => [type, selected.filter((item) => item.type === type).length]));
   return {
     questions: selected.map((item) => bankItemToAuthoringQuestion(item, generationScoreForType(spec, item.type))),
     items: selected.map((item) => ({
@@ -276,6 +307,97 @@ export function resolveGenerationQuestionBank(state, sourcePlan = {}, spec = {})
       version: Number(item.version || 1),
       categoryIds: [...(item.categoryIds || [])],
     })),
+    selection: {
+      requestedCount: plan.requestedCount,
+      selectedCount: selected.length,
+      shortfall: Math.max(0, plan.requestedCount - selected.length),
+      availableCount: plan.availableCount,
+      allocationMode: plan.allocationMode,
+      categoryIds: [...plan.categoryIds],
+      categories: plan.categoryIds.map((id) => categorySelectionSnapshot(state, id)),
+      allocations: plan.allocations.map((item) => ({ ...item })),
+      selectedTypeCounts,
+    },
+  };
+}
+
+function normalizeGenerationAllocations(input, categoryIds, requestedCount, mode) {
+  if (mode !== "manual") {
+    const base = Math.floor(requestedCount / categoryIds.length);
+    let remainder = requestedCount % categoryIds.length;
+    return categoryIds.map((categoryId) => ({
+      categoryId,
+      count: base + (remainder-- > 0 ? 1 : 0),
+    }));
+  }
+  const inputMap = new Map((Array.isArray(input) ? input : []).map((item) => [String(item?.categoryId || ""), Number(item?.count || 0)]));
+  const allocations = categoryIds.map((categoryId) => ({ categoryId, count: clampNumber(inputMap.get(categoryId), 0, requestedCount, 0) }));
+  const total = allocations.reduce((sum, item) => sum + item.count, 0);
+  if (total !== requestedCount) throw badRequest(`手动分配题量合计应为 ${requestedCount} 道，当前为 ${total} 道`);
+  return allocations;
+}
+
+function selectQuestionBankCandidates(state, candidates, allocations, typeTargets, requestedCount, mode, spec) {
+  const usageMap = questionBankUsageMap(state);
+  const remainingTypes = new Map(typeTargets);
+  const selected = [];
+  const selectedIds = new Set();
+  const comparator = questionBankCandidateComparator(spec, usageMap);
+  const allocationOrder = [...allocations].sort((left, right) => {
+    const leftAvailable = candidates.filter((item) => (item.categoryIds || []).includes(left.categoryId)).length;
+    const rightAvailable = candidates.filter((item) => (item.categoryIds || []).includes(right.categoryId)).length;
+    return leftAvailable - rightAvailable;
+  });
+
+  for (const allocation of allocationOrder) {
+    const available = candidates
+      .filter((item) => !selectedIds.has(item.id) && (item.categoryIds || []).includes(allocation.categoryId) && (remainingTypes.get(item.type) || 0) > 0)
+      .sort(comparator);
+    for (const item of available.slice(0, allocation.count)) {
+      selected.push(item);
+      selectedIds.add(item.id);
+      remainingTypes.set(item.type, Math.max(0, (remainingTypes.get(item.type) || 0) - 1));
+    }
+  }
+
+  if (mode === "balanced" && selected.length < requestedCount) {
+    const fallback = candidates
+      .filter((item) => !selectedIds.has(item.id) && (remainingTypes.get(item.type) || 0) > 0)
+      .sort(comparator);
+    for (const item of fallback) {
+      if (selected.length >= requestedCount) break;
+      selected.push(item);
+      selectedIds.add(item.id);
+      remainingTypes.set(item.type, Math.max(0, (remainingTypes.get(item.type) || 0) - 1));
+    }
+  }
+  return selected;
+}
+
+function questionBankCandidateComparator(spec, usageMap) {
+  const terms = [...new Set([
+    spec.direction,
+    ...(Array.isArray(spec.knowledge) ? spec.knowledge : String(spec.knowledge || "").split(/[,，、\n]/)),
+  ].map((item) => String(item || "").trim().toLowerCase()).filter((item) => item.length > 1))];
+  const matchScore = (item) => {
+    const text = [item.stem, ...(item.knowledge || []), ...(item.tags || [])].join(" ").toLowerCase();
+    return terms.reduce((score, term) => score + (text.includes(term) ? 1 : 0), 0);
+  };
+  return (left, right) => {
+    const scoreDifference = matchScore(right) - matchScore(left);
+    if (scoreDifference) return scoreDifference;
+    const usageDifference = (usageMap.get(left.id)?.size || 0) - (usageMap.get(right.id)?.size || 0);
+    if (usageDifference) return usageDifference;
+    return String(left.id).localeCompare(String(right.id));
+  };
+}
+
+function categorySelectionSnapshot(state, id) {
+  const category = categoryMap(state).get(id);
+  return {
+    id,
+    name: category?.name || id,
+    path: categoryPath(state, id),
   };
 }
 
@@ -350,6 +472,7 @@ function bankItemToAuthoringQuestion(item, score = item.defaultScore) {
       type: "question-bank",
       bankQuestionId: item.id,
       bankVersion: item.version,
+      bankCategoryIds: [...(item.categoryIds || [])],
       sourceType: item.origin?.type || "manual",
       materialRefs: Array.isArray(item.origin?.materialRefs) ? item.origin.materialRefs.map((ref) => ({ ...ref })) : [],
       edited: false,
@@ -374,7 +497,7 @@ function generationScoreForType(spec = {}, type) {
   return clampNumber(scores[apiKeys[type]] ?? scores[type], 1, 200, defaults[type] || 1);
 }
 
-function buildBankGenerationTask(questions, paperName, categoryId, previous = {}) {
+function buildBankGenerationTask(questions, paperName, previous = {}) {
   const apiKeys = { 单选: "single", 多选: "multiple", 判断: "judge", 填空: "blank", 简答: "short", 论述: "essay" };
   const typeMix = questionTypes.map((type) => ({ type, count: questions.filter((item) => item.type === type).length })).filter((item) => item.count);
   const typeCounts = Object.fromEntries(typeMix.map((item) => [apiKeys[item.type], item.count]));
@@ -395,6 +518,9 @@ function buildBankGenerationTask(questions, paperName, categoryId, previous = {}
     questionBankIds: questionBankItems.map((item) => item.id),
     questionBankItems,
     questionBankCount: questionBankItems.length,
+    questionBankRequestedCount: questionBankItems.length,
+    questionBankCategoryIds: [...new Set(questions.flatMap((item) => item.origin?.bankCategoryIds || []))],
+    questionBankAllocationMode: "legacy-exact",
     materialIds,
     materialQuestionCount: materialQuestions.length,
     aiQuestionCount: Math.max(0, questions.length - questionBankItems.length - materialQuestions.length),
@@ -402,7 +528,6 @@ function buildBankGenerationTask(questions, paperName, categoryId, previous = {}
   return {
     ...previous,
     paperName,
-    categoryId,
     direction: previous?.direction || "题库选题",
     difficulty: previous?.difficulty || "混合",
     knowledge: [...new Set(questions.flatMap((item) => item.knowledge || []))],
@@ -449,12 +574,10 @@ function questionBankSummary(item, usages, state) {
   };
 }
 
-function resolveImportCategoryId(state, body, paper) {
-  const categoryId = String(body.categoryId || paper?.categoryId || state.paper?.categoryId || state.generationTask?.categoryId || "");
+function resolveImportCategoryId(state, body) {
+  const categoryId = String(body.categoryId || "");
   if (!activeLeafCategory(state, categoryId)) {
-    throw badRequest(paper?.categoryId || state.paper?.categoryId || state.generationTask?.categoryId
-      ? "试卷分类已归档或不再是叶子分类，请选择新的分类后入库"
-      : "当前试卷没有分类，请先选择叶子分类后再将题目加入题库");
+    throw badRequest("请选择有效的题库末级分类后再将题目加入题库");
   }
   return categoryId;
 }
@@ -478,7 +601,7 @@ function questionBankUsageMap(state) {
       usages.set(source.paperId, {
         paperId: source.paperId,
         paperName: source.paperName || source.paperId,
-        status: (state.papers || []).find((paper) => paper.id === source.paperId)?.status || "历史试卷",
+        status: (state.papers || []).find((paper) => paper.id === source.paperId)?.status || "来源试卷已删除",
         questionCount: 1,
         createdAt: source.addedAt,
         publishedAt: (state.papers || []).find((paper) => paper.id === source.paperId)?.publishedAt || null,

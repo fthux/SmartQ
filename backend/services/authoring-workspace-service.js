@@ -10,8 +10,6 @@ export function emptyAuthoringPaper() {
     buildSpec: null,
     sourcePlanSnapshot: null,
     generationSpecSnapshot: null,
-    categoryId: "",
-    categorySnapshot: null,
   };
 }
 
@@ -28,9 +26,7 @@ export function normalizeAuthoringWorkspace(input = {}) {
       questionIds: Array.isArray(paper.questionIds) ? paper.questionIds : [],
       buildSpec: paper.buildSpec || null,
       sourcePlanSnapshot: paper.sourcePlanSnapshot || paper.buildSpec?.sourcePlanSnapshot || null,
-      generationSpecSnapshot: paper.generationSpecSnapshot || null,
-      categoryId: String(paper.categoryId || ""),
-      categorySnapshot: paper.categorySnapshot || null,
+      generationSpecSnapshot: stripPaperCategory(paper.generationSpecSnapshot),
     },
     generationTask: input?.generationTask && typeof input.generationTask === "object" ? input.generationTask : null,
   };
@@ -100,4 +96,10 @@ function hasLegacyAuthoringData(state = {}) {
       || (Array.isArray(state.paper?.questionIds) && state.paper.questionIds.length)
       || state.generationTask,
   );
+}
+
+function stripPaperCategory(value) {
+  if (!value || typeof value !== "object") return value || null;
+  const { categoryId: _categoryId, categorySnapshot: _categorySnapshot, ...rest } = value;
+  return rest;
 }

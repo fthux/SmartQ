@@ -27,6 +27,8 @@ const {
   openEditQuestionBankCategory,
   openEditQuestionBankItem,
   openQuestionBankDetail,
+  requestCloseQuestionBankCategoryEditor,
+  requestCloseQuestionBankEditor,
   runQuestionBankAction,
   runQuestionBankCategoryAction,
   saveQuestionBankCategory,
@@ -47,6 +49,12 @@ const specialCategoryNodes = computed(() => [
 const categoryTreeData = computed(() => [...specialCategoryNodes.value, ...state.questionBankManagement.categoryTree]);
 const leafCategoryOptions = computed(() => state.questionBankManagement.categories.filter((item) => item.status === "active" && item.isLeaf));
 const bulkCategoryOptions = computed(() => state.questionBankManagement.bulkMode === "remove" ? state.questionBankManagement.categories : leafCategoryOptions.value);
+const hasQuestionBankFilters = computed(() => Boolean(
+  state.questionBankManagement.search
+  || state.questionBankManagement.type
+  || state.questionBankManagement.difficulty
+  || !["", "all"].includes(state.questionBankManagement.selectedCategoryId),
+));
 const categoryParentOptions = computed(() => state.questionBankManagement.categories.filter((item) => {
   if (item.status !== "active" || item.depth >= 3 || item.id === state.questionBankManagement.categoryEditingId) return false;
   return !(item.path || []).some((part) => part.id === state.questionBankManagement.categoryEditingId);
@@ -57,6 +65,13 @@ function categoryPathLabel(category) {
 
 function handleCategoryNodeClick(node) {
   selectQuestionBankCategory(node.id);
+}
+
+function clearQuestionBankFilters() {
+  state.questionBankManagement.search = "";
+  state.questionBankManagement.type = "";
+  state.questionBankManagement.difficulty = "";
+  selectQuestionBankCategory("all");
 }
 
 function originLabel(origin) {
@@ -89,10 +104,10 @@ function formatAnswer(question) {
             <div class="category-tree-row">
               <span class="category-tree-label"><el-icon><Folder /></el-icon><span>{{ data.name }}</span><small>{{ data.count || 0 }}</small></span>
               <span v-if="!data.special" class="category-tree-actions">
-                <el-button v-if="data.status === 'active' && data.depth < 3" link :icon="FolderAdd" aria-label="新建子分类" @click.stop="openCreateQuestionBankCategory(data.id)" />
-                <el-button link :icon="Edit" aria-label="编辑分类" @click.stop="openEditQuestionBankCategory(data)" />
-                <el-button v-if="data.status === 'active'" link type="danger" :icon="Box" aria-label="归档分类" @click.stop="runQuestionBankCategoryAction(data, 'archive')" />
-                <el-button v-else link type="success" aria-label="恢复分类" @click.stop="runQuestionBankCategoryAction(data, 'restore')">恢复</el-button>
+                <el-button v-if="data.status === 'active' && data.depth < 3" link :icon="FolderAdd" :aria-label="`在${data.name}下新建子分类`" :disabled="Boolean(state.questionBankManagement.categoryActionId)" @click.stop="openCreateQuestionBankCategory(data.id)" />
+                <el-button link :icon="Edit" :aria-label="`编辑分类${data.name}`" :disabled="Boolean(state.questionBankManagement.categoryActionId)" @click.stop="openEditQuestionBankCategory(data)" />
+                <el-button v-if="data.status === 'active'" link type="danger" :icon="Box" :aria-label="`归档分类${data.name}`" :loading="state.questionBankManagement.categoryActionId === data.id" :disabled="Boolean(state.questionBankManagement.categoryActionId) && state.questionBankManagement.categoryActionId !== data.id" @click.stop="runQuestionBankCategoryAction(data, 'archive')" />
+                <el-button v-else link type="success" :aria-label="`恢复分类${data.name}`" :loading="state.questionBankManagement.categoryActionId === data.id" :disabled="Boolean(state.questionBankManagement.categoryActionId) && state.questionBankManagement.categoryActionId !== data.id" @click.stop="runQuestionBankCategoryAction(data, 'restore')">恢复</el-button>
               </span>
             </div>
           </template>
@@ -101,8 +116,8 @@ function formatAnswer(question) {
 
       <div class="min-w-0 space-y-4">
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight">{{ state.questionBankManagement.total }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前筛选</div></el-card>
-          <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-leaf">{{ state.questionBankManagement.items.length }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">当前页题目</div></el-card>
+          <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight">{{ state.questionBankManagement.total }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">匹配总数</div></el-card>
+          <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-leaf">{{ state.questionBankManagement.items.length }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">本页题目</div></el-card>
           <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-iris">{{ state.questionBankManagement.categoryCounts.unclassified }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">待归类题目</div></el-card>
           <el-card shadow="never" class="compact-stat-card"><div class="text-lg font-black leading-tight text-ocean">{{ state.questionBankManagement.categoryCounts.multi }}</div><div class="mt-0.5 text-[11px] font-bold leading-tight text-slate-500 dark:text-slate-400">多分类题目</div></el-card>
         </div>
@@ -124,7 +139,13 @@ function formatAnswer(question) {
 
           <el-alert v-if="state.questionBankManagement.error" class="mt-4" :title="state.questionBankManagement.error" type="error" show-icon :closable="false" />
 
-          <el-table v-loading="state.questionBankManagement.loading" :data="state.questionBankManagement.items" class="mt-4 w-full" empty-text="暂无匹配题目" row-key="id" @selection-change="setQuestionBankRows">
+          <el-table v-loading="state.questionBankManagement.loading" :data="state.questionBankManagement.items" class="mt-4 w-full" row-key="id" @selection-change="setQuestionBankRows">
+        <template #empty>
+          <el-empty :description="hasQuestionBankFilters ? '没有符合当前条件的题目' : '题库中还没有题目'">
+            <el-button v-if="hasQuestionBankFilters" @click="clearQuestionBankFilters">清空筛选</el-button>
+            <el-button v-else type="primary" :icon="Plus" @click="openCreateQuestionBankItem">新建题目</el-button>
+          </el-empty>
+        </template>
         <el-table-column type="selection" width="48" />
         <el-table-column label="题目" min-width="320">
           <template #default="{ row }">
@@ -142,14 +163,14 @@ function formatAnswer(question) {
         <el-table-column prop="difficulty" label="难度" width="72" />
         <el-table-column label="分类" min-width="180" show-overflow-tooltip><template #default="{ row }"><span v-if="row.categories?.length">{{ row.categories.map(categoryPathLabel).join('、') }}</span><el-tag v-else type="warning" size="small">未分类</el-tag></template></el-table-column>
         <el-table-column label="默认分值" width="90" align="right"><template #default="{ row }">{{ row.defaultScore }} 分</template></el-table-column>
-        <el-table-column label="来源/使用" width="130"><template #default="{ row }">{{ row.sourceCount }} 来源 / {{ row.paperUsageCount }} 卷</template></el-table-column>
+        <el-table-column label="来源与使用" width="150"><template #default="{ row }">来源 {{ row.sourceCount }} · 已用于 {{ row.paperUsageCount }} 卷</template></el-table-column>
         <el-table-column label="更新时间" min-width="165"><template #default="{ row }">{{ formatDateTime(row.updatedAt) }}</template></el-table-column>
         <el-table-column label="操作" fixed="right" width="215" align="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="View" @click="openQuestionBankDetail(row)">查看</el-button>
             <el-button v-if="row.status !== '已归档'" link type="primary" :icon="Edit" @click="openEditQuestionBankItem(row)">编辑</el-button>
-            <el-button v-if="row.status === '已归档'" link type="success" :loading="state.questionBankManagement.actionId === row.id" @click="runQuestionBankAction(row, 'restore')">恢复</el-button>
-            <el-button v-else link type="danger" :icon="Box" :loading="state.questionBankManagement.actionId === row.id" @click="runQuestionBankAction(row, 'archive')">归档</el-button>
+            <el-button v-if="row.status === '已归档'" link type="success" :loading="state.questionBankManagement.actionId === row.id" :disabled="state.questionBankManagement.actionId !== null && state.questionBankManagement.actionId !== row.id" @click="runQuestionBankAction(row, 'restore')">恢复</el-button>
+            <el-button v-else link type="danger" :icon="Box" :loading="state.questionBankManagement.actionId === row.id" :disabled="state.questionBankManagement.actionId !== null && state.questionBankManagement.actionId !== row.id" @click="runQuestionBankAction(row, 'archive')">归档</el-button>
           </template>
         </el-table-column>
           </el-table>
@@ -161,11 +182,11 @@ function formatAnswer(question) {
       </div>
     </div>
 
-    <el-dialog v-model="state.questionBankManagement.editorOpen" :title="state.questionBankManagement.editorMode === 'edit' ? '编辑题库题目' : '新建题库题目'" width="760px" top="4vh" append-to-body destroy-on-close>
+    <el-dialog v-model="state.questionBankManagement.editorOpen" :title="state.questionBankManagement.editorMode === 'edit' ? '编辑题库题目' : '新建题库题目'" width="min(760px, calc(100vw - 24px))" top="4vh" append-to-body destroy-on-close :close-on-click-modal="false" :before-close="requestCloseQuestionBankEditor">
       <el-form label-position="top" @submit.prevent="saveQuestionBankItem">
         <el-alert v-if="state.questionBankManagement.formError" class="mb-4" :title="state.questionBankManagement.formError" type="error" show-icon :closable="false" />
         <el-form-item label="所属分类">
-          <el-select v-model="state.questionBankManagement.form.categoryIds" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可选择多个叶子分类" class="w-full">
+          <el-select v-model="state.questionBankManagement.form.categoryIds" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可选择多个末级分类" class="w-full">
             <el-option v-for="category in leafCategoryOptions" :key="category.id" :label="categoryPathLabel(category)" :value="category.id" />
           </el-select>
         </el-form-item>
@@ -174,21 +195,21 @@ function formatAnswer(question) {
           <el-form-item label="默认分值"><el-input-number v-model="state.questionBankManagement.form.defaultScore" :min="1" :max="200" controls-position="right" class="w-full" /></el-form-item>
           <el-form-item label="难度"><el-select v-model="state.questionBankManagement.form.difficulty"><el-option v-for="difficulty in ['易','中','难','混合']" :key="difficulty" :label="difficulty" :value="difficulty" /></el-select></el-form-item>
         </div>
-        <el-form-item label="题干"><el-input v-model="state.questionBankManagement.form.stem" type="textarea" :rows="4" /></el-form-item>
+        <el-form-item label="题干"><el-input v-model="state.questionBankManagement.form.stem" type="textarea" :rows="4" maxlength="10000" placeholder="请输入完整题干" /></el-form-item>
         <div v-if="['单选','多选'].includes(state.questionBankManagement.form.type)" class="grid gap-x-3 sm:grid-cols-2">
-          <el-form-item v-for="letter in letters" :key="letter" :label="`选项 ${letter}`"><el-input v-model="state.questionBankManagement.form['option' + letter]" /></el-form-item>
+          <el-form-item v-for="letter in letters" :key="letter" :label="`选项 ${letter}`"><el-input v-model="state.questionBankManagement.form['option' + letter]" maxlength="500" :placeholder="`请输入选项 ${letter}`" /></el-form-item>
         </div>
         <div class="grid gap-x-3 sm:grid-cols-2">
           <el-form-item v-if="state.questionBankManagement.form.type === '单选'" label="正确答案"><el-select v-model="state.questionBankManagement.form.answerSingle"><el-option v-for="letter in letters" :key="letter" :label="letter" :value="letter" /></el-select></el-form-item>
           <el-form-item v-else-if="state.questionBankManagement.form.type === '判断'" label="正确答案"><el-radio-group v-model="state.questionBankManagement.form.answerSingle"><el-radio-button label="正确" value="正确" /><el-radio-button label="错误" value="错误" /></el-radio-group></el-form-item>
           <el-form-item v-else-if="state.questionBankManagement.form.type === '多选'" label="正确答案"><el-checkbox-group v-model="state.questionBankManagement.form.answerMultiple"><el-checkbox-button v-for="letter in letters" :key="letter" :label="letter" :value="letter" /></el-checkbox-group></el-form-item>
-          <el-form-item v-else label="参考答案"><el-input v-model="state.questionBankManagement.form.answerText" type="textarea" :rows="3" /></el-form-item>
-          <el-form-item label="答案解析"><el-input v-model="state.questionBankManagement.form.explanation" type="textarea" :rows="3" /></el-form-item>
+          <el-form-item v-else label="参考答案"><el-input v-model="state.questionBankManagement.form.answerText" type="textarea" :rows="3" placeholder="请输入参考答案" /></el-form-item>
+          <el-form-item label="答案解析"><el-input v-model="state.questionBankManagement.form.explanation" type="textarea" :rows="3" maxlength="10000" placeholder="请输入答案解析，可选" /></el-form-item>
         </div>
         <el-form-item v-if="['简答','论述'].includes(state.questionBankManagement.form.type)" label="评分规则"><el-input v-model="state.questionBankManagement.form.rubricText" type="textarea" :rows="4" placeholder="每行一条评分规则" /></el-form-item>
         <div class="grid gap-x-3 sm:grid-cols-2"><el-form-item label="知识点"><el-input v-model="state.questionBankManagement.form.knowledgeText" placeholder="多个知识点使用逗号分隔" /></el-form-item><el-form-item label="标签"><el-input v-model="state.questionBankManagement.form.tagsText" placeholder="多个标签使用逗号分隔" /></el-form-item></div>
       </el-form>
-      <template #footer><el-button @click="state.questionBankManagement.editorOpen = false">取消</el-button><el-button type="primary" :loading="state.questionBankManagement.saving" @click="saveQuestionBankItem">保存题目</el-button></template>
+      <template #footer><el-button @click="requestCloseQuestionBankEditor">取消</el-button><el-button type="primary" :loading="state.questionBankManagement.saving" @click="saveQuestionBankItem">保存题目</el-button></template>
     </el-dialog>
 
     <el-drawer v-model="state.questionBankManagement.detailOpen" append-to-body size="min(800px, 100vw)" title="题库题目详情">
@@ -197,7 +218,7 @@ function formatAnswer(question) {
           <div class="flex flex-wrap items-center gap-2"><el-tag>{{ state.questionBankManagement.detail.type }}</el-tag><el-tag effect="plain">{{ state.questionBankManagement.detail.difficulty }} · {{ state.questionBankManagement.detail.defaultScore }} 分</el-tag><el-tag effect="plain">v{{ state.questionBankManagement.detail.version }}</el-tag></div>
           <h2 class="mt-4 whitespace-pre-line text-lg font-black leading-8">{{ state.questionBankManagement.detail.stem }}</h2>
           <div v-if="state.questionBankManagement.detail.options?.length" class="mt-4 grid gap-2 sm:grid-cols-2"><div v-for="(option,index) in state.questionBankManagement.detail.options" :key="index" class="rounded border border-slate-200 px-3 py-2 text-sm dark:border-night-border">{{ String.fromCharCode(65 + index) }}. {{ option }}</div></div>
-          <el-descriptions class="mt-4" :column="1" border><el-descriptions-item label="分类">{{ (state.questionBankManagement.detail.categories || []).map(categoryPathLabel).join('、') || '未分类' }}</el-descriptions-item><el-descriptions-item label="答案">{{ formatAnswer(state.questionBankManagement.detail) }}</el-descriptions-item><el-descriptions-item label="解析">{{ state.questionBankManagement.detail.explanation || '未填写' }}</el-descriptions-item><el-descriptions-item label="知识点">{{ (state.questionBankManagement.detail.knowledge || []).join('、') || '未设置' }}</el-descriptions-item><el-descriptions-item label="原始来源">{{ originLabel(state.questionBankManagement.detail.origin) }}</el-descriptions-item></el-descriptions>
+          <el-descriptions class="mt-4" :column="1" border><el-descriptions-item label="分类">{{ (state.questionBankManagement.detail.categories || []).map(categoryPathLabel).join('、') || '未分类' }}</el-descriptions-item><el-descriptions-item label="答案">{{ formatAnswer(state.questionBankManagement.detail) }}</el-descriptions-item><el-descriptions-item label="解析">{{ state.questionBankManagement.detail.explanation || '未填写' }}</el-descriptions-item><el-descriptions-item label="知识点">{{ (state.questionBankManagement.detail.knowledge || []).join('、') || '未设置' }}</el-descriptions-item><el-descriptions-item label="首次来源">{{ originLabel(state.questionBankManagement.detail.origin) }}</el-descriptions-item></el-descriptions>
           <el-tabs class="mt-4">
             <el-tab-pane :label="`使用记录 ${state.questionBankManagement.detail.usages?.length || 0}`"><el-table :data="state.questionBankManagement.detail.usages || []" size="small" empty-text="尚未关联试卷"><el-table-column prop="paperName" label="试卷" min-width="200" /><el-table-column prop="relation" label="关系" min-width="140" /><el-table-column prop="status" label="状态" width="100" /><el-table-column prop="questionCount" label="题数" width="80" /><el-table-column label="时间" min-width="160"><template #default="{ row }">{{ formatDateTime(row.publishedAt || row.createdAt) }}</template></el-table-column></el-table></el-tab-pane>
             <el-tab-pane :label="`版本记录 ${state.questionBankManagement.detail.revisions?.length || 0}`"><el-table :data="state.questionBankManagement.detail.revisions || []" size="small"><el-table-column label="版本" width="80"><template #default="{ row }">v{{ row.version }}</template></el-table-column><el-table-column prop="stem" label="题干" min-width="260" show-overflow-tooltip /><el-table-column prop="createdBy" label="修改人" width="110" /><el-table-column label="时间" min-width="160"><template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template></el-table-column></el-table></el-tab-pane>
@@ -209,21 +230,31 @@ function formatAnswer(question) {
     <el-drawer v-model="state.questionBankManagement.categoryDrawerOpen" append-to-body size="min(340px, 88vw)" title="题库分类">
       <el-button class="mb-3 w-full" :icon="FolderAdd" @click="openCreateQuestionBankCategory('')">新建一级分类</el-button>
       <el-tree :data="categoryTreeData" node-key="id" :current-node-key="state.questionBankManagement.selectedCategoryId" highlight-current default-expand-all :expand-on-click-node="false" @node-click="handleCategoryNodeClick">
-        <template #default="{ data }"><div class="category-tree-row"><span class="category-tree-label"><el-icon><Folder /></el-icon><span>{{ data.name }}</span><small>{{ data.count || 0 }}</small></span></div></template>
+        <template #default="{ data }">
+          <div class="category-tree-row">
+            <span class="category-tree-label"><el-icon><Folder /></el-icon><span>{{ data.name }}</span><small>{{ data.count || 0 }}</small></span>
+            <span v-if="!data.special" class="mobile-category-actions" @click.stop>
+              <el-button v-if="data.status === 'active' && data.depth < 3" link :icon="FolderAdd" :aria-label="`在${data.name}下新建子分类`" :disabled="Boolean(state.questionBankManagement.categoryActionId)" @click="openCreateQuestionBankCategory(data.id)" />
+              <el-button link :icon="Edit" :aria-label="`编辑分类${data.name}`" :disabled="Boolean(state.questionBankManagement.categoryActionId)" @click="openEditQuestionBankCategory(data)" />
+              <el-button v-if="data.status === 'active'" link type="danger" :icon="Box" :aria-label="`归档分类${data.name}`" :loading="state.questionBankManagement.categoryActionId === data.id" @click="runQuestionBankCategoryAction(data, 'archive')" />
+              <el-button v-else link type="success" :aria-label="`恢复分类${data.name}`" :loading="state.questionBankManagement.categoryActionId === data.id" @click="runQuestionBankCategoryAction(data, 'restore')">恢复</el-button>
+            </span>
+          </div>
+        </template>
       </el-tree>
     </el-drawer>
 
-    <el-dialog v-model="state.questionBankManagement.categoryEditorOpen" :title="state.questionBankManagement.categoryEditorMode === 'edit' ? '编辑分类' : '新建分类'" width="min(520px, calc(100vw - 24px))" append-to-body>
+    <el-dialog v-model="state.questionBankManagement.categoryEditorOpen" :title="state.questionBankManagement.categoryEditorMode === 'edit' ? '编辑分类' : '新建分类'" width="min(520px, calc(100vw - 24px))" append-to-body :close-on-click-modal="false" :before-close="requestCloseQuestionBankCategoryEditor">
       <el-alert v-if="state.questionBankManagement.categoryFormError" class="mb-4" :title="state.questionBankManagement.categoryFormError" type="error" show-icon :closable="false" />
       <el-form label-position="top">
-        <el-form-item label="分类名称"><el-input v-model="state.questionBankManagement.categoryForm.name" maxlength="80" show-word-limit /></el-form-item>
-        <el-form-item label="上级分类"><el-select v-model="state.questionBankManagement.categoryForm.parentId" clearable placeholder="无，上级为题库根目录" class="w-full"><el-option v-for="category in categoryParentOptions" :key="category.id" :label="categoryPathLabel(category)" :value="category.id" /></el-select></el-form-item>
-        <el-form-item label="排序"><el-input-number v-model="state.questionBankManagement.categoryForm.sortOrder" :min="-100000" :max="100000" controls-position="right" /></el-form-item>
+        <el-form-item label="分类名称"><el-input v-model="state.questionBankManagement.categoryForm.name" maxlength="80" show-word-limit placeholder="请输入分类名称" /></el-form-item>
+        <el-form-item label="上级分类"><el-select v-model="state.questionBankManagement.categoryForm.parentId" clearable placeholder="不选择则创建为一级分类" class="w-full"><el-option v-for="category in categoryParentOptions" :key="category.id" :label="categoryPathLabel(category)" :value="category.id" /></el-select></el-form-item>
+        <el-form-item label="排序"><el-input-number v-model="state.questionBankManagement.categoryForm.sortOrder" :min="-100000" :max="100000" controls-position="right" /><div class="mt-1 text-xs text-slate-400">数值越小越靠前</div></el-form-item>
       </el-form>
-      <template #footer><el-button @click="state.questionBankManagement.categoryEditorOpen = false">取消</el-button><el-button type="primary" :loading="state.questionBankManagement.categorySaving" @click="saveQuestionBankCategory">保存分类</el-button></template>
+      <template #footer><el-button @click="requestCloseQuestionBankCategoryEditor">取消</el-button><el-button type="primary" :loading="state.questionBankManagement.categorySaving" @click="saveQuestionBankCategory">保存分类</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="state.questionBankManagement.bulkOpen" title="批量设置分类" width="min(560px, calc(100vw - 24px))" append-to-body>
+    <el-dialog v-model="state.questionBankManagement.bulkOpen" title="批量设置分类" width="min(560px, calc(100vw - 24px))" append-to-body :close-on-click-modal="false">
       <el-alert v-if="state.questionBankManagement.bulkError" class="mb-4" :title="state.questionBankManagement.bulkError" type="error" show-icon :closable="false" />
       <el-form label-position="top">
         <el-form-item label="处理方式"><el-segmented v-model="state.questionBankManagement.bulkMode" :options="[{label:'添加',value:'add'},{label:'移除',value:'remove'},{label:'替换',value:'replace'}]" /></el-form-item>
@@ -246,6 +277,7 @@ function formatAnswer(question) {
 .category-tree-actions { display: none; flex-shrink: 0; align-items: center; }
 .category-tree-row:hover .category-tree-actions { display: flex; }
 .category-tree-actions :deep(.el-button + .el-button) { margin-left: 1px; }
+.mobile-category-actions { display: flex; flex-shrink: 0; align-items: center; gap: 1px; }
 @media (min-width: 1280px) { .category-sidebar { display: block; } }
 @media (max-width: 640px) { .question-bank-list-card :deep(.el-pagination) { justify-content: flex-start; overflow-x: auto; } }
 </style>

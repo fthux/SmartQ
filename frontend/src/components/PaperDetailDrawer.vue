@@ -24,7 +24,7 @@ function statusType(status) {
 
 function questionSourceLabel(question) {
   if (question?.origin?.type === "question-bank") return `题库 · ${question.origin.bankQuestionId || "已入库"}`;
-  if (question?.origin?.type !== "material") return "AI 独立";
+  if (question?.origin?.type !== "material") return "AI 生成";
   return [...new Set((question.origin.materialRefs || []).map((item) => item.name).filter(Boolean))].join("、") || "资料题";
 }
 </script>
@@ -42,7 +42,7 @@ function questionSourceLabel(question) {
       <div class="flex min-w-0 items-center justify-between gap-3 pr-3">
         <div class="min-w-0"><div class="text-base font-black">试卷详情</div><div class="mt-0.5 truncate text-xs font-semibold text-slate-500 dark:text-slate-400">{{ state.selectedPaperDetail?.name || '正在加载试卷内容' }}</div></div>
         <div v-if="state.selectedPaperDetail" class="flex shrink-0 gap-2">
-          <el-button :icon="Collection" :loading="state.questionBankManagement.importingPaperId === state.selectedPaperDetail.id" @click="addPaperQuestionsToBank(state.selectedPaperDetail)">整卷入库</el-button>
+          <el-button :icon="Collection" :loading="state.questionBankManagement.importingPaperId === state.selectedPaperDetail.id" @click="addPaperQuestionsToBank(state.selectedPaperDetail)">全部题目入库</el-button>
           <el-button type="primary" :icon="Edit" @click="editPaper(state.selectedPaperDetail)">编辑</el-button>
         </div>
       </div>
@@ -58,9 +58,8 @@ function questionSourceLabel(question) {
         </div>
 
         <div class="mt-4 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-4 text-xs font-semibold dark:border-night-border">
-          <span>试卷分类：</span>
-          <el-tag :type="state.selectedPaperDetail.categorySnapshot ? 'primary' : 'warning'" effect="plain">{{ state.selectedPaperDetail.categorySnapshot?.path?.map((item) => item.name).join(' / ') || '未分类' }}</el-tag>
-          <el-select v-if="!state.selectedPaperDetail.categoryId" v-model="state.questionBankManagement.paperImportCategoryId" filterable placeholder="选择历史试卷入库分类" class="min-w-56">
+          <span>题目入库分类：</span>
+          <el-select v-model="state.questionBankManagement.paperImportCategoryId" filterable placeholder="选择题目入库分类" class="min-w-56">
             <el-option v-for="category in leafCategoryOptions" :key="category.id" :label="category.path.map((item) => item.name).join(' / ')" :value="category.id" />
           </el-select>
         </div>
@@ -74,7 +73,7 @@ function questionSourceLabel(question) {
           <span>题目来源：</span>
           <el-tag type="primary" effect="plain">题库题 {{ state.selectedPaperDetail.sourcePlanSnapshot.questionBankCount || 0 }}</el-tag>
           <el-tag type="success" effect="plain">资料题 {{ state.selectedPaperDetail.sourcePlanSnapshot.materialQuestionCount || 0 }}</el-tag>
-          <el-tag type="info" effect="plain">AI 独立题 {{ state.selectedPaperDetail.sourcePlanSnapshot.aiQuestionCount || 0 }}</el-tag>
+          <el-tag type="info" effect="plain">AI 生成题 {{ state.selectedPaperDetail.sourcePlanSnapshot.aiQuestionCount || 0 }}</el-tag>
           <el-tag v-for="material in state.selectedPaperDetail.sourcePlanSnapshot.materials || []" :key="`${material.id}-${material.version}`" effect="plain">{{ material.name }} · v{{ material.version }}</el-tag>
         </div>
 

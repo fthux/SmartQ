@@ -12,7 +12,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith("/api/")) await handleApi(req, res, url);
     else await serveStatic(res, url.pathname);
   } catch (error) {
-    sendJson(res, error.statusCode || 500, { error: error.message || "Internal Server Error" });
+    const statusCode = error.statusCode || 500;
+    if (statusCode >= 500) console.error("SmartQ request failed", error);
+    sendJson(res, statusCode, {
+      error: statusCode < 500 && error.message ? error.message : "服务暂时不可用，请稍后重试",
+    });
   }
 });
 

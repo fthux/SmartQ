@@ -23,7 +23,7 @@ export function requiresAdminAuth(req, url) {
 export async function loginAdmin(state, body = {}, req = {}) {
   const username = String(body.username || "").trim();
   const password = String(body.password || "");
-  if (!username || !password) return { error: "请输入管理员账号和密码", statusCode: 400 };
+  if (!username || !password) return { error: "请输入登录账号和密码", statusCode: 400 };
   const attemptKey = loginAttemptKey("admin", username || "unknown", req);
   const limit = checkLoginLimit(state, attemptKey);
   if (limit.blocked) {
@@ -42,7 +42,7 @@ export async function loginAdmin(state, body = {}, req = {}) {
       failures: failure.failures,
       lockedUntil: failure.lockedUntil || null,
     }));
-    return { error: "管理员账号或密码错误", statusCode: 401 };
+    return { error: "登录账号或密码错误", statusCode: 401 };
   }
   clearLoginFailures(state, attemptKey);
   if (user.status !== "active") {
@@ -64,7 +64,7 @@ export async function loginAdmin(state, body = {}, req = {}) {
   };
   state.adminSessions[token] = session;
   user.lastLoginAt = now;
-  state.auditLog.push(logItem("admin-login", `${username} 登录运营控制台`));
+  state.auditLog.push(logItem("admin-login", `${username} 登录内容管理控制台`));
   return { token, expiresAt, admin: publicAdminSession(session, user) };
 }
 
@@ -74,26 +74,26 @@ export function logoutAdmin(state, token = "") {
   if (value && state.adminSessions[value]) {
     const username = state.adminSessions[value].username || "admin";
     delete state.adminSessions[value];
-    state.auditLog.push(logItem("admin-logout", `${username} 退出运营控制台`));
+    state.auditLog.push(logItem("admin-logout", `${username} 退出内容管理控制台`));
   }
   return { loggedOut: true };
 }
 
 export function authenticateAdmin(state, token = "") {
   const value = String(token || "").trim();
-  if (!value) return { error: "请先登录运营控制台", statusCode: 401 };
+  if (!value) return { error: "请先登录内容管理控制台", statusCode: 401 };
   state.adminSessions = pruneAdminSessions(state.adminSessions || {});
   const session = state.adminSessions[value];
-  if (!session) return { error: "运营登录已失效，请重新登录", statusCode: 401 };
+  if (!session) return { error: "控制台登录已失效，请重新登录", statusCode: 401 };
   const expiresAt = new Date(session.expiresAt || 0).getTime();
   if (!expiresAt || expiresAt < Date.now()) {
     delete state.adminSessions[value];
-    return { error: "运营登录已过期，请重新登录", statusCode: 401 };
+    return { error: "控制台登录已过期，请重新登录", statusCode: 401 };
   }
   const user = findAdminUser(state, session.userId || session.username);
   if (!user || user.status !== "active" || session.authVersion !== user.authVersion) {
     delete state.adminSessions[value];
-    return { error: "运营登录已失效，请重新登录", statusCode: 401 };
+    return { error: "控制台登录已失效，请重新登录", statusCode: 401 };
   }
   session.lastSeenAt = new Date().toISOString();
   session.username = user.username;
@@ -106,8 +106,8 @@ export function publicAdminSession(session = {}, user = {}) {
 
 export function updateAdminProfile(state, session = {}, body = {}) {
   const displayName = String(body.displayName || "").trim();
-  if (!displayName) return { error: "请输入用户名", statusCode: 400 };
-  if (displayName.length > 32) return { error: "用户名不能超过 32 个字符", statusCode: 400 };
+  if (!displayName) return { error: "请输入显示名称", statusCode: 400 };
+  if (displayName.length > 32) return { error: "显示名称不能超过 32 个字符", statusCode: 400 };
   const user = findAdminUser(state, session.userId || session.username);
   if (!user) return { error: "用户不存在", statusCode: 404 };
   user.displayName = displayName;

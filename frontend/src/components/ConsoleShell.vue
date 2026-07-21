@@ -82,7 +82,7 @@ function handleThemePreference(theme) {
           </span>
           <span v-if="!state.ui.sidebarCollapsed" class="min-w-0">
             <span class="block truncate text-base font-black">SmartQ</span>
-            <span class="block truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400">考试与测评管理平台</span>
+            <span class="block truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400">智能命题与试卷管理</span>
           </span>
         </el-button>
       </div>
@@ -118,7 +118,7 @@ function handleThemePreference(theme) {
           </span>
           <div class="min-w-0">
             <div class="truncate text-sm font-black sm:text-base">{{ currentNavItem.label }}</div>
-            <div class="hidden text-[11px] font-semibold text-slate-400 sm:block">SmartQ 运营控制台</div>
+            <div class="hidden text-[11px] font-semibold text-slate-400 sm:block">SmartQ 内容管理控制台</div>
           </div>
         </div>
 
